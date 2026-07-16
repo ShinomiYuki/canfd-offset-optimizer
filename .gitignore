@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Real project inputs may be confidential.
+input/dbc/*
+!input/dbc/.gitkeep
+input/arxml/*
+!input/arxml/.gitkeep
+
+output/results/*
+!output/results/.gitkeep
+output/plots/*
+!output/plots/.gitkeep
+output/logs/*
+!output/logs/.gitkeep

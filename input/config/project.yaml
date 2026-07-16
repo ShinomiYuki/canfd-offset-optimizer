@@ -1,0 +1,21 @@
+network:
+  channel: CAN1
+  nominal_bitrate: null
+  data_bitrate: null
+  brs: null
+
+optimization:
+  slot_ms: 5
+  hyperperiod_ms: auto
+  hyperperiod_cap_ms: 5000
+  offset_min_ms: 15
+  offset_max_ms: 100
+  offset_step_ms: 5
+  random_restarts: 20
+  hot_slot_count: 3
+  conflict_candidate_cap: 6
+  pair_neighbor_steps: [1, 2, 3]
+
+model:
+  weight_mode: frame_time_us
+  average_load_limit: 0.75
