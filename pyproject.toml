@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Periodic CAN FD message Offset balancing with GCLS."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [{ name = "篠見由紀" }]
 dependencies = [
   "cantools>=40",

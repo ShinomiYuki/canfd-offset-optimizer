@@ -99,4 +99,8 @@ clean_pycache.cmd
 
 1. `docs/01_research_and_design.md`
 2. `docs/02_project_structure_and_code_conventions.md`
-3. `docs/03_implementation_plan.md`
+
+## 许可证
+
+本项目采用 [GNU Affero General Public License v3.0 only](LICENSE)，SPDX 标识为
+`AGPL-3.0-only`。
