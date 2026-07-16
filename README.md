@@ -11,8 +11,7 @@ Search、Reproducible Random Restarts）的周期 CAN FD 报文首次发送 Offs
 
 ## 输入约定
 
-- DBC：只解析当前 DBC 节点发送的 **TX 周期报文**。发送方为 `Vector__XXX`
-  的矩阵条目视为 RX 并过滤；
+- DBC：只解析当前 DBC 节点发送的 **TX 周期报文**。发送方为 `Vector__XXX`的矩阵条目视为 RX 并过滤；
 - ARXML：递归扫描 `.arxml`，读取目标通道 nominal bitrate、data bitrate 和 BRS；
 - YAML：配置候选 Offset、GCLS 参数，并可显式覆盖 ARXML 字段。所有覆盖都会写入
   warning 和 `summary.json`。
@@ -29,16 +28,55 @@ python -m pip install -e ".[dev]"
 python -m canfd_offset_optimizer optimize --dbc input/dbc/network.dbc --arxml input/arxml --config input/config/project.yaml --output output --seed 0 --restarts 20 --log-level INFO
 ```
 
-输出目录：
+对同一 DBC 比较原始 Offset、最小 Offset、Greedy、Greedy + 1-opt 和完整 GCLS：
+
+```bash
+python -m canfd_offset_optimizer compare --dbc input/dbc/network.dbc --arxml input/arxml --config input/config/project.yaml --output output/comparison/network --weight-mode payload_bytes --seed 0 --restarts 20
+```
+
+`--weight-mode` 是本次比较的显式覆盖，不修改 YAML，并会写入 warning、字段来源和
+`comparison_summary.json`。`payload_bytes`/`unit` 只比较释放均衡度，不代表物理
+总线占用时间。
+
+`optimize` 子命令的输出产物：
 
 ```text
-output/results/offsets.csv
-output/results/slot_loads.csv
-output/results/summary.json
-output/plots/steady_load.png
-output/plots/startup_load.png
-output/logs/run.log
+<output>/
+├── results/
+│   ├── offsets.csv
+│   ├── slot_loads.csv
+│   └── summary.json
+├── plots/
+│   ├── steady_load.png
+│   └── startup_load.png
+└── logs/
+    └── run.log
 ```
+
+`compare` 子命令的输出产物：
+
+```text
+<output>/
+├── results/
+│   ├── algorithm_comparison.csv
+│   ├── offsets_comparison.csv
+│   ├── slot_loads_comparison.csv
+│   └── comparison_summary.json
+├── plots/
+│   ├── steady_load_comparison.png
+│   ├── startup_load_comparison.png
+│   ├── steady_congestion_heatmap.png
+│   ├── startup_congestion_heatmap.png
+│   ├── steady_message_timeline.png
+│   └── startup_message_timeline.png
+└── logs/
+    └── run.log
+```
+
+其中 `congestion_heatmap.png` 用颜色和格内帧数展示每个 5 ms 时隙的拥挤程度，
+`message_timeline.png` 直接对比原始方案与 GCLS 中每条报文的发送时刻；两者均不
+表示真实总线占用率。`offsets_comparison.csv` 使用中文字段名，周期和 Offset 均以
+毫秒（ms）展示，便于直接审阅和交付。
 
 CSV 使用 UTF-8 with BOM，可直接由 Windows Excel 打开。
 

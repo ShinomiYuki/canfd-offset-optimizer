@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..config import ProjectConfig, load_project_config
@@ -50,7 +50,13 @@ def _merge_field(
     return arxml_value
 
 
-def load_project(dbc_path: Path, arxml_dir: Path, config_path: Path) -> LoadedProject:
+def load_project(
+    dbc_path: Path,
+    arxml_dir: Path,
+    config_path: Path,
+    *,
+    weight_mode_override: WeightMode | None = None,
+) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
     @raises MissingFieldError 精确权重模式缺少 bitrate/BRS 且无 YAML 覆盖时抛出。
@@ -59,11 +65,30 @@ def load_project(dbc_path: Path, arxml_dir: Path, config_path: Path) -> LoadedPr
     dbc = parse_dbc(dbc_path)
     warnings = list(dbc.warnings)
     sources: dict[str, str] = {}
+    configured_weight_mode = config.model.weight_mode
+    if weight_mode_override is not None:
+        if weight_mode_override is configured_weight_mode:
+            warnings.append(
+                f"CLI explicitly selects model.weight_mode={weight_mode_override.value}"
+            )
+        else:
+            warnings.append(
+                "CLI overrides project.yaml model.weight_mode: "
+                f"{configured_weight_mode.value} -> {weight_mode_override.value}"
+            )
+            config = replace(
+                config,
+                model=replace(config.model, weight_mode=weight_mode_override),
+            )
     channel_name = config.network.channel
     if not channel_name:
         raise ConfigurationError("network.channel must be specified to select an ARXML channel")
     sources["channel"] = "project.yaml network.channel selection"
-    sources["weight_mode"] = "project.yaml model.weight_mode"
+    sources["weight_mode"] = (
+        "CLI --weight-mode override"
+        if weight_mode_override is not None
+        else "project.yaml model.weight_mode"
+    )
     arxml: ArxmlChannelData | None = None
     if not arxml_dir.is_dir():
         raise InputFileError(f"ARXML directory does not exist: {arxml_dir}")
@@ -162,10 +187,12 @@ def load_project(dbc_path: Path, arxml_dir: Path, config_path: Path) -> LoadedPr
                 payload_bytes=raw.payload_bytes,
             )
         )
-        if (
-            raw.original_offset_us is not None
-            and raw.original_offset_us not in config.optimization.allowed_offsets_us
-        ):
+        if raw.original_offset_us is None:
+            warnings.append(
+                f"message {raw.name} has no original Offset; baseline uses "
+                f"{min(config.optimization.allowed_offsets_us)} us"
+            )
+        elif raw.original_offset_us not in config.optimization.allowed_offsets_us:
             warnings.append(
                 f"message {raw.name} original Offset {raw.original_offset_us} us is not "
                 f"legal; baseline uses {min(config.optimization.allowed_offsets_us)} us"

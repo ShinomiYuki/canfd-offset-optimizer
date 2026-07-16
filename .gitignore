@@ -23,5 +23,6 @@ output/plots/*
 !output/plots/.gitkeep
 output/logs/*
 !output/logs/.gitkeep
+output/comparison/*
 
 .vscode/

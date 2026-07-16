@@ -15,31 +15,46 @@ from pathlib import Path
 from typing import Sequence
 
 from .exceptions import CanfdOptimizerError
+from .models import WeightMode
+from .optimization.comparison import compare_algorithms
 from .optimization.gcls import run_gcls
 from .parsers.project_loader import load_project
+from .reporting.comparison_plotter import write_comparison_plots
+from .reporting.comparison_writer import (
+    write_comparison_csv_reports,
+    write_comparison_summary,
+)
+from .reporting.congestion_plotter import write_congestion_plots
 from .reporting.csv_writer import write_csv_reports
 from .reporting.plotter import write_load_plots
 from .reporting.summary_writer import write_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """! @brief 构造支持 optimize 子命令的参数解析器。"""
+    """! @brief 构造支持 optimize/compare 子命令的参数解析器。"""
     parser = argparse.ArgumentParser(
         prog="canfd-offset",
         description="Balance periodic CAN FD first-release offsets with GCLS.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     optimize = subparsers.add_parser("optimize", help="optimize periodic message offsets")
-    optimize.add_argument("--dbc", type=Path, required=True)
-    optimize.add_argument("--arxml", type=Path, required=True)
-    optimize.add_argument("--config", type=Path, required=True)
-    optimize.add_argument("--output", type=Path, required=True)
-    optimize.add_argument("--seed", type=int, default=0)
-    optimize.add_argument("--restarts", type=int)
-    optimize.add_argument(
-        "--log-level",
-        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
-        default="INFO",
+    compare = subparsers.add_parser("compare", help="compare optimization stages")
+    for command in (optimize, compare):
+        command.add_argument("--dbc", type=Path, required=True)
+        command.add_argument("--arxml", type=Path, required=True)
+        command.add_argument("--config", type=Path, required=True)
+        command.add_argument("--output", type=Path, required=True)
+        command.add_argument("--seed", type=int, default=0)
+        command.add_argument("--restarts", type=int)
+        command.add_argument(
+            "--log-level",
+            choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+            default="INFO",
+        )
+    compare.add_argument(
+        "--weight-mode",
+        choices=tuple(mode.value for mode in WeightMode),
+        help="override model.weight_mode for this comparison",
     )
     return parser
 
@@ -74,7 +89,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     logger = logging.getLogger(__name__)
     try:
-        loaded = load_project(args.dbc, args.arxml, args.config)
+        weight_mode_override = (
+            WeightMode(args.weight_mode)
+            if args.command == "compare" and args.weight_mode is not None
+            else None
+        )
+        loaded = load_project(
+            args.dbc,
+            args.arxml,
+            args.config,
+            weight_mode_override=weight_mode_override,
+        )
         config = loaded.config
         if args.restarts is not None:
             if args.restarts < 0:
@@ -90,18 +115,61 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.info("Field source %s=%s", field, source)
         for warning in loaded.network.warnings:
             logger.warning(warning)
-        result = run_gcls(
-            loaded.network.messages,
-            loaded.slot_map,
-            config.optimization,
-            config.model.average_load_limit,
-            args.seed,
-            weight_mode=loaded.network.weight_mode,
-        )
-        write_csv_reports(output, loaded.network, result, config.model.average_load_limit)
-        write_load_plots(output, loaded.network, result, config.model.average_load_limit)
-        write_summary(output, loaded.network, config, result)
-        logger.info("Best objective: %s", result.objective.as_tuple())
+        if args.command == "compare":
+            comparison = compare_algorithms(
+                loaded.network.messages,
+                loaded.slot_map,
+                config.optimization,
+                config.model.average_load_limit,
+                args.seed,
+                loaded.network.weight_mode,
+            )
+            write_comparison_csv_reports(
+                output,
+                loaded.network,
+                comparison,
+                config.model.average_load_limit,
+            )
+            write_comparison_plots(
+                output,
+                loaded.network,
+                comparison,
+                config.model.average_load_limit,
+            )
+            write_congestion_plots(output, loaded.network, comparison)
+            write_comparison_summary(output, loaded.network, config, comparison)
+            for stage in comparison.stages:
+                logger.info(
+                    "Comparison stage %s objective=%s evaluations=%d accepted=%d",
+                    stage.name,
+                    stage.objective.as_tuple(),
+                    stage.evaluation_count,
+                    stage.accepted_moves,
+                )
+            for record in comparison.restart_records:
+                logger.info(
+                    "Comparison restart seed=%d objective=%s",
+                    record.seed,
+                    record.objective.as_tuple(),
+                )
+            logger.info("Best comparison objective: %s", comparison.stage("gcls").objective.as_tuple())
+        else:
+            result = run_gcls(
+                loaded.network.messages,
+                loaded.slot_map,
+                config.optimization,
+                config.model.average_load_limit,
+                args.seed,
+                weight_mode=loaded.network.weight_mode,
+            )
+            write_csv_reports(
+                output, loaded.network, result, config.model.average_load_limit
+            )
+            write_load_plots(
+                output, loaded.network, result, config.model.average_load_limit
+            )
+            write_summary(output, loaded.network, config, result)
+            logger.info("Best objective: %s", result.objective.as_tuple())
         logger.info("Reports written under %s", output)
         return 0
     except CanfdOptimizerError as exc:

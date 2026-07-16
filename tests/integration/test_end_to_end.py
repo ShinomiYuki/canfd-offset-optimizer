@@ -147,3 +147,88 @@ def test_cli_reports_invalid_yaml_bitrate_as_input_error(
     captured = capsys.readouterr()
     assert "unexpected error" not in captured.err
     assert "nominal_bitrate" in captured.err
+
+
+def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) -> None:
+    output = tmp_path / "comparison"
+    assert main(
+        [
+            "compare",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--weight-mode",
+            "payload_bytes",
+            "--seed",
+            "42",
+            "--restarts",
+            "1",
+        ]
+    ) == 0
+    expected = (
+        output / "results" / "algorithm_comparison.csv",
+        output / "results" / "offsets_comparison.csv",
+        output / "results" / "slot_loads_comparison.csv",
+        output / "results" / "comparison_summary.json",
+        output / "plots" / "steady_load_comparison.png",
+        output / "plots" / "startup_load_comparison.png",
+        output / "plots" / "steady_congestion_heatmap.png",
+        output / "plots" / "steady_message_timeline.png",
+        output / "plots" / "startup_congestion_heatmap.png",
+        output / "plots" / "startup_message_timeline.png",
+        output / "logs" / "run.log",
+    )
+    assert all(path.is_file() and path.stat().st_size > 0 for path in expected)
+    assert all(path.read_bytes().startswith(b"\xef\xbb\xbf") for path in expected[:3])
+    with expected[0].open(encoding="utf-8-sig", newline="") as stream:
+        algorithms = list(csv.DictReader(stream))
+    assert [row["stage"] for row in algorithms] == [
+        "original",
+        "minimum",
+        "greedy",
+        "greedy_1opt",
+        "gcls",
+    ]
+    with expected[1].open(encoding="utf-8-sig", newline="") as stream:
+        offsets_reader = csv.DictReader(stream)
+        offsets = list(offsets_reader)
+    assert len(offsets) == 4
+    assert offsets_reader.fieldnames is not None
+    assert len(offsets_reader.fieldnames) == len(set(offsets_reader.fieldnames))
+    assert offsets_reader.fieldnames == [
+        "报文名称",
+        "CAN_ID",
+        "帧格式",
+        "发送节点",
+        "周期(ms)",
+        "载荷长度(Byte)",
+        "DBC原始Offset(ms)",
+        "原始方案Offset(ms)",
+        "最小Offset方案(ms)",
+        "Greedy推荐Offset(ms)",
+        "Greedy+1-opt推荐Offset(ms)",
+        "GCLS推荐Offset(ms)",
+    ]
+    assert offsets[0]["周期(ms)"] == "20"
+    assert offsets[0]["帧格式"] == "标准帧"
+    assert float(offsets[0]["GCLS推荐Offset(ms)"]) >= 15
+    with expected[2].open(encoding="utf-8-sig", newline="") as stream:
+        slot = next(csv.DictReader(stream))
+    assert slot["weight_mode"] == "payload_bytes"
+    assert slot["weighted_load_us"] == ""
+    assert slot["load_ratio"] == ""
+    assert slot["threshold_violation"] == ""
+    summary = json.loads(expected[3].read_text(encoding="utf-8"))
+    assert summary["weight_mode"] == "payload_bytes"
+    assert summary["field_sources"]["weight_mode"] == "CLI --weight-mode override"
+    assert summary["slot_load_threshold_us"] is None
+    assert [item["seed"] for item in summary["restarts"]] == [42, 43]
+    assert any("CLI overrides" in warning for warning in summary["warnings"])
+    log = expected[-1].read_text(encoding="utf-8")
+    assert "Comparison restart seed=42" in log
+    assert "Comparison restart seed=43" in log

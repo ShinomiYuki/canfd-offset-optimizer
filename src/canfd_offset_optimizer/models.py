@@ -284,6 +284,84 @@ class OptimizationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonStageResult:
+    """! @brief 一个基线或算法阶段的完整不可变状态快照。"""
+
+    name: str
+    kind: str
+    assignments: tuple[OffsetAssignment, ...]
+    objective: ObjectiveValue
+    steady_slot_loads: tuple[int, ...]
+    startup_slot_loads: tuple[int, ...]
+    steady_slot_counts: tuple[int, ...]
+    startup_slot_counts: tuple[int, ...]
+    evaluation_count: int
+    accepted_moves: int
+    elapsed_seconds: float
+
+    def __post_init__(self) -> None:
+        if not self.name or self.kind not in {"baseline", "algorithm"}:
+            raise ValueError("comparison stage name/kind is invalid")
+        if len(self.steady_slot_loads) != len(self.steady_slot_counts):
+            raise ValueError("steady comparison arrays must have equal length")
+        if len(self.startup_slot_loads) != len(self.startup_slot_counts):
+            raise ValueError("startup comparison arrays must have equal length")
+        arrays = (
+            self.steady_slot_loads,
+            self.startup_slot_loads,
+            self.steady_slot_counts,
+            self.startup_slot_counts,
+        )
+        if any(value < 0 for array in arrays for value in array):
+            raise ValueError("comparison arrays must be non-negative")
+        if (
+            self.evaluation_count < 0
+            or self.accepted_moves < 0
+            or not isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+        ):
+            raise ValueError("comparison statistics must be non-negative")
+
+    def offset_by_name(self) -> dict[str, int]:
+        """! @brief 返回该阶段报文名到 Offset 的映射副本。"""
+        return {item.message_name: item.offset_us for item in self.assignments}
+
+
+@dataclass(frozen=True, slots=True)
+class AlgorithmComparisonResult:
+    """! @brief 固定顺序的多阶段算法对比结果。"""
+
+    messages: tuple[CanMessage, ...]
+    stages: tuple[ComparisonStageResult, ...]
+    restart_records: tuple[RestartRecord, ...]
+    seed: int
+
+    def __post_init__(self) -> None:
+        expected = ("original", "minimum", "greedy", "greedy_1opt", "gcls")
+        if tuple(stage.name for stage in self.stages) != expected:
+            raise ValueError(f"comparison stages must be ordered as {expected}")
+        message_names = {message.name for message in self.messages}
+        if len(message_names) != len(self.messages):
+            raise ValueError("comparison message names must be unique")
+        for stage in self.stages:
+            assignments = stage.offset_by_name()
+            if set(assignments) != message_names or len(stage.assignments) != len(
+                self.messages
+            ):
+                raise ValueError(f"stage {stage.name} must assign every message once")
+            for message in self.messages:
+                if assignments[message.name] not in message.allowed_offsets_us:
+                    raise ValueError(f"stage {stage.name} has illegal Offset for {message.name}")
+
+    def stage(self, name: str) -> ComparisonStageResult:
+        """! @brief 按稳定名称查询一个阶段。"""
+        for stage in self.stages:
+            if stage.name == name:
+                return stage
+        raise KeyError(name)
+
+
+@dataclass(frozen=True, slots=True)
 class RunSummary:
     """! @brief 可序列化运行摘要的显式容器。"""
 
