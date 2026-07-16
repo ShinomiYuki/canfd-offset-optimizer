@@ -2,11 +2,14 @@
 @brief 五阶段算法比较、可复现性和报告只读性的回归测试。
 """
 
+import csv
+import json
 from dataclasses import replace
 from pathlib import Path
 
 from canfd_offset_optimizer.config import (
     ModelConfig,
+    ObjectiveConfig,
     OptimizationConfig,
     ProjectConfig,
 )
@@ -14,6 +17,7 @@ from canfd_offset_optimizer.models import (
     CanMessage,
     ChannelConfig,
     NetworkModel,
+    ObjectiveMode,
     WeightMode,
 )
 from canfd_offset_optimizer.optimization.comparison import compare_algorithms
@@ -26,6 +30,13 @@ from canfd_offset_optimizer.reporting.congestion_plotter import (
     build_window_congestion_data,
     congestion_level,
     write_congestion_plots,
+)
+from canfd_offset_optimizer.reporting.objective_mode_plotter import (
+    write_objective_mode_plot,
+)
+from canfd_offset_optimizer.reporting.objective_mode_writer import (
+    write_all_network_objective_report,
+    write_objective_mode_reports,
 )
 from canfd_offset_optimizer.reporting.weight_mode_writer import write_weight_mode_reports
 from canfd_offset_optimizer.timeline.slot_map import (
@@ -229,3 +240,60 @@ def test_congestion_plot_data_matches_snapshots_and_release_rules() -> None:
                     assert len(series.release_times_us) == (
                         network.hyperperiod_us // series.message.cycle_time_us
                     )
+
+
+def test_objective_mode_reports_are_read_only_and_complete(tmp_path: Path) -> None:
+    payload_messages, slot_map = _fixture()
+    messages = tuple(
+        replace(message, frame_time_us=message.payload_bytes + 100)
+        for message in payload_messages
+    )
+    optimization = OptimizationConfig(random_restarts=0, conflict_candidate_cap=3)
+    results = {
+        mode: compare_algorithms(
+            messages,
+            slot_map,
+            optimization,
+            weight_mode=WeightMode.FRAME_TIME_US,
+            objective_config=ObjectiveConfig(mode),
+        )
+        for mode in (ObjectiveMode.PEAK, ObjectiveMode.BALANCED, ObjectiveMode.VARIANCE)
+    }
+    configs = {
+        mode: ProjectConfig(
+            optimization=optimization,
+            model=ModelConfig(weight_mode=WeightMode.FRAME_TIME_US),
+            objective=ObjectiveConfig(mode),
+        )
+        for mode in results
+    }
+    network = replace(
+        _network(messages, slot_map),
+        channel=ChannelConfig("CAN1", 500_000, 2_000_000, True),
+        weight_mode=WeightMode.FRAME_TIME_US,
+    )
+    before = tuple(results.items())
+    network_root = tmp_path / "CAN1"
+    paths = write_objective_mode_reports(
+        network_root, network, configs, results, "CAN1"
+    )
+    plot = write_objective_mode_plot(network_root, network, results, "CAN1")
+    aggregate = write_all_network_objective_report(tmp_path)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in (*paths, plot))
+    assert plot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert aggregate.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert tuple(results.items()) == before
+    with paths[0].open(encoding="utf-8-sig", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert [row["result"] for row in rows] == [
+        "original",
+        "peak",
+        "balanced",
+        "variance",
+    ]
+    assert {row["weight_mode"] for row in rows} == {"frame_time_us"}
+    summary = json.loads(paths[2].read_text(encoding="utf-8"))
+    cross = summary["cross_evaluation"]
+    assert set(cross["results"]) == {"original", "peak", "balanced", "variance"}
+    assert cross["balanced_vs_peak"]["recommended_offset_difference_count"] >= 0
+    assert cross["balanced_vs_peak"]["steady_phase_difference_count"] >= 0

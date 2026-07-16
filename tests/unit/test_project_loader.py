@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from canfd_offset_optimizer.exceptions import InputFileError, MissingFieldError
+from canfd_offset_optimizer.models import ObjectiveMode, WeightMode
 from canfd_offset_optimizer.parsers.project_loader import load_project
 
 
@@ -106,3 +107,16 @@ def test_missing_arxml_path_is_never_treated_as_an_empty_directory(
             tmp_path / "misspelled-arxml",
             config,
         )
+
+
+def test_approximate_weight_forces_peak_objective_and_audits_override() -> None:
+    loaded = load_project(
+        FIXTURES / "dbc" / "four_messages.dbc",
+        FIXTURES / "arxml",
+        FIXTURES / "config" / "project.yaml",
+        weight_mode_override=WeightMode.PAYLOAD_BYTES,
+        objective_mode_override=ObjectiveMode.VARIANCE,
+    )
+    assert loaded.config.objective.mode is ObjectiveMode.PEAK
+    assert dict(loaded.network.field_sources)["objective_mode"].startswith("forced peak")
+    assert any("forced to peak" in item for item in loaded.network.warnings)

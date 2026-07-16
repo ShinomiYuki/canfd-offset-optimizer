@@ -55,6 +55,11 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     )
     summary = json.loads(expected[2].read_text(encoding="utf-8"))
     assert summary["algorithm"]["name"] == "GCLS"
+    assert summary["algorithm"]["seed"] == 42
+    assert summary["cli_overrides"]["random_restarts"] == "1"
+    assert summary["field_sources"]["random_restarts"] == "CLI --restarts override"
+    assert summary["effective_configuration"]["random_restarts"] == 1
+    assert len(summary["input_hash"]) == 64
     assert [record["seed"] for record in summary["restarts"]] == [42, 43]
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_first_greedy"])
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_before"])
@@ -237,6 +242,35 @@ def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) ->
     assert "Comparison restart seed=43" in log
 
 
+def test_objective_mode_cli_override_is_audited(tmp_path: Path) -> None:
+    output = tmp_path / "variance"
+    assert main(
+        [
+            "optimize",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--objective-mode",
+            "variance",
+            "--restarts",
+            "0",
+        ]
+    ) == 0
+    summary = json.loads(
+        (output / "results" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["objectives"]["objective_mode"] == "variance"
+    assert summary["field_sources"]["objective_mode"] == (
+        "CLI --objective-mode override"
+    )
+    assert any("objective.mode" in warning for warning in summary["warnings"])
+
+
 def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> None:
     output = tmp_path / "dual"
     assert main(
@@ -288,10 +322,20 @@ def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> 
         assert summary["network"]["brs"] is True
         assert summary["field_sources"]["channel"] == "CLI --channel override"
         assert [record["seed"] for record in summary["restarts"]] == [42, 43]
+    for mode in ("peak", "variance"):
+        assert all(
+            (output / "objective_modes" / mode / relative).is_file()
+            and (output / "objective_modes" / mode / relative).stat().st_size > 0
+            for relative in relative_mode_files
+        )
     combined = (
         output / "results/dual_weight_mode_comparison.csv",
         output / "results/dual_offsets_weight_mode_comparison.csv",
         output / "results/weight_mode_summary.json",
+        output / "results/dual_objective_mode_comparison.csv",
+        output / "results/dual_offsets_objective_mode_comparison.csv",
+        output / "results/objective_mode_summary.json",
+        output / "plots/dual_steady_objective_mode_comparison.png",
         output / "logs/run.log",
     )
     assert all(path.is_file() and path.stat().st_size > 0 for path in combined)
@@ -310,14 +354,47 @@ def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> 
         assert int(row["保守帧占用时间(μs)"]) > 0
         for column in (
             "payload_bytes_GCLS_Offset(ms)",
-            "frame_time_us_GCLS_Offset(ms)",
+            "frame_time_us_peak_GCLS_Offset(ms)",
+            "frame_time_us_balanced_GCLS_Offset(ms)",
+            "frame_time_us_variance_GCLS_Offset(ms)",
         ):
             assert float(row[column]) in range(15, 101, 5)
     combined_summary = json.loads(combined[2].read_text(encoding="utf-8"))
     assert combined_summary["recommended_production_mode"] == "frame_time_us"
     assert set(combined_summary["modes"]) == {"payload_bytes", "frame_time_us"}
+    objective_summary = json.loads(combined[5].read_text(encoding="utf-8"))
+    assert objective_summary["recommended_mode"] == "balanced"
+    assert set(objective_summary["modes"]) == {"peak", "balanced", "variance"}
+    balanced_summary = objective_summary["modes"]["balanced"]
+    assert balanced_summary["comparison"]["peak_budget_us"] > 0
+    assert [
+        record["seed"]
+        for record in balanced_summary["comparison"]["peak_reference_restarts"]
+    ] == [42, 43]
+    assert balanced_summary["load_statistics"]["steady"][
+        "standard_deviation_us"
+    ] >= 0
+    peak_objective = objective_summary["modes"]["peak"]["stages"][-1]["objective"]
+    variance_objective = objective_summary["modes"]["variance"]["stages"][-1][
+        "objective"
+    ]
+    assert variance_objective["violation_count"] <= peak_objective["violation_count"]
+    if variance_objective["violation_count"] == peak_objective["violation_count"]:
+        assert variance_objective["violation_excess"] <= peak_objective[
+            "violation_excess"
+        ]
+        if variance_objective["violation_excess"] == peak_objective["violation_excess"]:
+            assert variance_objective["sum_square_load"] <= peak_objective[
+                "sum_square_load"
+            ]
     aggregate = tmp_path / "ALL_offsets_weight_mode_comparison.csv"
     with aggregate.open(encoding="utf-8-sig", newline="") as stream:
         aggregate_rows = list(csv.DictReader(stream))
     assert len(aggregate_rows) == 4
     assert {row["网段"] for row in aggregate_rows} == {"dual"}
+    objective_aggregate = tmp_path / "ALL_network_objective_mode_summary.csv"
+    assert objective_aggregate.read_bytes().startswith(b"\xef\xbb\xbf")
+    with objective_aggregate.open(encoding="utf-8-sig", newline="") as stream:
+        objective_rows = list(csv.DictReader(stream))
+    assert len(objective_rows) == 1
+    assert objective_rows[0]["网段"] == "dual"

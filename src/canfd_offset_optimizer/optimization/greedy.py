@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..models import CanMessage
 from ..timeline.slot_map import SlotMap
 from ..timeline.state import SearchState
-from .objective import score_state
+from .objective import ObjectivePolicy, score_state
 
 
 def greedy_order(messages: tuple[CanMessage, ...]) -> tuple[CanMessage, ...]:
@@ -22,6 +22,7 @@ def greedy_order(messages: tuple[CanMessage, ...]) -> tuple[CanMessage, ...]:
                 -message.frame_time_us,
                 message.can_id,
                 message.definition_index,
+                message.name,
             ),
         )
     )
@@ -30,7 +31,7 @@ def greedy_order(messages: tuple[CanMessage, ...]) -> tuple[CanMessage, ...]:
 def greedy_construct(
     messages: tuple[CanMessage, ...],
     slot_map: SlotMap,
-    load_threshold: int | None,
+    policy: ObjectivePolicy | int | None,
     ordered_messages: tuple[CanMessage, ...] | None = None,
 ) -> tuple[SearchState, int]:
     """! @brief 对每条报文选择令当前词典序目标最小的候选 Offset。
@@ -48,7 +49,7 @@ def greedy_construct(
         best_score = None
         for offset in message.allowed_offsets_us:
             state.apply(message, offset)
-            score = score_state(state, load_threshold)
+            score = score_state(state, policy)
             evaluations += 1
             state.rollback(message, offset)
             if best_score is None or score < best_score:

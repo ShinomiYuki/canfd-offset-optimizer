@@ -6,9 +6,9 @@ from itertools import product
 
 import pytest
 
-from canfd_offset_optimizer.config import OptimizationConfig
+from canfd_offset_optimizer.config import ObjectiveConfig, OptimizationConfig
 from canfd_offset_optimizer.exceptions import OptimizationError
-from canfd_offset_optimizer.models import CanMessage, WeightMode
+from canfd_offset_optimizer.models import CanMessage, ObjectiveMode, WeightMode
 from canfd_offset_optimizer.optimization.gcls import run_gcls
 from canfd_offset_optimizer.optimization.greedy import greedy_construct
 from canfd_offset_optimizer.optimization.local_search import (
@@ -137,7 +137,7 @@ def test_gcls_is_reproducible_one_optimal_and_input_order_independent() -> None:
 
 
 def test_equal_candidate_scores_use_the_smaller_offset_stably() -> None:
-    target = _message("target", 1, 1_000, 10, (15_000, 16_000), 0)
+    target = _message("target", 1, 100_000, 10, (15_000, 20_000), 0)
     anchor = _message("anchor", 2, 100_000, 1, (100_000,), 1)
     messages = (target, anchor)
     startup, steady, _ = build_windows(messages, 5_000, 100_000)
@@ -171,7 +171,47 @@ def test_approximate_weight_mode_disables_the_physical_microsecond_threshold() -
             random_restarts=0,
         ),
         weight_mode=WeightMode.UNIT,
+        objective_config=ObjectiveConfig(ObjectiveMode.VARIANCE),
     )
+    assert result.objective.mode is ObjectiveMode.PEAK
     assert result.objective.steady_peak == 5_000
     assert result.objective.violation_count == 0
     assert result.objective.violation_excess == 0
+
+
+def test_peak_mode_fixed_golden_regression_is_unchanged() -> None:
+    """Lock strict peak outputs; reporting-only extensions must not change this result."""
+    offsets = (15_000, 20_000, 25_000, 30_000)
+    messages = (
+        _message("C", 0x300, 20_000, 100, offsets, 2),
+        _message("A", 0x100, 10_000, 100, offsets, 0),
+        _message("B", 0x200, 20_000, 200, offsets, 1),
+    )
+    startup, steady, _ = build_windows(messages, 5_000, 40_000)
+    slot_map = precompute_slot_map(messages, startup, steady)
+    result = run_gcls(
+        messages,
+        slot_map,
+        OptimizationConfig(
+            offset_max_us=30_000,
+            random_restarts=2,
+            conflict_candidate_cap=3,
+        ),
+        seed=77,
+        objective_config=ObjectiveConfig(ObjectiveMode.PEAK),
+    )
+    assert result.offset_by_name() == {"A": 30_000, "B": 15_000, "C": 25_000}
+    assert result.objective.metrics_tuple() == (
+        0,
+        0,
+        200,
+        140_000,
+        200,
+        50_000,
+        1,
+    )
+    assert result.steady_slot_loads == (100, 200, 100, 100, 100, 200, 100, 100)
+    assert result.startup_slot_loads == (0, 0, 0, 200, 0, 100)
+    assert result.steady_slot_counts == (1, 1, 1, 1, 1, 1, 1, 1)
+    assert result.startup_slot_counts == (0, 0, 0, 1, 0, 1)
+    assert (result.evaluation_count, result.accepted_moves) == (132, 2)

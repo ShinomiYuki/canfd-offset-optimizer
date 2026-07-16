@@ -35,13 +35,16 @@ def test_all_network_message_table_is_sorted_and_uses_chinese_fields(
         "保守帧占用时间(μs)",
         "DBC原始Offset(ms)",
         "payload_bytes_GCLS_Offset(ms)",
-        "frame_time_us_GCLS_Offset(ms)",
+        "frame_time_us_peak_GCLS_Offset(ms)",
+        "frame_time_us_balanced_GCLS_Offset(ms)",
+        "frame_time_us_variance_GCLS_Offset(ms)",
         "是否变化",
     ]
     for network in ("SU", "DA"):
         results = tmp_path / network / "results"
         results.mkdir(parents=True)
         (results / "weight_mode_summary.json").write_text("{}", encoding="utf-8")
+        (results / "objective_mode_summary.json").write_text("{}", encoding="utf-8")
         with (results / f"{network}_offsets_weight_mode_comparison.csv").open(
             "w", encoding="utf-8-sig", newline=""
         ) as stream:
@@ -56,7 +59,9 @@ def test_all_network_message_table_is_sorted_and_uses_chinese_fields(
                     "保守帧占用时间(μs)": "125",
                     "DBC原始Offset(ms)": "15",
                     "payload_bytes_GCLS_Offset(ms)": "20",
-                    "frame_time_us_GCLS_Offset(ms)": "25",
+                    "frame_time_us_peak_GCLS_Offset(ms)": "25",
+                    "frame_time_us_balanced_GCLS_Offset(ms)": "30",
+                    "frame_time_us_variance_GCLS_Offset(ms)": "35",
                     "是否变化": "True",
                 }
             )

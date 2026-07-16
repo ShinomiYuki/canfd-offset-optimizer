@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..config import ProjectConfig, load_project_config
 from ..exceptions import ConfigurationError, InputFileError, MissingFieldError
-from ..models import CanMessage, ChannelConfig, NetworkModel, WeightMode
+from ..models import CanMessage, ChannelConfig, NetworkModel, ObjectiveMode, WeightMode
 from ..timeline.slot_map import SlotMap, build_windows, precompute_slot_map
 from ..timing.frame_time import estimate_frame_weight
 from .arxml_parser import ArxmlChannelData, parse_arxml_directory
@@ -57,6 +57,7 @@ def load_project(
     *,
     weight_mode_override: WeightMode | None = None,
     channel_override: str | None = None,
+    objective_mode_override: ObjectiveMode | None = None,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
@@ -66,8 +67,24 @@ def load_project(
     dbc = parse_dbc(dbc_path)
     warnings = list(dbc.warnings)
     sources: dict[str, str] = {}
+    cli_overrides: dict[str, str] = {}
+    restart_policy = config.optimization.restart_policy
+    if restart_policy.legacy_additional_restarts is not None:
+        warnings.append(
+            "optimization.random_restarts is deprecated; normalized "
+            f"{restart_policy.legacy_additional_restarts} additional restarts to "
+            f"fixed total_attempts={restart_policy.attempt_limit}"
+        )
+        sources["restart_policy"] = "legacy project.yaml random_restarts adapter"
+    else:
+        sources["restart_policy"] = (
+            "project.yaml optimization.restart_policy"
+            if restart_policy.source_kind == "structured"
+            else "default adaptive restart policy"
+        )
     configured_weight_mode = config.model.weight_mode
     if weight_mode_override is not None:
+        cli_overrides["weight_mode"] = weight_mode_override.value
         if weight_mode_override is configured_weight_mode:
             warnings.append(
                 f"CLI explicitly selects model.weight_mode={weight_mode_override.value}"
@@ -85,6 +102,7 @@ def load_project(
         selected_channel = channel_override.strip()
         if not selected_channel:
             raise ConfigurationError("CLI --channel must not be empty")
+        cli_overrides["channel"] = selected_channel
         if selected_channel == config.network.channel:
             warnings.append(
                 f"CLI --channel explicitly selects network.channel={selected_channel!r}"
@@ -98,6 +116,34 @@ def load_project(
             config,
             network=replace(config.network, channel=selected_channel),
         )
+    if objective_mode_override is not None:
+        cli_overrides["objective_mode"] = objective_mode_override.value
+        configured_objective_mode = config.objective.mode
+        if objective_mode_override is configured_objective_mode:
+            warnings.append(
+                f"CLI explicitly selects objective.mode={objective_mode_override.value}"
+            )
+        else:
+            warnings.append(
+                "CLI overrides project.yaml objective.mode: "
+                f"{configured_objective_mode.value} -> {objective_mode_override.value}"
+            )
+        config = replace(
+            config,
+            objective=replace(config.objective, mode=objective_mode_override),
+        )
+    if (
+        config.model.weight_mode is not WeightMode.FRAME_TIME_US
+        and config.objective.mode is not ObjectiveMode.PEAK
+    ):
+        warnings.append(
+            f"objective.mode={config.objective.mode.value} requires frame_time_us; "
+            "approximate weight mode was forced to peak"
+        )
+        config = replace(
+            config,
+            objective=replace(config.objective, mode=ObjectiveMode.PEAK),
+        )
     channel_name = config.network.channel
     if not channel_name:
         raise ConfigurationError("network.channel must be specified to select an ARXML channel")
@@ -110,6 +156,15 @@ def load_project(
         "CLI --weight-mode override"
         if weight_mode_override is not None
         else "project.yaml model.weight_mode"
+    )
+    sources["objective_mode"] = (
+        "forced peak for approximate weight mode"
+        if config.model.weight_mode is not WeightMode.FRAME_TIME_US
+        else (
+            "CLI --objective-mode override"
+            if objective_mode_override is not None
+            else "project.yaml objective.mode"
+        )
     )
     arxml: ArxmlChannelData | None = None
     if not arxml_dir.is_dir():
@@ -243,6 +298,7 @@ def load_project(
         warnings=tuple(warnings),
         field_sources=tuple(sorted(sources.items())),
         input_files=tuple(input_files),
+        cli_overrides=tuple(sorted(cli_overrides.items())),
     )
     if (
         network.weight_mode is WeightMode.FRAME_TIME_US
@@ -261,5 +317,6 @@ def load_project(
             ),
             field_sources=network.field_sources,
             input_files=network.input_files,
+            cli_overrides=network.cli_overrides,
         )
     return LoadedProject(config, network, precompute_slot_map(network.messages, startup, steady))

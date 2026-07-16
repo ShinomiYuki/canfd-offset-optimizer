@@ -16,8 +16,9 @@ from ..models import (
     WeightMode,
 )
 from ..optimization.objective import slot_load_threshold_us
-from .summary_writer import sha256_file
-from .filenames import prefixed_report_name
+from .filenames import infer_report_prefix, prefixed_report_name
+from .restart_writer import configuration_hash
+from .summary_writer import combined_input_hash, sha256_file
 
 
 def _objective_dict(value: ObjectiveValue) -> dict[str, int]:
@@ -27,7 +28,9 @@ def _objective_dict(value: ObjectiveValue) -> dict[str, int]:
         "steady_peak": value.steady_peak,
         "startup_peak": value.startup_peak,
         "sum_square_load": value.sum_square_load,
+        "startup_sum_square_load": value.startup_sum_square_load,
         "max_release_count": value.max_release_count,
+        "peak_budget_excess": value.peak_budget_excess,
     }
 
 
@@ -76,11 +79,15 @@ def write_comparison_csv_reports(
             "阶段",
             "类型",
             "词典序排名",
+            "目标模式",
+            "峰值预算(μs)",
+            "峰值预算超出量(μs)",
             "超限时隙数",
             "超限总量",
             "稳态峰值",
             "启动峰值",
             "负载平方和",
+            "启动负载平方和",
             "最大释放帧数",
             "是否优于原始方案",
             "稳态峰值改善率(%)",
@@ -99,11 +106,15 @@ def write_comparison_csv_reports(
                     "阶段": stage.name,
                     "类型": stage.kind,
                     "词典序排名": objective_ranks[objective],
+                    "目标模式": objective.mode.value,
+                    "峰值预算(μs)": objective.peak_budget_us or "",
+                    "峰值预算超出量(μs)": objective.peak_budget_excess,
                     "超限时隙数": objective.violation_count,
                     "超限总量": objective.violation_excess,
                     "稳态峰值": objective.steady_peak,
                     "启动峰值": objective.startup_peak,
                     "负载平方和": objective.sum_square_load,
+                    "启动负载平方和": objective.startup_sum_square_load,
                     "最大释放帧数": objective.max_release_count,
                     "是否优于原始方案": objective < original.objective,
                     "稳态峰值改善率(%)": _improvement_percent(
@@ -236,12 +247,34 @@ def build_comparison_summary(
     """! @brief 构造可由标准 JSON 编码器直接序列化的比较摘要。"""
     physical = network.weight_mode is WeightMode.FRAME_TIME_US
     return {
+        "input_hash": combined_input_hash(network.input_files),
+        "configuration_hash": configuration_hash(config),
         "input_files": [
             {"path": str(path), "sha256": sha256_file(path)}
             for path in network.input_files
             if path.is_file()
         ],
         "field_sources": dict(network.field_sources),
+        "cli_overrides": dict(network.cli_overrides),
+        "effective_configuration": {
+            "weight_mode": config.model.weight_mode.value,
+            "objective_mode": config.objective.mode.value,
+            "restart_policy": {
+                "mode": config.optimization.restart_policy.mode.value,
+                "total_attempts": config.optimization.restart_policy.total_attempts,
+                "min_attempts": config.optimization.restart_policy.min_attempts,
+                "check_interval": config.optimization.restart_policy.check_interval,
+                "patience_attempts": config.optimization.restart_policy.patience_attempts,
+                "max_attempts": config.optimization.restart_policy.max_attempts,
+                "source_kind": config.optimization.restart_policy.source_kind,
+                "legacy_additional_restarts": (
+                    config.optimization.restart_policy.legacy_additional_restarts
+                ),
+            },
+            "peak_tolerance_type": config.objective.peak_tolerance.type.value,
+            "peak_tolerance_value": config.objective.peak_tolerance.value,
+            "variance_offset_cap": config.optimization.variance_offset_cap,
+        },
         "network": {
             "message_count": len(network.messages),
             "channel": network.channel.name,
@@ -263,19 +296,42 @@ def build_comparison_summary(
         },
         "comparison": {
             "stage_order": [stage.name for stage in result.stages],
-            "lexicographic_order": [
-                "violation_count",
-                "violation_excess",
-                "steady_peak",
-                "startup_peak",
-                "sum_square_load",
-                "max_release_count",
-            ],
+            "objective_mode": result.stage("gcls").objective.mode.value,
+            "lexicographic_order": list(result.stage("gcls").objective.priorities),
+            "peak_budget_us": result.peak_budget_us,
+            "peak_reference_objective": (
+                _objective_dict(result.peak_reference_objective)
+                if result.peak_reference_objective
+                else None
+            ),
             "seed": result.seed,
-            "random_restarts": config.optimization.random_restarts,
+            "restart_mode": result.restart_execution.mode.value,
+            "restart_actual_attempts": result.restart_execution.actual_attempts,
+            "restart_stop_reason": result.restart_execution.stop_reason,
+            "restart_max_attempts_reached": (
+                result.restart_execution.max_attempts_reached
+            ),
             "hot_slot_count": config.optimization.hot_slot_count,
             "conflict_candidate_cap": config.optimization.conflict_candidate_cap,
             "pair_neighbor_steps": config.optimization.pair_neighbor_steps,
+            "variance_offset_cap": config.optimization.variance_offset_cap,
+            "peak_tolerance": {
+                "type": config.objective.peak_tolerance.type.value,
+                "value": config.objective.peak_tolerance.value,
+            },
+            "variance_metric": config.objective.variance_metric,
+            "peak_reference_restarts": [
+                {
+                    "attempt_index": record.attempt_index,
+                    "seed": record.seed,
+                    "objective": record.objective.as_tuple(),
+                    "assignment_hash": record.assignment_hash,
+                }
+                for record in result.peak_reference_restart_records
+            ],
+            "peak_reference_evaluation_count": result.peak_reference_evaluation_count,
+            "peak_reference_runtime_seconds": result.peak_reference_elapsed_seconds,
+            "balanced_fallback_reason": result.balanced_fallback_reason,
         },
         "stages": [
             {
@@ -283,6 +339,9 @@ def build_comparison_summary(
                 "kind": stage.kind,
                 "objective": _objective_dict(stage.objective),
                 "objective_tuple": stage.objective.as_tuple(),
+                "objective_metrics": stage.objective.metrics_tuple(),
+                "objective_mode": stage.objective.mode.value,
+                "peak_budget_us": stage.objective.peak_budget_us,
                 "evaluation_count": stage.evaluation_count,
                 "accepted_moves": stage.accepted_moves,
                 "runtime_seconds": stage.elapsed_seconds,
@@ -290,7 +349,25 @@ def build_comparison_summary(
             for stage in result.stages
         ],
         "restarts": [
-            {"seed": record.seed, "objective": record.objective.as_tuple()}
+            {
+                "attempt_index": record.attempt_index,
+                "attempt_kind": record.attempt_kind.value,
+                "seed": record.seed,
+                "objective": record.objective.as_tuple(),
+                "assignment_hash": record.assignment_hash,
+                "assignments": [
+                    {
+                        "message_name": item.message_name,
+                        "can_id": item.can_id,
+                        "offset_us": item.offset_us,
+                        "definition_index": item.definition_index,
+                    }
+                    for item in record.assignments
+                ],
+                "runtime_seconds": record.elapsed_seconds,
+                "evaluation_count": record.evaluation_count,
+                "accepted_moves": record.accepted_moves,
+            }
             for record in result.restart_records
         ],
         "weight_mode": network.weight_mode.value,
@@ -319,14 +396,28 @@ def write_comparison_summary(
     network: NetworkModel,
     config: ProjectConfig,
     result: AlgorithmComparisonResult,
+    report_prefix: str | None = None,
 ) -> Path:
     """! @brief 写出 `results/comparison_summary.json`。"""
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     path = results_dir / "comparison_summary.json"
+    prefix = report_prefix or infer_report_prefix(
+        network.input_files[0] if network.input_files else Path("network.dbc"),
+        output_root.name,
+    )
+    payload = build_comparison_summary(network, config, result)
+    payload["restart_audit_files"] = {
+        "gcls": f"{prefix}_restart_records.jsonl",
+        "peak_reference": (
+            f"{prefix}_peak_reference_restart_records.jsonl"
+            if result.peak_reference_restart_records
+            else None
+        ),
+    }
     path.write_text(
         json.dumps(
-            build_comparison_summary(network, config, result),
+            payload,
             ensure_ascii=False,
             indent=2,
         ),

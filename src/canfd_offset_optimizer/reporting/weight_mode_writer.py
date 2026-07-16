@@ -9,7 +9,13 @@ import json
 from pathlib import Path
 
 from ..config import ProjectConfig
-from ..models import AlgorithmComparisonResult, NetworkModel, ObjectiveValue, WeightMode
+from ..models import (
+    AlgorithmComparisonResult,
+    NetworkModel,
+    ObjectiveMode,
+    ObjectiveValue,
+    WeightMode,
+)
 from .comparison_writer import build_comparison_summary
 from .filenames import prefixed_report_name
 
@@ -20,7 +26,9 @@ def _objective_columns(prefix: str, value: ObjectiveValue) -> dict[str, int]:
         f"{prefix}_超限总量": value.violation_excess,
         f"{prefix}_稳态峰值": value.steady_peak,
         f"{prefix}_启动峰值": value.startup_peak,
-        f"{prefix}_负载平方和": value.sum_square_load,
+        f"{prefix}_稳态负载平方和Qss": value.sum_square_load,
+        f"{prefix}_启动负载平方和Qst": value.startup_sum_square_load,
+        f"{prefix}_峰值预算超出量": value.peak_budget_excess,
         f"{prefix}_最大释放帧数": value.max_release_count,
     }
 
@@ -50,6 +58,7 @@ def write_weight_mode_reports(
     physical_config: ProjectConfig,
     physical_result: AlgorithmComparisonResult,
     report_prefix: str | None = None,
+    physical_mode_results: dict[ObjectiveMode, AlgorithmComparisonResult] | None = None,
 ) -> tuple[Path, Path, Path]:
     """! @brief Write two within-mode summaries and a read-only GCLS Offset diff."""
     if payload_network.weight_mode is not WeightMode.PAYLOAD_BYTES:
@@ -77,6 +86,7 @@ def write_weight_mode_reports(
         rows.append(
             {
                 "权重模式": mode,
+                "目标模式": result.stage("gcls").objective.mode.value,
                 "目标负载单位": unit,
                 "ARXML Controller": network.channel.name,
                 "Nominal Bitrate(bit/s)": network.channel.nominal_bitrate or "",
@@ -114,7 +124,15 @@ def write_weight_mode_reports(
     if set(physical_by_key) != payload_keys:
         raise ValueError("weight modes must contain the same messages")
     payload_offsets = payload_result.stage("gcls").offset_by_name()
-    physical_offsets = physical_result.stage("gcls").offset_by_name()
+    mode_results = physical_mode_results or {
+        ObjectiveMode.PEAK: physical_result,
+        ObjectiveMode.BALANCED: physical_result,
+        ObjectiveMode.VARIANCE: physical_result,
+    }
+    physical_offsets = {
+        mode: mode_results[mode].stage("gcls").offset_by_name()
+        for mode in (ObjectiveMode.PEAK, ObjectiveMode.BALANCED, ObjectiveMode.VARIANCE)
+    }
     offset_rows: list[dict[str, object]] = []
     for message in payload_result.messages:
         key = _message_key(message.name, message.can_id)
@@ -127,7 +145,7 @@ def write_weight_mode_reports(
         ):
             raise ValueError(f"weight modes disagree on metadata for {message.name!r}")
         payload_offset = payload_offsets[message.name]
-        physical_offset = physical_offsets[message.name]
+        balanced_offset = physical_offsets[ObjectiveMode.BALANCED][message.name]
         offset_rows.append(
             {
                 "报文名称": message.name,
@@ -137,8 +155,16 @@ def write_weight_mode_reports(
                 "保守帧占用时间(μs)": physical_message.frame_time_us,
                 "DBC原始Offset(ms)": _milliseconds(message.original_offset_us),
                 "payload_bytes_GCLS_Offset(ms)": _milliseconds(payload_offset),
-                "frame_time_us_GCLS_Offset(ms)": _milliseconds(physical_offset),
-                "是否变化": payload_offset != physical_offset,
+                "frame_time_us_peak_GCLS_Offset(ms)": _milliseconds(
+                    physical_offsets[ObjectiveMode.PEAK][message.name]
+                ),
+                "frame_time_us_balanced_GCLS_Offset(ms)": _milliseconds(
+                    balanced_offset
+                ),
+                "frame_time_us_variance_GCLS_Offset(ms)": _milliseconds(
+                    physical_offsets[ObjectiveMode.VARIANCE][message.name]
+                ),
+                "payload与balanced是否变化": payload_offset != balanced_offset,
             }
         )
     with offsets_path.open("w", encoding="utf-8-sig", newline="") as stream:
@@ -146,7 +172,9 @@ def write_weight_mode_reports(
         writer.writeheader()
         writer.writerows(offset_rows)
 
-    changed_count = sum(row["是否变化"] is True for row in offset_rows)
+    changed_count = sum(
+        row["payload与balanced是否变化"] is True for row in offset_rows
+    )
     summary = {
         "comparison_semantics": (
             "Each mode is compared only with its own original assignment; raw Byte and "
@@ -167,6 +195,13 @@ def write_weight_mode_reports(
                 physical_network, physical_config, physical_result
             ),
         },
+        "physical_objective_modes": {
+            mode.value: {
+                "objective": mode_results[mode].stage("gcls").objective.as_tuple(),
+                "peak_budget_us": mode_results[mode].peak_budget_us,
+            }
+            for mode in (ObjectiveMode.PEAK, ObjectiveMode.BALANCED, ObjectiveMode.VARIANCE)
+        },
     }
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -184,7 +219,9 @@ def write_all_network_offsets_report(dual_weight_root: Path) -> Path:
         "保守帧占用时间(μs)",
         "DBC原始Offset(ms)",
         "payload_bytes_GCLS_Offset(ms)",
-        "frame_time_us_GCLS_Offset(ms)",
+        "frame_time_us_peak_GCLS_Offset(ms)",
+        "frame_time_us_balanced_GCLS_Offset(ms)",
+        "frame_time_us_variance_GCLS_Offset(ms)",
     )
     rows: list[dict[str, str]] = []
     for network_dir in sorted(
@@ -192,7 +229,9 @@ def write_all_network_offsets_report(dual_weight_root: Path) -> Path:
         key=lambda path: path.name,
     ):
         results_dir = network_dir / "results"
-        if not (results_dir / "weight_mode_summary.json").is_file():
+        if not (results_dir / "weight_mode_summary.json").is_file() or not (
+            results_dir / "objective_mode_summary.json"
+        ).is_file():
             continue
         preferred = results_dir / f"{network_dir.name}_offsets_weight_mode_comparison.csv"
         fallback = results_dir / "offsets_weight_mode_comparison.csv"

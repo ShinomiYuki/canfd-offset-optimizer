@@ -14,6 +14,13 @@ optimization:
   hot_slot_count: 3
   conflict_candidate_cap: 4
   pair_neighbor_steps: [1, 2, 3]
+  variance_offset_cap: 3
 model:
   weight_mode: frame_time_us
   average_load_limit: 0.75
+objective:
+  mode: balanced
+  peak_tolerance:
+    type: relative
+    value: 0.05
+  variance_metric: sum_of_squares

@@ -15,10 +15,22 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Iterator, Sequence
 
-from .config import ProjectConfig
+from .config import ProjectConfig, RestartPolicy
+from .diagnostics.cpsat_verify import run_cpsat_verification
+from .diagnostics.restart_study import DEFAULT_CHECKPOINTS, run_restart_study
+from .diagnostics.tolerance_study import DEFAULT_TOLERANCES, run_tolerance_scan
 from .exceptions import CanfdOptimizerError
-from .models import AlgorithmComparisonResult, WeightMode
-from .optimization.comparison import compare_algorithms
+from .models import (
+    AlgorithmComparisonResult,
+    ObjectiveMode,
+    OptimizationResult,
+    RestartMode,
+    WeightMode,
+)
+from .optimization.comparison import (
+    compare_algorithms,
+    extract_peak_optimization_result,
+)
 from .optimization.gcls import run_gcls
 from .parsers.project_loader import LoadedProject, load_project
 from .reporting.comparison_plotter import write_comparison_plots
@@ -29,8 +41,15 @@ from .reporting.comparison_writer import (
 from .reporting.congestion_plotter import write_congestion_plots
 from .reporting.csv_writer import write_csv_reports
 from .reporting.filenames import infer_report_prefix
+from .reporting.objective_mode_plotter import write_objective_mode_plot
+from .reporting.objective_mode_writer import (
+    write_all_network_objective_report,
+    write_objective_mode_reports,
+)
 from .reporting.plotter import write_load_plots
 from .reporting.summary_writer import write_summary
+from .reporting.summary_writer import combined_input_hash
+from .reporting.restart_writer import configuration_hash, write_restart_jsonl
 from .reporting.weight_mode_writer import (
     write_all_network_offsets_report,
     write_weight_mode_reports,
@@ -50,13 +69,40 @@ def build_parser() -> argparse.ArgumentParser:
         "compare-weights",
         help="run payload-byte and physical frame-time comparisons",
     )
-    for command in (optimize, compare, compare_weights):
+    analyze_restarts = subparsers.add_parser(
+        "analyze-restarts", help="analyze Peak restart stability and saturation"
+    )
+    scan_tolerances = subparsers.add_parser(
+        "scan-tolerances", help="scan balanced relative peak tolerances"
+    )
+    verify_cpsat = subparsers.add_parser(
+        "verify-cpsat", help="verify balanced Qss with optional OR-Tools CP-SAT"
+    )
+    all_commands = (
+        optimize,
+        compare,
+        compare_weights,
+        analyze_restarts,
+        scan_tolerances,
+        verify_cpsat,
+    )
+    for command in all_commands:
         command.add_argument("--dbc", type=Path, required=True)
         command.add_argument("--arxml", type=Path, required=True)
         command.add_argument("--config", type=Path, required=True)
         command.add_argument("--output", type=Path, required=True)
         command.add_argument("--seed", type=int, default=0)
         command.add_argument("--restarts", type=int)
+        command.add_argument(
+            "--restart-mode",
+            choices=tuple(mode.value for mode in RestartMode),
+            help="override the normalized restart policy",
+        )
+        command.add_argument(
+            "--restart-attempts",
+            type=int,
+            help="total attempts; required with --restart-mode fixed",
+        )
         command.add_argument(
             "--channel",
             help="select an ARXML Controller SHORT-NAME and override network.channel",
@@ -71,6 +117,27 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(mode.value for mode in WeightMode),
         help="override model.weight_mode for this comparison",
     )
+    for command in (optimize, compare):
+        command.add_argument(
+            "--objective-mode",
+            choices=tuple(mode.value for mode in ObjectiveMode),
+            help="override objective.mode for this run",
+        )
+    analyze_restarts.add_argument("--batch-count", type=int, default=30)
+    analyze_restarts.add_argument("--max-attempts", type=int, default=80)
+    analyze_restarts.add_argument(
+        "--checkpoints",
+        default=",".join(str(value) for value in DEFAULT_CHECKPOINTS),
+    )
+    analyze_restarts.add_argument("--resume", action="store_true")
+    scan_tolerances.add_argument(
+        "--tolerances",
+        default=",".join(str(value) for value in DEFAULT_TOLERANCES),
+        help="comma-separated relative values, for example 0,0.05,0.20",
+    )
+    verify_cpsat.add_argument("--tolerance", type=float, default=0.05)
+    verify_cpsat.add_argument("--time-limit-seconds", type=float, default=300.0)
+    verify_cpsat.add_argument("--solver-seed", type=int, default=0)
     return parser
 
 
@@ -81,7 +148,96 @@ def _with_restart_override(config: ProjectConfig, restarts: int | None) -> Proje
         raise ValueError("--restarts must be non-negative")
     return replace(
         config,
-        optimization=replace(config.optimization, random_restarts=restarts),
+        optimization=replace(
+            config.optimization,
+            restart_policy=RestartPolicy.fixed(
+                restarts + 1,
+                source_kind="legacy",
+                legacy_additional_restarts=restarts,
+            ),
+        ),
+    )
+
+
+def _with_restart_override_loaded(
+    loaded: LoadedProject, restarts: int | None
+) -> LoadedProject:
+    """Apply ``--restarts`` while preserving its requested value and source for reports."""
+    if restarts is None:
+        return loaded
+    config = _with_restart_override(loaded.config, restarts)
+    sources = dict(loaded.network.field_sources)
+    sources["random_restarts"] = "CLI --restarts override"
+    overrides = dict(loaded.network.cli_overrides)
+    overrides["random_restarts"] = str(restarts)
+    warnings = loaded.network.warnings + (
+        f"CLI overrides optimization.random_restarts to {restarts}",
+        "--restarts is deprecated; use --restart-mode fixed --restart-attempts",
+    )
+    return replace(
+        loaded,
+        config=config,
+        network=replace(
+            loaded.network,
+            field_sources=tuple(sorted(sources.items())),
+            cli_overrides=tuple(sorted(overrides.items())),
+            warnings=warnings,
+        ),
+    )
+
+
+def _with_restart_policy_overrides(
+    loaded: LoadedProject,
+    legacy_restarts: int | None,
+    mode_value: str | None,
+    total_attempts: int | None,
+) -> LoadedProject:
+    """Normalize legacy/new CLI restart options into one audited policy."""
+    existing = loaded.config.optimization.restart_policy
+    if legacy_restarts is not None and (mode_value is not None or total_attempts is not None):
+        raise ValueError("--restarts conflicts with --restart-mode/--restart-attempts")
+    if legacy_restarts is not None:
+        return _with_restart_override_loaded(loaded, legacy_restarts)
+    if mode_value is None and total_attempts is None:
+        return loaded
+    if existing.source_kind == "legacy":
+        raise ValueError("new restart CLI options conflict with YAML random_restarts")
+    if mode_value is None:
+        raise ValueError("--restart-attempts requires --restart-mode fixed")
+    mode = RestartMode(mode_value)
+    if mode is RestartMode.FIXED:
+        if total_attempts is None or total_attempts <= 0:
+            raise ValueError(
+                "--restart-mode fixed requires positive --restart-attempts"
+            )
+        selected = RestartPolicy.fixed(total_attempts, source_kind="cli")
+    else:
+        if total_attempts is not None:
+            raise ValueError(
+                "--restart-attempts is only valid with --restart-mode fixed"
+            )
+        selected = replace(existing, mode=RestartMode.ADAPTIVE, total_attempts=None, source_kind="cli")
+    sources = dict(loaded.network.field_sources)
+    sources["restart_policy"] = "CLI --restart-mode override"
+    overrides = dict(loaded.network.cli_overrides)
+    overrides["restart_mode"] = selected.mode.value
+    if selected.total_attempts is not None:
+        overrides["restart_total_attempts"] = str(selected.total_attempts)
+    return replace(
+        loaded,
+        config=replace(
+            loaded.config,
+            optimization=replace(
+                loaded.config.optimization, restart_policy=selected
+            ),
+        ),
+        network=replace(
+            loaded.network,
+            field_sources=tuple(sorted(sources.items())),
+            cli_overrides=tuple(sorted(overrides.items())),
+            warnings=loaded.network.warnings
+            + (f"CLI selects restart_policy.mode={selected.mode.value}",),
+        ),
     )
 
 
@@ -92,6 +248,32 @@ def _log_loaded(loaded: LoadedProject) -> None:
         logger.info("Field source %s=%s", field, source)
     for warning in loaded.network.warnings:
         logger.warning(warning)
+
+
+def _with_objective_mode(loaded: LoadedProject, mode: ObjectiveMode) -> LoadedProject:
+    """Create an audited view of one loaded physical network for an objective experiment."""
+    sources = dict(loaded.network.field_sources)
+    sources["objective_mode"] = "compare-weights fixed physical objective experiment"
+    warnings = loaded.network.warnings
+    overrides = dict(loaded.network.cli_overrides)
+    overrides["objective_mode_experiment"] = mode.value
+    if loaded.config.objective.mode is not mode:
+        warnings += (
+            f"compare-weights selects physical objective.mode={mode.value}",
+        )
+    return replace(
+        loaded,
+        config=replace(
+            loaded.config,
+            objective=replace(loaded.config.objective, mode=mode),
+        ),
+        network=replace(
+            loaded.network,
+            warnings=warnings,
+            field_sources=tuple(sorted(sources.items())),
+            cli_overrides=tuple(sorted(overrides.items())),
+        ),
+    )
 
 
 def _log_comparison(result: AlgorithmComparisonResult) -> None:
@@ -119,6 +301,7 @@ def _run_comparison_bundle(
     config: ProjectConfig,
     seed: int,
     report_prefix: str,
+    peak_reference_result: OptimizationResult | None = None,
 ) -> AlgorithmComparisonResult:
     result = compare_algorithms(
         loaded.network.messages,
@@ -127,6 +310,8 @@ def _run_comparison_bundle(
         config.model.average_load_limit,
         seed,
         loaded.network.weight_mode,
+        config.objective,
+        peak_reference_result,
     )
     write_comparison_csv_reports(
         output,
@@ -143,7 +328,34 @@ def _run_comparison_bundle(
         report_prefix,
     )
     write_congestion_plots(output, loaded.network, result, report_prefix)
-    write_comparison_summary(output, loaded.network, config, result)
+    write_comparison_summary(
+        output, loaded.network, config, result, report_prefix
+    )
+    write_restart_jsonl(
+        output / "results" / f"{report_prefix}_restart_records.jsonl",
+        result.restart_records,
+        experiment_id=(
+            f"{report_prefix}-{loaded.network.weight_mode.value}-"
+            f"{config.objective.mode.value}-{seed}"
+        ),
+        input_hash=combined_input_hash(loaded.network.input_files),
+        configuration_hash_value=configuration_hash(config),
+        network=report_prefix,
+    )
+    if result.peak_reference_restart_records:
+        write_restart_jsonl(
+            output
+            / "results"
+            / f"{report_prefix}_peak_reference_restart_records.jsonl",
+            result.peak_reference_restart_records,
+            experiment_id=(
+                f"{report_prefix}-{loaded.network.weight_mode.value}-peak-reference-{seed}"
+            ),
+            input_hash=combined_input_hash(loaded.network.input_files),
+            configuration_hash_value=configuration_hash(config),
+            network=report_prefix,
+            phase="peak_reference",
+        )
     _log_comparison(result)
     return result
 
@@ -198,24 +410,151 @@ def main(argv: Sequence[str] | None = None) -> int:
         report_prefix = infer_report_prefix(args.dbc, output.name)
         if args.restarts is not None and args.restarts < 0:
             parser.error("--restarts must be non-negative")
+        if args.command in {
+            "analyze-restarts",
+            "scan-tolerances",
+            "verify-cpsat",
+        }:
+            diagnostic_loaded = load_project(
+                args.dbc,
+                args.arxml,
+                args.config,
+                weight_mode_override=WeightMode.FRAME_TIME_US,
+                channel_override=args.channel,
+                objective_mode_override=ObjectiveMode.PEAK,
+            )
+            diagnostic_loaded = _with_restart_policy_overrides(
+                diagnostic_loaded,
+                args.restarts,
+                args.restart_mode,
+                args.restart_attempts,
+            )
+            _log_loaded(diagnostic_loaded)
+            diagnostic_policy = diagnostic_loaded.config.optimization.restart_policy
+            diagnostic_attempts = (
+                diagnostic_policy.total_attempts
+                if diagnostic_policy.mode is RestartMode.FIXED
+                else None
+            )
+            if args.command == "analyze-restarts":
+                if (
+                    args.restarts is not None
+                    or args.restart_mode is not None
+                    or args.restart_attempts is not None
+                ):
+                    raise CanfdOptimizerError(
+                        "analyze-restarts controls attempts with --max-attempts; "
+                        "do not combine restart policy CLI options"
+                    )
+                try:
+                    checkpoints = tuple(
+                        int(value.strip())
+                        for value in args.checkpoints.split(",")
+                        if value.strip()
+                    )
+                except ValueError as exc:
+                    raise CanfdOptimizerError(
+                        "--checkpoints must contain comma-separated integers"
+                    ) from exc
+                run_restart_study(
+                    diagnostic_loaded,
+                    output,
+                    report_prefix,
+                    base_seed=args.seed,
+                    batch_count=args.batch_count,
+                    max_attempts=args.max_attempts,
+                    checkpoints=checkpoints,
+                    resume=args.resume,
+                )
+            elif args.command == "scan-tolerances":
+                try:
+                    tolerances = tuple(
+                        float(value.strip())
+                        for value in args.tolerances.split(",")
+                        if value.strip()
+                    )
+                except ValueError as exc:
+                    raise CanfdOptimizerError(
+                        "--tolerances must contain comma-separated numbers"
+                    ) from exc
+                run_tolerance_scan(
+                    diagnostic_loaded,
+                    output,
+                    report_prefix,
+                    seed=args.seed,
+                    total_attempts=diagnostic_attempts,
+                    tolerances=tolerances,
+                )
+            else:
+                run_cpsat_verification(
+                    diagnostic_loaded,
+                    output,
+                    report_prefix,
+                    seed=args.seed,
+                    total_attempts=diagnostic_attempts,
+                    tolerance=args.tolerance,
+                    time_limit_seconds=args.time_limit_seconds,
+                    solver_seed=args.solver_seed,
+                )
+            logger.info("Diagnostic reports written under %s", output)
+            return 0
         if args.command == "compare-weights":
-            mode_results: dict[
-                WeightMode, tuple[LoadedProject, ProjectConfig, AlgorithmComparisonResult]
-            ] = {}
-            for mode in (WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US):
-                mode_output = output / mode.value
+            payload_output = output / WeightMode.PAYLOAD_BYTES.value
+            with _additional_log_file(payload_output / "logs" / "run.log"):
+                payload_loaded = load_project(
+                    args.dbc,
+                    args.arxml,
+                    args.config,
+                    weight_mode_override=WeightMode.PAYLOAD_BYTES,
+                    channel_override=args.channel,
+                )
+                payload_loaded = _with_restart_policy_overrides(
+                    payload_loaded,
+                    args.restarts,
+                    args.restart_mode,
+                    args.restart_attempts,
+                )
+                payload_config = payload_loaded.config
+                _log_loaded(payload_loaded)
+                payload_result = _run_comparison_bundle(
+                    payload_output,
+                    payload_loaded,
+                    payload_config,
+                    args.seed,
+                    report_prefix,
+                )
+
+            physical_base = load_project(
+                args.dbc,
+                args.arxml,
+                args.config,
+                weight_mode_override=WeightMode.FRAME_TIME_US,
+                channel_override=args.channel,
+            )
+            physical_mode_results: dict[ObjectiveMode, AlgorithmComparisonResult] = {}
+            physical_mode_configs: dict[ObjectiveMode, ProjectConfig] = {}
+            physical_mode_loaded: dict[ObjectiveMode, LoadedProject] = {}
+            peak_reference: OptimizationResult | None = None
+            for objective_mode in (
+                ObjectiveMode.PEAK,
+                ObjectiveMode.BALANCED,
+                ObjectiveMode.VARIANCE,
+            ):
+                mode_loaded = _with_objective_mode(physical_base, objective_mode)
+                mode_loaded = _with_restart_policy_overrides(
+                    mode_loaded,
+                    args.restarts,
+                    args.restart_mode,
+                    args.restart_attempts,
+                )
+                mode_config = mode_loaded.config
+                mode_output = (
+                    output / WeightMode.FRAME_TIME_US.value
+                    if objective_mode is ObjectiveMode.BALANCED
+                    else output / "objective_modes" / objective_mode.value
+                )
                 with _additional_log_file(mode_output / "logs" / "run.log"):
-                    logger.info("Starting weight mode %s", mode.value)
-                    mode_loaded = load_project(
-                        args.dbc,
-                        args.arxml,
-                        args.config,
-                        weight_mode_override=mode,
-                        channel_override=args.channel,
-                    )
-                    mode_config = _with_restart_override(
-                        mode_loaded.config, args.restarts
-                    )
+                    logger.info("Starting physical objective mode %s", objective_mode.value)
                     _log_loaded(mode_loaded)
                     mode_result = _run_comparison_bundle(
                         mode_output,
@@ -223,14 +562,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         mode_config,
                         args.seed,
                         report_prefix,
+                        peak_reference,
                     )
-                    mode_results[mode] = (mode_loaded, mode_config, mode_result)
-            payload_loaded, payload_config, payload_result = mode_results[
-                WeightMode.PAYLOAD_BYTES
-            ]
-            physical_loaded, physical_config, physical_result = mode_results[
-                WeightMode.FRAME_TIME_US
-            ]
+                physical_mode_results[objective_mode] = mode_result
+                physical_mode_configs[objective_mode] = mode_config
+                physical_mode_loaded[objective_mode] = mode_loaded
+                if objective_mode is ObjectiveMode.PEAK:
+                    peak_reference = extract_peak_optimization_result(mode_result)
+            physical_loaded = physical_mode_loaded[ObjectiveMode.BALANCED]
+            physical_config = physical_mode_configs[ObjectiveMode.BALANCED]
+            physical_result = physical_mode_results[ObjectiveMode.BALANCED]
             write_weight_mode_reports(
                 output,
                 payload_loaded.network,
@@ -240,15 +581,42 @@ def main(argv: Sequence[str] | None = None) -> int:
                 physical_config,
                 physical_result,
                 report_prefix,
+                physical_mode_results,
+            )
+            write_objective_mode_reports(
+                output,
+                physical_loaded.network,
+                physical_mode_configs,
+                physical_mode_results,
+                report_prefix,
+            )
+            write_objective_mode_plot(
+                output,
+                physical_loaded.network,
+                physical_mode_results,
+                report_prefix,
             )
             if output.name.casefold() == report_prefix.casefold():
                 aggregate_path = write_all_network_offsets_report(output.parent)
                 logger.info("All-network message table written to %s", aggregate_path)
+                objective_aggregate_path = write_all_network_objective_report(
+                    output.parent
+                )
+                logger.info(
+                    "All-network objective table written to %s",
+                    objective_aggregate_path,
+                )
             logger.info("Dual-weight reports written under %s", output)
             return 0
         weight_mode_override = (
             WeightMode(args.weight_mode)
             if args.command == "compare" and args.weight_mode is not None
+            else None
+        )
+        objective_mode_override = (
+            ObjectiveMode(args.objective_mode)
+            if args.command in {"optimize", "compare"}
+            and args.objective_mode is not None
             else None
         )
         loaded = load_project(
@@ -257,8 +625,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config,
             weight_mode_override=weight_mode_override,
             channel_override=args.channel,
+            objective_mode_override=objective_mode_override,
         )
-        config = _with_restart_override(loaded.config, args.restarts)
+        loaded = _with_restart_policy_overrides(
+            loaded,
+            args.restarts,
+            args.restart_mode,
+            args.restart_attempts,
+        )
+        config = loaded.config
         _log_loaded(loaded)
         if args.command == "compare":
             _run_comparison_bundle(output, loaded, config, args.seed, report_prefix)
@@ -270,6 +645,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config.model.average_load_limit,
                 args.seed,
                 weight_mode=loaded.network.weight_mode,
+                objective_config=config.objective,
             )
             write_csv_reports(
                 output,
@@ -285,7 +661,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config.model.average_load_limit,
                 report_prefix,
             )
-            write_summary(output, loaded.network, config, result)
+            write_summary(
+                output, loaded.network, config, result, report_prefix
+            )
+            write_restart_jsonl(
+                output / "results" / f"{report_prefix}_restart_records.jsonl",
+                result.restart_records,
+                experiment_id=(
+                    f"{report_prefix}-{loaded.network.weight_mode.value}-"
+                    f"{result.objective.mode.value}-{args.seed}"
+                ),
+                input_hash=combined_input_hash(loaded.network.input_files),
+                configuration_hash_value=configuration_hash(config),
+                network=report_prefix,
+            )
+            if result.peak_reference_restart_records:
+                write_restart_jsonl(
+                    output
+                    / "results"
+                    / f"{report_prefix}_peak_reference_restart_records.jsonl",
+                    result.peak_reference_restart_records,
+                    experiment_id=(
+                        f"{report_prefix}-{loaded.network.weight_mode.value}-"
+                        f"peak-reference-{args.seed}"
+                    ),
+                    input_hash=combined_input_hash(loaded.network.input_files),
+                    configuration_hash_value=configuration_hash(config),
+                    network=report_prefix,
+                    phase="peak_reference",
+                )
             logger.info("Best objective: %s", result.objective.as_tuple())
         logger.info("Reports written under %s", output)
         return 0
