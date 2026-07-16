@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..models import AlgorithmComparisonResult, NetworkModel, WeightMode
 from ..optimization.objective import slot_load_threshold_us
+from .filenames import prefixed_report_name
 
 
 def write_comparison_plots(
@@ -17,6 +18,7 @@ def write_comparison_plots(
     network: NetworkModel,
     result: AlgorithmComparisonResult,
     load_limit: float,
+    report_prefix: str | None = None,
 ) -> tuple[Path, Path]:
     """! @brief 生成共享纵轴的 steady/startup 五阶段对比图。"""
     cache_dir = output_root / "logs" / ".matplotlib"
@@ -59,7 +61,9 @@ def write_comparison_plots(
         figure.supylabel(f"Weighted load ({unit})")
         figure.suptitle(f"{window_name.capitalize()} load comparison")
         figure.tight_layout()
-        path = plot_dir / f"{window_name}_load_comparison.png"
+        path = plot_dir / prefixed_report_name(
+            f"{window_name}_load_comparison.png", report_prefix
+        )
         figure.savefig(path, dpi=150)
         plt.close(figure)
         paths.append(path)

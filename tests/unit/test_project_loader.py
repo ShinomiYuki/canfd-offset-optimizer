@@ -28,6 +28,25 @@ def test_loader_constructs_four_message_network() -> None:
     assert all(message.frame_time_us > 0 for message in loaded.network.messages)
 
 
+def test_channel_override_is_applied_and_audited(tmp_path: Path) -> None:
+    config = tmp_path / "wrong-channel.yaml"
+    config.write_text(
+        (FIXTURES / "config" / "project.yaml")
+        .read_text(encoding="utf-8")
+        .replace("channel: CAN1", "channel: WRONG"),
+        encoding="utf-8",
+    )
+    loaded = load_project(
+        FIXTURES / "dbc" / "four_messages.dbc",
+        FIXTURES / "arxml",
+        config,
+        channel_override="CAN1",
+    )
+    assert loaded.config.network.channel == "CAN1"
+    assert dict(loaded.network.field_sources)["channel"] == "CLI --channel override"
+    assert any("CLI overrides" in warning for warning in loaded.network.warnings)
+
+
 def test_yaml_override_is_used_and_reported(tmp_path: Path) -> None:
     config = tmp_path / "override.yaml"
     config.write_text(

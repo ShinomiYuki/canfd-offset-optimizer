@@ -108,8 +108,14 @@ M=H/\Delta=100.
 每条报文的权重 \(C_i\) 使用估算的 CAN FD 帧总线占用时间，单位统一为整数微秒。若启用 BRS，可抽象为
 
 \[
-C_i=\frac{N_i^{\mathrm{nom}}}{R_{\mathrm{nom}}}+\frac{N_i^{\mathrm{data}}}{R_{\mathrm{data}}}.
+C_i=\frac{N_i^{\mathrm{nom}}+3}{R_{\mathrm{nom}}}+\frac{N_i^{\mathrm{data}}}{R_{\mathrm{data}}}.
 \]
+
+其中额外的 3 bit 是按 nominal bitrate 计入的 intermission。当前实现采用包含协议字段、
+动态填充上界、固定 CRC 填充和 intermission 的保守 ISO CAN FD 估算，并向上取整为正
+整数微秒；它不是逐位仿真，也不是最坏响应时间分析。`CanControllerBaudRate` 与
+`CanControllerFdBaudRate` 按 AUTOSAR/DaVinci 的 kbit/s 语义换算为 bit/s，
+`CanControllerTxBitRateSwitch` 可作为 Controller 级 BRS 配置。
 
 若无法获得可靠的 bitrate 或 BRS，工具可以在显式允许的情况下退化为 `payload_bytes` 或 `unit` 权重，但必须在输出中标记为近似模式。
 
@@ -358,7 +364,7 @@ flowchart LR
 
 - ECU FIFO 排队仿真；
 - CAN 总线真实仲裁；
-- Intermission、错误帧和重传；
+- 错误帧和重传（正常帧后的 3-bit intermission 已计入权重）；
 - 发送端/接收端软件处理时间；
 - 事件流量、诊断流量和网络管理流量；
 - DBC/ARXML 自动回写；

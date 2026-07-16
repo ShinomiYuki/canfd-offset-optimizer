@@ -56,6 +56,7 @@ def load_project(
     config_path: Path,
     *,
     weight_mode_override: WeightMode | None = None,
+    channel_override: str | None = None,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
@@ -80,10 +81,31 @@ def load_project(
                 config,
                 model=replace(config.model, weight_mode=weight_mode_override),
             )
+    if channel_override is not None:
+        selected_channel = channel_override.strip()
+        if not selected_channel:
+            raise ConfigurationError("CLI --channel must not be empty")
+        if selected_channel == config.network.channel:
+            warnings.append(
+                f"CLI --channel explicitly selects network.channel={selected_channel!r}"
+            )
+        else:
+            warnings.append(
+                "CLI overrides project.yaml network.channel: "
+                f"{config.network.channel!r} -> {selected_channel!r}"
+            )
+        config = replace(
+            config,
+            network=replace(config.network, channel=selected_channel),
+        )
     channel_name = config.network.channel
     if not channel_name:
         raise ConfigurationError("network.channel must be specified to select an ARXML channel")
-    sources["channel"] = "project.yaml network.channel selection"
+    sources["channel"] = (
+        "CLI --channel override"
+        if channel_override is not None
+        else "project.yaml network.channel selection"
+    )
     sources["weight_mode"] = (
         "CLI --weight-mode override"
         if weight_mode_override is not None

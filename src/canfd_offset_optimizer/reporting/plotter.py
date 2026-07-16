@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..models import NetworkModel, OptimizationResult, WeightMode
 from ..optimization.objective import slot_load_threshold_us
+from .filenames import prefixed_report_name
 
 
 def write_load_plots(
@@ -19,6 +20,7 @@ def write_load_plots(
     network: NetworkModel,
     result: OptimizationResult,
     load_limit: float,
+    report_prefix: str | None = None,
 ) -> tuple[Path, Path]:
     """! @brief 生成 `steady_load.png` 和 `startup_load.png`。"""
     cache_dir = output_root / "logs" / ".matplotlib"
@@ -55,7 +57,7 @@ def write_load_plots(
         if physical_time_weight:
             axis.legend()
         figure.tight_layout()
-        path = plot_dir / f"{label}_load.png"
+        path = plot_dir / prefixed_report_name(f"{label}_load.png", report_prefix)
         figure.savefig(path, dpi=150)
         plt.close(figure)
         paths.append(path)

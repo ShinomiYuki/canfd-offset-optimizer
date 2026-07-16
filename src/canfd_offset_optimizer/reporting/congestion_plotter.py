@@ -21,6 +21,7 @@ from ..models import (
     WeightMode,
 )
 from ..timeline.slot_map import release_times
+from .filenames import prefixed_report_name
 
 
 WindowName = Literal["startup", "steady"]
@@ -369,6 +370,7 @@ def write_congestion_plots(
     output_root: Path,
     network: NetworkModel,
     result: AlgorithmComparisonResult,
+    report_prefix: str | None = None,
 ) -> tuple[Path, Path, Path, Path]:
     """! @brief 生成 startup/steady 热力图和原始/GCLS 时间线。"""
     plt, colors, patches, lines = _load_matplotlib(output_root)
@@ -377,8 +379,12 @@ def write_congestion_plots(
     paths: list[Path] = []
     for window_name in ("steady", "startup"):
         data = build_window_congestion_data(network, result, window_name)
-        heatmap_path = plot_dir / f"{window_name}_congestion_heatmap.png"
-        timeline_path = plot_dir / f"{window_name}_message_timeline.png"
+        heatmap_path = plot_dir / prefixed_report_name(
+            f"{window_name}_congestion_heatmap.png", report_prefix
+        )
+        timeline_path = plot_dir / prefixed_report_name(
+            f"{window_name}_message_timeline.png", report_prefix
+        )
         _write_heatmap(heatmap_path, network, data, plt, colors, patches)
         _write_timeline(timeline_path, network, data, plt, patches, lines)
         paths.extend((heatmap_path, timeline_path))

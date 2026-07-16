@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..models import NetworkModel, OptimizationResult, WeightMode
 from ..optimization.objective import slot_load_threshold_us
+from .filenames import prefixed_report_name
 
 
 def write_csv_reports(
@@ -18,6 +19,7 @@ def write_csv_reports(
     network: NetworkModel,
     result: OptimizationResult,
     load_limit: float,
+    report_prefix: str | None = None,
 ) -> tuple[Path, Path]:
     """! @brief 写出 offsets.csv 与 slot_loads.csv。
 
@@ -26,43 +28,45 @@ def write_csv_reports(
     """
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    offsets_path = results_dir / "offsets.csv"
-    slot_loads_path = results_dir / "slot_loads.csv"
+    offsets_path = results_dir / prefixed_report_name("offsets.csv", report_prefix)
+    slot_loads_path = results_dir / prefixed_report_name(
+        "slot_loads.csv", report_prefix
+    )
     assignments = result.offset_by_name()
     with offsets_path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
             stream,
             fieldnames=[
-                "message_name",
-                "can_id",
-                "frame_format",
-                "sender_ecu",
-                "cycle_time_us",
-                "weight_mode",
-                "weight_value",
-                "frame_weight_us",
-                "original_offset_us",
-                "recommended_offset_us",
+                "报文名称",
+                "CAN_ID",
+                "帧格式",
+                "发送节点",
+                "周期(μs)",
+                "权重模式",
+                "权重值",
+                "保守帧时间(μs)",
+                "原始Offset(μs)",
+                "推荐Offset(μs)",
             ],
         )
         writer.writeheader()
         for message in result.messages:
             writer.writerow(
                 {
-                    "message_name": message.name,
-                    "can_id": f"0x{message.can_id:X}",
-                    "frame_format": message.frame_format.value,
-                    "sender_ecu": message.sender_ecu,
-                    "cycle_time_us": message.cycle_time_us,
-                    "weight_mode": network.weight_mode.value,
-                    "weight_value": message.frame_time_us,
-                    "frame_weight_us": (
+                    "报文名称": message.name,
+                    "CAN_ID": f"0x{message.can_id:X}",
+                    "帧格式": message.frame_format.value,
+                    "发送节点": message.sender_ecu,
+                    "周期(μs)": message.cycle_time_us,
+                    "权重模式": network.weight_mode.value,
+                    "权重值": message.frame_time_us,
+                    "保守帧时间(μs)": (
                         message.frame_time_us
                         if network.weight_mode is WeightMode.FRAME_TIME_US
                         else ""
                     ),
-                    "original_offset_us": message.original_offset_us,
-                    "recommended_offset_us": assignments[message.name],
+                    "原始Offset(μs)": message.original_offset_us,
+                    "推荐Offset(μs)": assignments[message.name],
                 }
             )
     physical_time_weight = network.weight_mode is WeightMode.FRAME_TIME_US
@@ -75,16 +79,16 @@ def write_csv_reports(
         writer = csv.DictWriter(
             stream,
             fieldnames=[
-                "window",
-                "slot_index",
-                "start_us",
-                "end_us",
-                "weight_mode",
-                "weighted_load",
-                "weighted_load_us",
-                "load_ratio",
-                "release_count",
-                "threshold_violation",
+                "窗口",
+                "时隙索引",
+                "开始时间(μs)",
+                "结束时间(μs)",
+                "权重模式",
+                "加权负载",
+                "加权负载(μs)",
+                "负载比例",
+                "释放帧数",
+                "是否超过阈值",
             ],
         )
         writer.writeheader()
@@ -126,20 +130,20 @@ def _write_window_rows(
         start = window_start_us + index * slot_width_us
         writer.writerow(
             {
-                "window": label,
-                "slot_index": index,
-                "start_us": start,
-                "end_us": start + slot_width_us,
-                "weight_mode": weight_mode.value,
-                "weighted_load": load,
-                "weighted_load_us": (
+                "窗口": "启动" if label == "startup" else "稳态",
+                "时隙索引": index,
+                "开始时间(μs)": start,
+                "结束时间(μs)": start + slot_width_us,
+                "权重模式": weight_mode.value,
+                "加权负载": load,
+                "加权负载(μs)": (
                     load if weight_mode is WeightMode.FRAME_TIME_US else ""
                 ),
-                "load_ratio": (
+                "负载比例": (
                     f"{load / slot_width_us:.6f}" if threshold_us is not None else ""
                 ),
-                "release_count": count,
-                "threshold_violation": (
+                "释放帧数": count,
+                "是否超过阈值": (
                     load > threshold_us if threshold_us is not None else ""
                 ),
             }

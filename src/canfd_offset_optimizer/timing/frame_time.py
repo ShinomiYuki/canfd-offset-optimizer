@@ -19,6 +19,7 @@ class FrameTimeEstimate:
     mode: WeightMode
     nominal_bits: int
     data_bits: int
+    intermission_bits: int
     warning: str | None = None
 
 
@@ -37,7 +38,8 @@ def estimate_frame_weight(
 
     @details
     `frame_time_us` 是 ISO CAN FD 的保守上界估计：动态填充按最坏上界计算，
-    CRC 字段包含 stuff-count、parity 和固定填充位；不包含 intermission。
+    CRC 字段包含 stuff-count、parity 和固定填充位；包含 3 个 nominal-rate
+    intermission bits。
     BRS 开启时在 BRS 之后使用 data bitrate，并把尾段保守地计入 nominal phase。
     该模式不声称是逐位精确仿真。
     """
@@ -46,11 +48,12 @@ def estimate_frame_weight(
             f"payload_bytes={payload_bytes} is not representable by a CAN FD DLC"
         )
     if mode is WeightMode.UNIT:
-        return FrameTimeEstimate(1, mode, 0, 0, "unit weight is an approximation")
+        return FrameTimeEstimate(1, mode, 0, 0, 0, "unit weight is an approximation")
     if mode is WeightMode.PAYLOAD_BYTES:
         return FrameTimeEstimate(
             max(1, payload_bytes),
             mode,
+            0,
             0,
             0,
             "payload_bytes weight ignores CAN FD protocol overhead and bitrate",
@@ -70,20 +73,25 @@ def estimate_frame_weight(
     # and one fixed bit after each complete group of four protected bits.
     crc_protected_bits = 4 + crc_bits
     crc_field_bits = crc_protected_bits + 1 + crc_protected_bits // 4
+    intermission_bits = 3
     if not channel.brs:
         nominal_bits = (
             _stuffed(prefix_bits + dynamic_data_bits) + crc_field_bits + tail_bits
         )
         data_bits = 0
         frame_time_us = (
-            nominal_bits * 1_000_000 + channel.nominal_bitrate - 1
+            (nominal_bits + intermission_bits) * 1_000_000
+            + channel.nominal_bitrate
+            - 1
         ) // channel.nominal_bitrate
     else:
         nominal_bits = _stuffed(prefix_bits) + tail_bits
         data_bits = _stuffed(dynamic_data_bits) + crc_field_bits
         assert channel.data_bitrate is not None
         nominal_us = (
-            nominal_bits * 1_000_000 + channel.nominal_bitrate - 1
+            (nominal_bits + intermission_bits) * 1_000_000
+            + channel.nominal_bitrate
+            - 1
         ) // channel.nominal_bitrate
         data_us = (
             data_bits * 1_000_000 + channel.data_bitrate - 1
@@ -94,6 +102,8 @@ def estimate_frame_weight(
         mode,
         nominal_bits,
         data_bits,
-        "frame_time_us is a conservative ISO CAN FD estimate (excluding intermission), "
+        intermission_bits,
+        "frame_time_us is a conservative ISO CAN FD estimate including 3 nominal-rate "
+        "intermission bits; "
         "not an exact stuffed-bit simulation",
     )

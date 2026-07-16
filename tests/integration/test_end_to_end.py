@@ -37,11 +37,11 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     )
     assert exit_code == 0
     expected = (
-        output / "results" / "offsets.csv",
-        output / "results" / "slot_loads.csv",
+        output / "results" / "output_offsets.csv",
+        output / "results" / "output_slot_loads.csv",
         output / "results" / "summary.json",
-        output / "plots" / "steady_load.png",
-        output / "plots" / "startup_load.png",
+        output / "plots" / "output_steady_load.png",
+        output / "plots" / "output_startup_load.png",
         output / "logs" / "run.log",
     )
     assert all(path.is_file() and path.stat().st_size > 0 for path in expected)
@@ -49,7 +49,10 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     with expected[0].open(encoding="utf-8-sig", newline="") as stream:
         offsets = list(csv.DictReader(stream))
     assert len(offsets) == 4
-    assert all(int(row["recommended_offset_us"]) in range(15_000, 100_001, 5_000) for row in offsets)
+    assert all(
+        int(row["推荐Offset(μs)"]) in range(15_000, 100_001, 5_000)
+        for row in offsets
+    )
     summary = json.loads(expected[2].read_text(encoding="utf-8"))
     assert summary["algorithm"]["name"] == "GCLS"
     assert [record["seed"] for record in summary["restarts"]] == [42, 43]
@@ -112,14 +115,14 @@ def test_approximate_mode_reports_weight_units_without_physical_threshold(
     assert summary["objectives"]["after"]["violation_count"] == 0
     assert summary["objectives"]["after"]["violation_excess"] == 0
     assert summary["objectives"]["lexicographic_order"][1] == "violation_excess"
-    with (output / "results" / "slot_loads.csv").open(
+    with (output / "results" / "approximate-output_slot_loads.csv").open(
         encoding="utf-8-sig", newline=""
     ) as stream:
         first = next(csv.DictReader(stream))
-    assert first["weight_mode"] == "unit"
-    assert first["weighted_load_us"] == ""
-    assert first["load_ratio"] == ""
-    assert first["threshold_violation"] == ""
+    assert first["权重模式"] == "unit"
+    assert first["加权负载(μs)"] == ""
+    assert first["负载比例"] == ""
+    assert first["是否超过阈值"] == ""
 
 
 def test_cli_reports_invalid_yaml_bitrate_as_input_error(
@@ -171,23 +174,23 @@ def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) ->
         ]
     ) == 0
     expected = (
-        output / "results" / "algorithm_comparison.csv",
-        output / "results" / "offsets_comparison.csv",
-        output / "results" / "slot_loads_comparison.csv",
+        output / "results" / "comparison_algorithm_comparison.csv",
+        output / "results" / "comparison_offsets_comparison.csv",
+        output / "results" / "comparison_slot_loads_comparison.csv",
         output / "results" / "comparison_summary.json",
-        output / "plots" / "steady_load_comparison.png",
-        output / "plots" / "startup_load_comparison.png",
-        output / "plots" / "steady_congestion_heatmap.png",
-        output / "plots" / "steady_message_timeline.png",
-        output / "plots" / "startup_congestion_heatmap.png",
-        output / "plots" / "startup_message_timeline.png",
+        output / "plots" / "comparison_steady_load_comparison.png",
+        output / "plots" / "comparison_startup_load_comparison.png",
+        output / "plots" / "comparison_steady_congestion_heatmap.png",
+        output / "plots" / "comparison_steady_message_timeline.png",
+        output / "plots" / "comparison_startup_congestion_heatmap.png",
+        output / "plots" / "comparison_startup_message_timeline.png",
         output / "logs" / "run.log",
     )
     assert all(path.is_file() and path.stat().st_size > 0 for path in expected)
     assert all(path.read_bytes().startswith(b"\xef\xbb\xbf") for path in expected[:3])
     with expected[0].open(encoding="utf-8-sig", newline="") as stream:
         algorithms = list(csv.DictReader(stream))
-    assert [row["stage"] for row in algorithms] == [
+    assert [row["阶段"] for row in algorithms] == [
         "original",
         "minimum",
         "greedy",
@@ -219,10 +222,10 @@ def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) ->
     assert float(offsets[0]["GCLS推荐Offset(ms)"]) >= 15
     with expected[2].open(encoding="utf-8-sig", newline="") as stream:
         slot = next(csv.DictReader(stream))
-    assert slot["weight_mode"] == "payload_bytes"
-    assert slot["weighted_load_us"] == ""
-    assert slot["load_ratio"] == ""
-    assert slot["threshold_violation"] == ""
+    assert slot["权重模式"] == "payload_bytes"
+    assert slot["加权负载(μs)"] == ""
+    assert slot["负载比例"] == ""
+    assert slot["是否超过阈值"] == ""
     summary = json.loads(expected[3].read_text(encoding="utf-8"))
     assert summary["weight_mode"] == "payload_bytes"
     assert summary["field_sources"]["weight_mode"] == "CLI --weight-mode override"
@@ -232,3 +235,89 @@ def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) ->
     log = expected[-1].read_text(encoding="utf-8")
     assert "Comparison restart seed=42" in log
     assert "Comparison restart seed=43" in log
+
+
+def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> None:
+    output = tmp_path / "dual"
+    assert main(
+        [
+            "compare-weights",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--channel",
+            "CAN1",
+            "--seed",
+            "42",
+            "--restarts",
+            "1",
+        ]
+    ) == 0
+    relative_mode_files = (
+        Path("results/dual_algorithm_comparison.csv"),
+        Path("results/dual_offsets_comparison.csv"),
+        Path("results/dual_slot_loads_comparison.csv"),
+        Path("results/comparison_summary.json"),
+        Path("plots/dual_steady_load_comparison.png"),
+        Path("plots/dual_startup_load_comparison.png"),
+        Path("plots/dual_steady_congestion_heatmap.png"),
+        Path("plots/dual_startup_congestion_heatmap.png"),
+        Path("plots/dual_steady_message_timeline.png"),
+        Path("plots/dual_startup_message_timeline.png"),
+        Path("logs/run.log"),
+    )
+    for mode in ("payload_bytes", "frame_time_us"):
+        assert all(
+            (output / mode / relative).is_file()
+            and (output / mode / relative).stat().st_size > 0
+            for relative in relative_mode_files
+        )
+        summary = json.loads(
+            (output / mode / "results/comparison_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert summary["weight_mode"] == mode
+        assert summary["network"]["nominal_bitrate_bit_s"] == 500_000
+        assert summary["network"]["data_bitrate_bit_s"] == 2_000_000
+        assert summary["network"]["brs"] is True
+        assert summary["field_sources"]["channel"] == "CLI --channel override"
+        assert [record["seed"] for record in summary["restarts"]] == [42, 43]
+    combined = (
+        output / "results/dual_weight_mode_comparison.csv",
+        output / "results/dual_offsets_weight_mode_comparison.csv",
+        output / "results/weight_mode_summary.json",
+        output / "logs/run.log",
+    )
+    assert all(path.is_file() and path.stat().st_size > 0 for path in combined)
+    assert combined[0].read_bytes().startswith(b"\xef\xbb\xbf")
+    assert combined[1].read_bytes().startswith(b"\xef\xbb\xbf")
+    with combined[0].open(encoding="utf-8-sig", newline="") as stream:
+        mode_rows = list(csv.DictReader(stream))
+    assert [row["权重模式"] for row in mode_rows] == [
+        "payload_bytes",
+        "frame_time_us",
+    ]
+    with combined[1].open(encoding="utf-8-sig", newline="") as stream:
+        offset_rows = list(csv.DictReader(stream))
+    assert len(offset_rows) == 4
+    for row in offset_rows:
+        assert int(row["保守帧占用时间(μs)"]) > 0
+        for column in (
+            "payload_bytes_GCLS_Offset(ms)",
+            "frame_time_us_GCLS_Offset(ms)",
+        ):
+            assert float(row[column]) in range(15, 101, 5)
+    combined_summary = json.loads(combined[2].read_text(encoding="utf-8"))
+    assert combined_summary["recommended_production_mode"] == "frame_time_us"
+    assert set(combined_summary["modes"]) == {"payload_bytes", "frame_time_us"}
+    aggregate = tmp_path / "ALL_offsets_weight_mode_comparison.csv"
+    with aggregate.open(encoding="utf-8-sig", newline="") as stream:
+        aggregate_rows = list(csv.DictReader(stream))
+    assert len(aggregate_rows) == 4
+    assert {row["网段"] for row in aggregate_rows} == {"dual"}

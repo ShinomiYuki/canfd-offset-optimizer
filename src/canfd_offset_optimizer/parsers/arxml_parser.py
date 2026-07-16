@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +33,14 @@ PARAMETER_NAMES: dict[str, tuple[str, ...]] = {
         "cancontrollerfdbrs",
         "canfdbrsenabled",
         "brsenabled",
+        "cancontrollertxbitrateswitch",
     ),
+}
+
+KBIT_PER_SECOND_PARAMETER_NAMES = {
+    "cancontrollerbaudrate",
+    "cancontrollerfddatarate",
+    "cancontrollerfdbaudrate",
 }
 
 
@@ -59,12 +67,30 @@ def _child_text(element: etree._Element, local_name: str) -> str | None:
     return None
 
 
-def _parameter_key(reference: str) -> str | None:
+def _parameter_spec(reference: str) -> tuple[str, int] | None:
     tail = reference.rsplit("/", 1)[-1].lower().replace("-", "").replace("_", "")
     for key, candidates in PARAMETER_NAMES.items():
-        if any(tail == candidate or tail.endswith(candidate) for candidate in candidates):
-            return key
+        for candidate in candidates:
+            if tail == candidate or tail.endswith(candidate):
+                scale = 1000 if candidate in KBIT_PER_SECOND_PARAMETER_NAMES else 1
+                return key, scale
     return None
+
+
+def _parse_scaled_integer(value_text: str, scale: int, source: str) -> int:
+    """! @brief Parse a numeric AUTOSAR value and convert it to an integer base unit."""
+    try:
+        scaled = Decimal(value_text) * scale
+    except InvalidOperation as exc:
+        raise InputFileError(f"invalid numeric value {value_text!r} at {source}") from exc
+    if not scaled.is_finite() or scaled != scaled.to_integral_value():
+        raise InputFileError(
+            f"value {value_text!r} does not convert to an integral bit rate at {source}"
+        )
+    value = int(scaled)
+    if value <= 0:
+        raise InputFileError(f"bit rate must be positive at {source}, got {value_text!r}")
+    return value
 
 
 def _parse_bool(value: str, source: str) -> bool:
@@ -173,16 +199,17 @@ def parse_arxml_directory(directory: Path, channel_name: str) -> ArxmlChannelDat
             value_text = _child_text(element, "VALUE")
             if reference is None or value_text is None:
                 continue
-            key = _parameter_key(reference)
-            if key is None:
+            spec = _parameter_spec(reference)
+            if spec is None:
                 continue
-            source = f"{path}:{element.sourceline or '?'}:{reference}"
-            try:
-                value: int | bool = _parse_bool(value_text, source) if key == "brs" else int(value_text)
-            except ValueError as exc:
-                raise InputFileError(f"invalid integer {value_text!r} at {source}") from exc
-            if key in {"nominal_bitrate", "data_bitrate"} and int(value) <= 0:
-                raise InputFileError(f"{key} must be positive at {source}, got {value!r}")
+            key, scale = spec
+            conversion = " [kbit/s -> bit/s]" if scale == 1000 else ""
+            source = f"{path}:{element.sourceline or '?'}:{reference}{conversion}"
+            value: int | bool = (
+                _parse_bool(value_text, source)
+                if key == "brs"
+                else _parse_scaled_integer(value_text, scale, source)
+            )
             if key in values and values[key] != value:
                 raise DataConflictError(
                     f"conflicting ARXML values for {key}: {values[key]!r} at "

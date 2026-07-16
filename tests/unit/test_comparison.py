@@ -2,6 +2,7 @@
 @brief 五阶段算法比较、可复现性和报告只读性的回归测试。
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 from canfd_offset_optimizer.config import (
@@ -26,6 +27,7 @@ from canfd_offset_optimizer.reporting.congestion_plotter import (
     congestion_level,
     write_congestion_plots,
 )
+from canfd_offset_optimizer.reporting.weight_mode_writer import write_weight_mode_reports
 from canfd_offset_optimizer.timeline.slot_map import (
     SlotMap,
     build_windows,
@@ -135,6 +137,54 @@ def test_comparison_writers_do_not_modify_snapshots(tmp_path: Path) -> None:
     congestion_paths = write_congestion_plots(tmp_path, network, result)
     assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in congestion_paths)
     assert result == before
+
+
+def test_weight_mode_writer_does_not_modify_either_snapshot(tmp_path: Path) -> None:
+    payload_messages, slot_map = _fixture()
+    physical_messages = tuple(
+        replace(message, frame_time_us=message.payload_bytes + 100)
+        for message in payload_messages
+    )
+    optimization = OptimizationConfig(random_restarts=0, conflict_candidate_cap=3)
+    payload_result = compare_algorithms(
+        payload_messages,
+        slot_map,
+        optimization,
+        weight_mode=WeightMode.PAYLOAD_BYTES,
+    )
+    physical_result = compare_algorithms(
+        physical_messages,
+        slot_map,
+        optimization,
+        weight_mode=WeightMode.FRAME_TIME_US,
+    )
+    payload_network = _network(payload_messages, slot_map)
+    physical_network = replace(
+        payload_network,
+        messages=physical_messages,
+        channel=ChannelConfig("CAN1", 500_000, 2_000_000, True),
+        weight_mode=WeightMode.FRAME_TIME_US,
+    )
+    payload_config = ProjectConfig(
+        optimization=optimization,
+        model=ModelConfig(weight_mode=WeightMode.PAYLOAD_BYTES),
+    )
+    physical_config = ProjectConfig(
+        optimization=optimization,
+        model=ModelConfig(weight_mode=WeightMode.FRAME_TIME_US),
+    )
+    before = payload_result, physical_result
+    paths = write_weight_mode_reports(
+        tmp_path,
+        payload_network,
+        payload_config,
+        payload_result,
+        physical_network,
+        physical_config,
+        physical_result,
+    )
+    assert all(path.is_file() for path in paths)
+    assert (payload_result, physical_result) == before
 
 
 def test_congestion_plot_data_matches_snapshots_and_release_rules() -> None:

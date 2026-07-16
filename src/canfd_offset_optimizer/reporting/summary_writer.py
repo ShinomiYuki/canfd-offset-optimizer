@@ -123,7 +123,7 @@ def build_summary(
         "warnings": list(network.warnings),
         "weight_mode": network.weight_mode.value,
         "weight_accuracy": (
-            "conservative_iso_can_fd_estimate"
+            "conservative_iso_can_fd_estimate_with_intermission"
             if physical_time_weight
             else "explicit_approximation"
         ),

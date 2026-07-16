@@ -33,10 +33,16 @@ def test_approximation_modes_are_explicit() -> None:
 def test_iso_can_fd_estimate_has_auditable_phase_bit_counts() -> None:
     brs = ChannelConfig("CAN1", 500_000, 2_000_000, True)
     estimate = estimate_frame_weight(8, False, brs, WeightMode.FRAME_TIME_US)
-    assert (estimate.nominal_bits, estimate.data_bits, estimate.frame_time_us) == (
+    assert (
+        estimate.nominal_bits,
+        estimate.data_bits,
+        estimate.intermission_bits,
+        estimate.frame_time_us,
+    ) == (
         31,
         113,
-        119,
+        3,
+        125,
     )
     assert "estimate" in (estimate.warning or "")
 
@@ -45,7 +51,8 @@ def test_no_brs_does_not_require_an_unused_data_bitrate_and_dlc_is_validated() -
     no_brs = ChannelConfig("CAN1", 500_000, None, False)
     estimate = estimate_frame_weight(8, False, no_brs, WeightMode.FRAME_TIME_US)
     assert estimate.data_bits == 0
-    assert estimate.frame_time_us == 288
+    assert estimate.intermission_bits == 3
+    assert estimate.frame_time_us == 294
     with pytest.raises(ValueError, match="DLC"):
         estimate_frame_weight(10, False, no_brs, WeightMode.FRAME_TIME_US)
 

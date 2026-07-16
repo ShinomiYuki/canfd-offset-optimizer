@@ -17,6 +17,7 @@ from ..models import (
 )
 from ..optimization.objective import slot_load_threshold_us
 from .summary_writer import sha256_file
+from .filenames import prefixed_report_name
 
 
 def _objective_dict(value: ObjectiveValue) -> dict[str, int]:
@@ -48,13 +49,20 @@ def write_comparison_csv_reports(
     network: NetworkModel,
     result: AlgorithmComparisonResult,
     load_limit: float,
+    report_prefix: str | None = None,
 ) -> tuple[Path, Path, Path]:
     """! @brief 写出算法、Offset 和时隙三个 UTF-8 BOM 对比表。"""
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    algorithm_path = results_dir / "algorithm_comparison.csv"
-    offsets_path = results_dir / "offsets_comparison.csv"
-    slots_path = results_dir / "slot_loads_comparison.csv"
+    algorithm_path = results_dir / prefixed_report_name(
+        "algorithm_comparison.csv", report_prefix
+    )
+    offsets_path = results_dir / prefixed_report_name(
+        "offsets_comparison.csv", report_prefix
+    )
+    slots_path = results_dir / prefixed_report_name(
+        "slot_loads_comparison.csv", report_prefix
+    )
     original = result.stage("original")
     objective_ranks = {
         objective: rank
@@ -65,22 +73,22 @@ def write_comparison_csv_reports(
 
     with algorithm_path.open("w", encoding="utf-8-sig", newline="") as stream:
         fieldnames = [
-            "stage",
-            "kind",
-            "lexicographic_rank",
-            "violation_count",
-            "violation_excess",
-            "steady_peak",
-            "startup_peak",
-            "sum_square_load",
-            "max_release_count",
-            "better_than_original",
-            "steady_peak_improvement_pct",
-            "startup_peak_improvement_pct",
-            "sum_square_improvement_pct",
-            "evaluation_count",
-            "accepted_moves",
-            "runtime_seconds",
+            "阶段",
+            "类型",
+            "词典序排名",
+            "超限时隙数",
+            "超限总量",
+            "稳态峰值",
+            "启动峰值",
+            "负载平方和",
+            "最大释放帧数",
+            "是否优于原始方案",
+            "稳态峰值改善率(%)",
+            "启动峰值改善率(%)",
+            "负载平方和改善率(%)",
+            "评价次数",
+            "接受移动次数",
+            "运行时间(s)",
         ]
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
@@ -88,23 +96,28 @@ def write_comparison_csv_reports(
             objective = stage.objective
             writer.writerow(
                 {
-                    "stage": stage.name,
-                    "kind": stage.kind,
-                    "lexicographic_rank": objective_ranks[objective],
-                    **_objective_dict(objective),
-                    "better_than_original": objective < original.objective,
-                    "steady_peak_improvement_pct": _improvement_percent(
+                    "阶段": stage.name,
+                    "类型": stage.kind,
+                    "词典序排名": objective_ranks[objective],
+                    "超限时隙数": objective.violation_count,
+                    "超限总量": objective.violation_excess,
+                    "稳态峰值": objective.steady_peak,
+                    "启动峰值": objective.startup_peak,
+                    "负载平方和": objective.sum_square_load,
+                    "最大释放帧数": objective.max_release_count,
+                    "是否优于原始方案": objective < original.objective,
+                    "稳态峰值改善率(%)": _improvement_percent(
                         original.objective.steady_peak, objective.steady_peak
                     ),
-                    "startup_peak_improvement_pct": _improvement_percent(
+                    "启动峰值改善率(%)": _improvement_percent(
                         original.objective.startup_peak, objective.startup_peak
                     ),
-                    "sum_square_improvement_pct": _improvement_percent(
+                    "负载平方和改善率(%)": _improvement_percent(
                         original.objective.sum_square_load, objective.sum_square_load
                     ),
-                    "evaluation_count": stage.evaluation_count,
-                    "accepted_moves": stage.accepted_moves,
-                    "runtime_seconds": f"{stage.elapsed_seconds:.9f}",
+                    "评价次数": stage.evaluation_count,
+                    "接受移动次数": stage.accepted_moves,
+                    "运行时间(s)": f"{stage.elapsed_seconds:.9f}",
                 }
             )
 
@@ -159,17 +172,17 @@ def write_comparison_csv_reports(
     physical = network.weight_mode is WeightMode.FRAME_TIME_US
     with slots_path.open("w", encoding="utf-8-sig", newline="") as stream:
         fieldnames = [
-            "stage",
-            "window",
-            "slot_index",
-            "start_us",
-            "end_us",
-            "weight_mode",
-            "weighted_load",
-            "weighted_load_us",
-            "load_ratio",
-            "release_count",
-            "threshold_violation",
+            "阶段",
+            "窗口",
+            "时隙索引",
+            "开始时间(μs)",
+            "结束时间(μs)",
+            "权重模式",
+            "加权负载",
+            "加权负载(μs)",
+            "负载比例",
+            "释放帧数",
+            "是否超过阈值",
         ]
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
@@ -192,19 +205,19 @@ def write_comparison_csv_reports(
                     start_us = window.start_us + index * window.slot_width_us
                     writer.writerow(
                         {
-                            "stage": stage.name,
-                            "window": window_name,
-                            "slot_index": index,
-                            "start_us": start_us,
-                            "end_us": start_us + window.slot_width_us,
-                            "weight_mode": network.weight_mode.value,
-                            "weighted_load": load,
-                            "weighted_load_us": load if physical else "",
-                            "load_ratio": (
+                            "阶段": stage.name,
+                            "窗口": "启动" if window_name == "startup" else "稳态",
+                            "时隙索引": index,
+                            "开始时间(μs)": start_us,
+                            "结束时间(μs)": start_us + window.slot_width_us,
+                            "权重模式": network.weight_mode.value,
+                            "加权负载": load,
+                            "加权负载(μs)": load if physical else "",
+                            "负载比例": (
                                 f"{load / window.slot_width_us:.6f}" if physical else ""
                             ),
-                            "release_count": count,
-                            "threshold_violation": (
+                            "释放帧数": count,
+                            "是否超过阈值": (
                                 load
                                 > slot_load_threshold_us(window.slot_width_us, load_limit)
                                 if physical
@@ -232,6 +245,9 @@ def build_comparison_summary(
         "network": {
             "message_count": len(network.messages),
             "channel": network.channel.name,
+            "nominal_bitrate_bit_s": network.channel.nominal_bitrate,
+            "data_bitrate_bit_s": network.channel.data_bitrate,
+            "brs": network.channel.brs,
             "hyperperiod_us": network.hyperperiod_us,
             "slot_width_us": network.steady_window.slot_width_us,
             "startup_window": {
@@ -279,7 +295,9 @@ def build_comparison_summary(
         ],
         "weight_mode": network.weight_mode.value,
         "weight_accuracy": (
-            "conservative_iso_can_fd_estimate" if physical else "explicit_approximation"
+            "conservative_iso_can_fd_estimate_with_intermission"
+            if physical
+            else "explicit_approximation"
         ),
         "objective_load_unit": "microseconds" if physical else "payload-byte weight",
         "average_load": network.average_load if physical else None,
