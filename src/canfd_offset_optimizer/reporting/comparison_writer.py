@@ -18,7 +18,11 @@ from ..models import (
 from ..optimization.objective import slot_load_threshold_us
 from .filenames import infer_report_prefix, prefixed_report_name
 from .restart_writer import configuration_hash
-from .summary_writer import combined_input_hash, sha256_file
+from .summary_writer import (
+    combined_input_hash,
+    sha256_file,
+    triple_search_audit_dict,
+)
 
 
 def _objective_dict(value: ObjectiveValue) -> dict[str, int]:
@@ -277,6 +281,10 @@ def build_comparison_summary(
             "peak_candidate_pool_size": (
                 config.optimization.peak_candidate_pool_size
             ),
+            "conflict_triple_enabled": config.optimization.conflict_triple_enabled,
+            "triple_candidate_cap": config.optimization.triple_candidate_cap,
+            "triple_hot_slot_count": config.optimization.triple_hot_slot_count,
+            "triple_max_rounds": config.optimization.triple_max_rounds,
         },
         "network": {
             "message_count": len(network.messages),
@@ -430,6 +438,9 @@ def build_comparison_summary(
                 "runtime_seconds": record.elapsed_seconds,
                 "evaluation_count": record.evaluation_count,
                 "accepted_moves": record.accepted_moves,
+                "triple_search": triple_search_audit_dict(
+                    record.triple_search_audit
+                ),
             }
             for record in result.balanced_candidate_searches
         ],

@@ -137,9 +137,25 @@ class OptimizationConfig:
     pair_neighbor_steps: tuple[int, ...] = (1, 2, 3)
     variance_offset_cap: int = 3
     peak_candidate_pool_size: int = 1
+    conflict_triple_enabled: bool = False
+    triple_candidate_cap: int = 6
+    triple_hot_slot_count: int = 3
+    triple_max_rounds: int = 3
     random_restarts: InitVar[int | None] = None
 
     def __post_init__(self, random_restarts: int | None) -> None:
+        if not isinstance(self.conflict_triple_enabled, bool):
+            raise ConfigurationError(
+                "optimization.conflict_triple_enabled must be boolean"
+            )
+        if (
+            isinstance(self.triple_candidate_cap, bool)
+            or not isinstance(self.triple_candidate_cap, int)
+            or not 6 <= self.triple_candidate_cap <= 8
+        ):
+            raise ConfigurationError(
+                "optimization.triple_candidate_cap must be an integer in [6, 8]"
+            )
         if random_restarts is not None:
             if isinstance(random_restarts, bool) or not isinstance(
                 random_restarts, int
@@ -177,6 +193,9 @@ class OptimizationConfig:
             self.hot_slot_count,
             self.conflict_candidate_cap,
             self.variance_offset_cap,
+            self.triple_candidate_cap,
+            self.triple_hot_slot_count,
+            self.triple_max_rounds,
         )
         if any(
             isinstance(value, bool) or not isinstance(value, int)
@@ -190,6 +209,8 @@ class OptimizationConfig:
             self.hot_slot_count,
             self.conflict_candidate_cap,
             self.variance_offset_cap,
+            self.triple_hot_slot_count,
+            self.triple_max_rounds,
         )
         if any(value <= 0 for value in positive):
             raise ConfigurationError("slot/cap/step/count values must be positive")
@@ -365,6 +386,10 @@ def load_project_config(path: Path) -> ProjectConfig:
             "pair_neighbor_steps",
             "variance_offset_cap",
             "peak_candidate_pool_size",
+            "conflict_triple_enabled",
+            "triple_candidate_cap",
+            "triple_hot_slot_count",
+            "triple_max_rounds",
         },
         "optimization",
     )
@@ -478,6 +503,18 @@ def load_project_config(path: Path) -> ProjectConfig:
         variance_offset_cap=_required_int(optimization_raw, "variance_offset_cap", 3),
         peak_candidate_pool_size=_required_int(
             optimization_raw, "peak_candidate_pool_size", 1
+        ),
+        conflict_triple_enabled=optimization_raw.get(
+            "conflict_triple_enabled", False
+        ),
+        triple_candidate_cap=_required_int(
+            optimization_raw, "triple_candidate_cap", 6
+        ),
+        triple_hot_slot_count=_required_int(
+            optimization_raw, "triple_hot_slot_count", 3
+        ),
+        triple_max_rounds=_required_int(
+            optimization_raw, "triple_max_rounds", 3
         ),
     )
     mode_value = model_raw.get("weight_mode", WeightMode.FRAME_TIME_US.value)

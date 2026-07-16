@@ -12,10 +12,52 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..config import ProjectConfig
-from ..models import NetworkModel, ObjectiveValue, OptimizationResult, WeightMode
+from ..models import (
+    NetworkModel,
+    ObjectiveValue,
+    OptimizationResult,
+    TripleSearchAudit,
+    WeightMode,
+)
 from ..optimization.objective import slot_load_threshold_us
 from .filenames import infer_report_prefix
 from .restart_writer import configuration_hash
+
+
+def triple_search_audit_dict(audit: TripleSearchAudit | None) -> dict[str, object] | None:
+    """Serialize an optional conflict-directed 3-opt audit without re-evaluation."""
+    if audit is None:
+        return None
+    return {
+        "candidate_cap": audit.candidate_cap,
+        "hot_slot_count": audit.hot_slot_count,
+        "max_rounds": audit.max_rounds,
+        "checked_triplets": audit.checked_triplets,
+        "checked_offset_combinations": audit.checked_offset_combinations,
+        "accepted_moves": audit.accepted_moves,
+        "runtime_seconds": audit.elapsed_seconds,
+        "stop_reason": audit.stop_reason,
+        "rounds": [
+            {
+                "round_index": item.round_index,
+                "message_names": list(item.message_names),
+                "CAN_IDs": list(item.can_ids),
+                "old_offsets_us": list(item.old_offsets_us),
+                "new_offsets_us": list(item.new_offsets_us),
+                "objective_before": list(item.objective_before.as_tuple()),
+                "objective_after_move": list(item.objective_after_move.as_tuple()),
+                "objective_after_cleanup": list(
+                    item.objective_after_cleanup.as_tuple()
+                ),
+                "checked_triplets": item.checked_triplets,
+                "checked_offset_combinations": item.checked_offset_combinations,
+                "cleanup_evaluations": item.cleanup_evaluations,
+                "cleanup_accepted_moves": item.cleanup_accepted_moves,
+                "runtime_seconds": item.elapsed_seconds,
+            }
+            for item in audit.rounds
+        ],
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -100,6 +142,10 @@ def build_summary(
             "peak_candidate_pool_size": (
                 config.optimization.peak_candidate_pool_size
             ),
+            "conflict_triple_enabled": config.optimization.conflict_triple_enabled,
+            "triple_candidate_cap": config.optimization.triple_candidate_cap,
+            "triple_hot_slot_count": config.optimization.triple_hot_slot_count,
+            "triple_max_rounds": config.optimization.triple_max_rounds,
         },
         "yaml_overrides": {
             key: value
@@ -270,6 +316,9 @@ def build_summary(
                 "runtime_seconds": record.elapsed_seconds,
                 "evaluation_count": record.evaluation_count,
                 "accepted_moves": record.accepted_moves,
+                "triple_search": triple_search_audit_dict(
+                    record.triple_search_audit
+                ),
             }
             for record in result.balanced_candidate_searches
         ],

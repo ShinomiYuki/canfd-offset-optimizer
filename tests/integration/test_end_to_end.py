@@ -63,6 +63,7 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     assert [record["seed"] for record in summary["restarts"]] == [42]
     assert len(summary["selected_peak_candidates"]) == 1
     assert len(summary["balanced_candidate_searches"]) == 1
+    assert summary["balanced_candidate_searches"][0]["triple_search"] is None
     assert summary["algorithm"]["restart_stop_reason"] == "peak_candidate_pool_exhausted"
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_first_greedy"])
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_before"])
@@ -99,6 +100,39 @@ def test_candidate_pool_diagnostic_cli_generates_audit_outputs(tmp_path: Path) -
     assert (output / "results" / "candidate_pool_comparison.csv").read_bytes().startswith(
         b"\xef\xbb\xbf"
     )
+
+
+def test_triple_ablation_cli_generates_four_group_report(tmp_path: Path) -> None:
+    output = tmp_path / "triple_ablation"
+    assert main(
+        [
+            "analyze-triple-ablation",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--channel",
+            "CAN1",
+            "--restarts",
+            "3",
+        ]
+    ) == 0
+    summary = json.loads(
+        (output / "results" / "triple_ablation_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [variant["group"] for variant in summary["variants"]] == [
+        "A",
+        "B",
+        "C",
+        "D",
+    ]
+    assert (output / "results" / "triple_ablation_audit.jsonl").is_file()
 
 
 def test_cli_returns_nonzero_for_missing_input(

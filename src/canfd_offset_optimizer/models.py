@@ -454,6 +454,87 @@ class PeakCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class TripleMoveAudit:
+    """! @brief 一轮冲突导向三报文联合重定位的完整审计记录。"""
+
+    round_index: int
+    message_names: tuple[str, str, str]
+    can_ids: tuple[int, int, int]
+    old_offsets_us: tuple[int, int, int]
+    new_offsets_us: tuple[int, int, int]
+    objective_before: ObjectiveValue
+    objective_after_move: ObjectiveValue
+    objective_after_cleanup: ObjectiveValue
+    checked_triplets: int
+    checked_offset_combinations: int
+    cleanup_evaluations: int
+    cleanup_accepted_moves: int
+    elapsed_seconds: float = field(compare=False)
+
+    def __post_init__(self) -> None:
+        if self.round_index < 0 or len(set(self.message_names)) != 3:
+            raise ValueError("triple move requires one valid round and three messages")
+        if any(offset < 0 for offset in self.old_offsets_us + self.new_offsets_us):
+            raise ValueError("triple move Offsets must be non-negative")
+        if any(
+            new == old
+            for old, new in zip(
+                self.old_offsets_us, self.new_offsets_us, strict=True
+            )
+        ):
+            raise ValueError("triple move must relocate all three messages")
+        if not self.objective_after_move < self.objective_before:
+            raise ValueError("triple move must strictly improve the active objective")
+        if self.objective_after_cleanup > self.objective_after_move:
+            raise ValueError("post-triple cleanup must not worsen the objective")
+        if (
+            self.checked_triplets <= 0
+            or self.checked_offset_combinations <= 0
+            or self.cleanup_evaluations < 0
+            or self.cleanup_accepted_moves < 0
+            or not isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+        ):
+            raise ValueError("triple move audit statistics are invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class TripleSearchAudit:
+    """! @brief 一次三报文搜索的终止原因、工作量与已接受移动。"""
+
+    candidate_cap: int
+    max_rounds: int
+    hot_slot_count: int
+    checked_triplets: int
+    checked_offset_combinations: int
+    accepted_moves: int
+    elapsed_seconds: float = field(compare=False)
+    stop_reason: str
+    rounds: tuple[TripleMoveAudit, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 6 <= self.candidate_cap <= 8:
+            raise ValueError("triple candidate cap must be in [6, 8]")
+        if self.max_rounds <= 0 or self.hot_slot_count <= 0:
+            raise ValueError("triple search round/slot limits must be positive")
+        if (
+            self.checked_triplets < 0
+            or self.checked_offset_combinations < 0
+            or self.accepted_moves != len(self.rounds)
+            or not isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+            or not self.stop_reason.strip()
+        ):
+            raise ValueError("triple search audit summary is invalid")
+        if self.checked_triplets < sum(item.checked_triplets for item in self.rounds):
+            raise ValueError("triple search triplet total is inconsistent")
+        if self.checked_offset_combinations < sum(
+            item.checked_offset_combinations for item in self.rounds
+        ):
+            raise ValueError("triple search Offset total is inconsistent")
+
+
+@dataclass(frozen=True, slots=True)
 class BalancedCandidateSearchRecord:
     """! @brief 从一个 Peak 候选执行一次现有 Balanced 局部搜索的审计记录。"""
 
@@ -470,6 +551,7 @@ class BalancedCandidateSearchRecord:
     elapsed_seconds: float = field(compare=False)
     evaluation_count: int
     accepted_moves: int
+    triple_search_audit: TripleSearchAudit | None = None
 
     def __post_init__(self) -> None:
         if self.pool_index < 0 or self.source_attempt_index < -1:

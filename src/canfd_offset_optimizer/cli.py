@@ -23,6 +23,7 @@ from .diagnostics.candidate_pool_study import (
 )
 from .diagnostics.restart_study import DEFAULT_CHECKPOINTS, run_restart_study
 from .diagnostics.tolerance_study import DEFAULT_TOLERANCES, run_tolerance_scan
+from .diagnostics.triple_ablation import run_triple_ablation
 from .exceptions import CanfdOptimizerError
 from .models import (
     AlgorithmComparisonResult,
@@ -86,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
         "analyze-candidate-pools",
         help="compare diverse Peak candidate-pool sizes for Balanced search",
     )
+    analyze_triple_ablation = subparsers.add_parser(
+        "analyze-triple-ablation",
+        help="run the A/B/C/D conflict-directed 3-opt ablation",
+    )
     all_commands = (
         optimize,
         compare,
@@ -94,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
         scan_tolerances,
         verify_cpsat,
         analyze_candidate_pools,
+        analyze_triple_ablation,
     )
     for command in all_commands:
         command.add_argument("--dbc", type=Path, required=True)
@@ -429,6 +435,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "scan-tolerances",
             "verify-cpsat",
             "analyze-candidate-pools",
+            "analyze-triple-ablation",
         }:
             diagnostic_loaded = load_project(
                 args.dbc,
@@ -438,7 +445,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 channel_override=args.channel,
                 objective_mode_override=(
                     ObjectiveMode.BALANCED
-                    if args.command == "analyze-candidate-pools"
+                    if args.command
+                    in {"analyze-candidate-pools", "analyze-triple-ablation"}
                     else ObjectiveMode.PEAK
                 ),
             )
@@ -515,7 +523,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     time_limit_seconds=args.time_limit_seconds,
                     solver_seed=args.solver_seed,
                 )
-            else:
+            elif args.command == "analyze-candidate-pools":
                 try:
                     pool_sizes = tuple(
                         int(value.strip())
@@ -533,6 +541,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     seed=args.seed,
                     total_attempts=diagnostic_attempts,
                     pool_sizes=pool_sizes,
+                )
+            else:
+                run_triple_ablation(
+                    diagnostic_loaded,
+                    output,
+                    report_prefix,
+                    seed=args.seed,
+                    total_attempts=diagnostic_attempts,
                 )
             logger.info("Diagnostic reports written under %s", output)
             return 0

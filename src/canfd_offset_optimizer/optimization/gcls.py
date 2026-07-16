@@ -42,6 +42,7 @@ from .local_search import (
     relocate_single_messages,
 )
 from .objective import ObjectivePolicy, score_state, slot_load_threshold_us
+from .triple_search import conflict_triple_search
 
 
 def _restart_order(messages: tuple[CanMessage, ...], seed: int) -> tuple[CanMessage, ...]:
@@ -509,7 +510,7 @@ def _run_balanced_candidate_pool(
     candidates: tuple[PeakCandidate, ...],
     restart_observer: Callable[[RestartRecord], None] | None,
 ) -> OptimizationResult:
-    """Run exactly one unchanged Balanced local search from each Peak candidate."""
+    """Run one configured Balanced local search from each selected Peak candidate."""
     started = perf_counter()
     if policy.mode is not ObjectiveMode.BALANCED or policy.peak_budget_us is None:
         raise ValueError("candidate-pool search requires a balanced policy")
@@ -553,6 +554,25 @@ def _run_balanced_candidate_pool(
             config.offset_step_us,
             config.variance_offset_cap,
         )
+        triple_audit = None
+        if config.conflict_triple_enabled:
+            triple_stats, triple_audit = conflict_triple_search(
+                state,
+                policy,
+                (
+                    reference.objective.violation_count,
+                    reference.objective.violation_excess,
+                ),
+                candidate_cap=config.triple_candidate_cap,
+                hot_slot_count=config.triple_hot_slot_count,
+                max_rounds=config.triple_max_rounds,
+                pair_hot_slot_count=config.hot_slot_count,
+                pair_candidate_cap=config.conflict_candidate_cap,
+                pair_neighbor_steps=config.pair_neighbor_steps,
+                offset_step_us=config.offset_step_us,
+                variance_offset_cap=config.variance_offset_cap,
+            )
+            stats += triple_stats
         total += stats
         objective_after = score_state(state, policy)
         result_assignments = _snapshot_assignments(state)
@@ -571,6 +591,7 @@ def _run_balanced_candidate_pool(
             elapsed_seconds=elapsed,
             evaluation_count=stats.evaluations,
             accepted_moves=stats.accepted_moves,
+            triple_search_audit=triple_audit,
         )
         search_records.append(search_record)
         restart_record = RestartRecord(

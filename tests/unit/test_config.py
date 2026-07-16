@@ -154,3 +154,25 @@ def test_peak_candidate_pool_size_accepts_supported_values(value: int) -> None:
         OptimizationConfig(peak_candidate_pool_size=value).peak_candidate_pool_size
         == value
     )
+
+
+@pytest.mark.parametrize("value", [5, 9, True])
+def test_triple_candidate_cap_is_limited_to_six_through_eight(value: int) -> None:
+    with pytest.raises(ConfigurationError, match="triple_candidate_cap"):
+        OptimizationConfig(triple_candidate_cap=value)
+
+
+@pytest.mark.parametrize("value", [6, 7, 8])
+def test_triple_candidate_cap_accepts_bounded_values(value: int) -> None:
+    assert OptimizationConfig(triple_candidate_cap=value).triple_candidate_cap == value
+
+
+def test_conflict_triple_search_is_disabled_by_default(tmp_path: Path) -> None:
+    config = OptimizationConfig()
+    assert config.conflict_triple_enabled is False
+    path = tmp_path / "invalid_triple.yaml"
+    path.write_text(
+        "optimization:\n  conflict_triple_enabled: 1\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError, match="conflict_triple_enabled"):
+        load_project_config(path)

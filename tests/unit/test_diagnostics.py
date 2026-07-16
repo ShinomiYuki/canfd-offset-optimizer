@@ -19,6 +19,7 @@ from canfd_offset_optimizer.diagnostics.restart_study import (
     run_restart_study,
 )
 from canfd_offset_optimizer.diagnostics.tolerance_study import run_tolerance_scan
+from canfd_offset_optimizer.diagnostics.triple_ablation import run_triple_ablation
 from canfd_offset_optimizer.config import (
     ModelConfig,
     OptimizationConfig,
@@ -97,6 +98,34 @@ def test_candidate_pool_study_writes_auditable_grid(tmp_path: Path) -> None:
         b"\xef\xbb\xbf"
     )
     assert (tmp_path / "results" / "candidate_pool_summary.json").is_file()
+
+
+def test_triple_ablation_writes_four_groups_and_audit(tmp_path: Path) -> None:
+    summary = run_triple_ablation(
+        _loaded(), tmp_path, "TEST", seed=5, total_attempts=4
+    )
+    variants = cast(list[dict[str, object]], summary["variants"])
+    assert [variant["group"] for variant in variants] == ["A", "B", "C", "D"]
+    assert [variant["pool_size"] for variant in variants] == [1, 4, 1, 4]
+    assert [variant["triple_enabled"] for variant in variants] == [
+        False,
+        False,
+        True,
+        True,
+    ]
+    audit = [
+        json.loads(line)
+        for line in (
+            tmp_path / "results" / "triple_ablation_audit.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    assert audit
+    assert all(row["triple_search"] is None for row in audit if not row["triple_enabled"])
+    assert all(row["triple_search"] is not None for row in audit if row["triple_enabled"])
+    assert (tmp_path / "results" / "triple_ablation.csv").read_bytes().startswith(
+        b"\xef\xbb\xbf"
+    )
+    assert (tmp_path / "results" / "triple_ablation_summary.json").is_file()
 
 
 def test_restart_saturation_and_balanced_escalation_rules() -> None:

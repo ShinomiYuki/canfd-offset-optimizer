@@ -216,6 +216,51 @@ def test_pool_size_one_preserves_legacy_balanced_golden_result() -> None:
     assert pooled.assignments == legacy.assignments
     assert pooled.steady_slot_loads == legacy.steady_slot_loads
     assert pooled.startup_slot_loads == legacy.startup_slot_loads
+    assert pooled.balanced_candidate_searches[0].triple_search_audit is None
+
+
+def test_balanced_runs_triple_search_only_when_explicitly_enabled() -> None:
+    messages, slot_map = _fixture()
+    base = OptimizationConfig(restart_policy=RestartPolicy.fixed(2))
+    peak = run_gcls(
+        messages,
+        slot_map,
+        base,
+        objective_config=ObjectiveConfig(ObjectiveMode.PEAK),
+    )
+    peak_with_triple_flag = run_gcls(
+        messages,
+        slot_map,
+        replace(base, conflict_triple_enabled=True),
+        objective_config=ObjectiveConfig(ObjectiveMode.PEAK),
+    )
+    assert peak_with_triple_flag.assignments == peak.assignments
+    assert peak_with_triple_flag.objective == peak.objective
+    assert peak_with_triple_flag.restart_records == peak.restart_records
+    assert peak_with_triple_flag.evaluation_count == peak.evaluation_count
+    disabled = run_gcls(
+        messages,
+        slot_map,
+        base,
+        objective_config=ObjectiveConfig(ObjectiveMode.BALANCED),
+        peak_reference_result=peak,
+    )
+    enabled = run_gcls(
+        messages,
+        slot_map,
+        replace(base, conflict_triple_enabled=True),
+        objective_config=ObjectiveConfig(ObjectiveMode.BALANCED),
+        peak_reference_result=peak,
+    )
+    assert all(
+        item.triple_search_audit is None
+        for item in disabled.balanced_candidate_searches
+    )
+    assert all(
+        item.triple_search_audit is not None
+        for item in enabled.balanced_candidate_searches
+    )
+    assert enabled.objective <= disabled.objective
 
 
 def test_farthest_first_pool_is_guarded_deterministic_and_phase_diverse() -> None:

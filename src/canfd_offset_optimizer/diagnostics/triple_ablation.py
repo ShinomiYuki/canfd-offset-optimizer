@@ -1,4 +1,4 @@
-"""Peak-candidate-pool ablation for multi-start Balanced search."""
+"""Four-way ablation for Peak-pool size and conflict-directed 3-opt."""
 
 from __future__ import annotations
 
@@ -12,28 +12,31 @@ from ..models import ObjectiveMode
 from ..optimization.gcls import run_gcls
 from ..parsers.project_loader import LoadedProject
 from ..reporting.restart_writer import configuration_hash
-from ..reporting.summary_writer import combined_input_hash
+from ..reporting.summary_writer import (
+    combined_input_hash,
+    triple_search_audit_dict,
+)
 
 
-DEFAULT_POOL_SIZES = (1, 4, 8, 16, 32)
+ABLATION_VARIANTS = (
+    ("A", 1, False),
+    ("B", 4, False),
+    ("C", 1, True),
+    ("D", 4, True),
+)
 
 
-def run_candidate_pool_study(
+def run_triple_ablation(
     loaded: LoadedProject,
     output: Path,
     network_prefix: str,
     *,
     seed: int = 0,
     total_attempts: int | None = None,
-    pool_sizes: tuple[int, ...] = DEFAULT_POOL_SIZES,
 ) -> dict[str, object]:
-    """Run one shared Peak reference and a fixed Balanced candidate-pool grid."""
+    """Run A/B/C/D against one identical strict Peak reference."""
     if loaded.network.weight_mode.value != "frame_time_us":
-        raise ValueError("candidate-pool studies require frame_time_us")
-    if tuple(sorted(set(pool_sizes))) != pool_sizes or any(
-        size not in DEFAULT_POOL_SIZES for size in pool_sizes
-    ):
-        raise ValueError("pool sizes must be unique, increasing, and drawn from 1,4,8,16,32")
+        raise ValueError("3-opt ablation requires frame_time_us")
     if total_attempts is not None and total_attempts <= 0:
         raise ValueError("total_attempts must be positive")
     restart_policy = (
@@ -61,10 +64,11 @@ def run_candidate_pool_study(
     runs: list[dict[str, object]] = []
     audit_rows: list[dict[str, object]] = []
     baseline_qss: int | None = None
-    for pool_size in pool_sizes:
+    for label, pool_size, enabled in ABLATION_VARIANTS:
         optimization = replace(
             base_optimization,
             peak_candidate_pool_size=pool_size,
+            conflict_triple_enabled=enabled,
         )
         result = run_gcls(
             loaded.network.messages,
@@ -78,94 +82,84 @@ def run_candidate_pool_study(
         )
         if baseline_qss is None:
             baseline_qss = result.objective.sum_square_load
-        qss_improvement = (
-            (baseline_qss - result.objective.sum_square_load) / baseline_qss
-            if baseline_qss
-            else 0.0
-        )
+        triple_audits = [
+            record.triple_search_audit
+            for record in result.balanced_candidate_searches
+            if record.triple_search_audit is not None
+        ]
         rows.append(
             {
-                "候选池请求大小": pool_size,
+                "消融组": label,
+                "Peak候选池大小": pool_size,
+                "3-opt启用": enabled,
                 "实际候选数": len(result.selected_peak_candidates),
-                "Peak候选归档数": len(peak.peak_candidate_archive),
                 "峰值预算(μs)": result.peak_budget_us,
                 "Nvio": result.objective.violation_count,
                 "Vvio": result.objective.violation_excess,
                 "Zss(μs)": result.objective.steady_peak,
                 "Qss(μs²)": result.objective.sum_square_load,
-                "相对pool_size_1_Qss改善率": qss_improvement,
+                "相对A组Qss改善率": (
+                    (baseline_qss - result.objective.sum_square_load) / baseline_qss
+                    if baseline_qss
+                    else 0.0
+                ),
                 "Zst(μs)": result.objective.startup_peak,
                 "Qst(μs²)": result.objective.startup_sum_square_load,
                 "Kmax": result.objective.max_release_count,
-                "局部搜索评价次数": sum(
-                    record.evaluation_count
-                    for record in result.balanced_candidate_searches
+                "检查三元组数": sum(item.checked_triplets for item in triple_audits),
+                "检查Offset组合数": sum(
+                    item.checked_offset_combinations for item in triple_audits
                 ),
-                "接受移动次数": sum(
-                    record.accepted_moves
-                    for record in result.balanced_candidate_searches
+                "接受3-opt次数": sum(item.accepted_moves for item in triple_audits),
+                "3-opt耗时(s)": sum(item.elapsed_seconds for item in triple_audits),
+                "Balanced总耗时(s)": (
+                    result.elapsed_seconds - result.peak_reference_elapsed_seconds
                 ),
-                "Balanced运行时间(s)": result.elapsed_seconds
-                - result.peak_reference_elapsed_seconds,
                 "最终assignment_hash": result.assignment_hash,
             }
         )
-        selected_payload: list[dict[str, object]] = []
+        candidate_runs: list[dict[str, object]] = []
         for candidate, search in zip(
             result.selected_peak_candidates,
             result.balanced_candidate_searches,
             strict=True,
         ):
-            candidate_payload: dict[str, object] = {
+            candidate_run: dict[str, object] = {
                 "pool_index": search.pool_index,
-                "peak_budget_us": result.peak_budget_us,
-                "peak_guardrail": [
-                    peak.objective.violation_count,
-                    peak.objective.violation_excess,
-                ],
                 "source_peak_attempt": candidate.source_attempt_index,
                 "source_seed": candidate.source_seed,
                 "candidate_assignment_hash": candidate.assignment_hash,
                 "candidate_steady_phase_hash": candidate.steady_phase_hash,
-                "peak_objective": list(candidate.objective.as_tuple()),
-                "balanced_objective_before": list(search.objective_before.as_tuple()),
-                "balanced_objective_after": list(search.objective_after.as_tuple()),
+                "objective_before": list(search.objective_before.as_tuple()),
+                "objective_after": list(search.objective_after.as_tuple()),
                 "strictly_improved": search.strictly_improved,
-                "runtime_seconds": search.elapsed_seconds,
-                "evaluation_count": search.evaluation_count,
-                "accepted_moves": search.accepted_moves,
                 "result_assignment_hash": search.result_assignment_hash,
-                "candidate_assignments": [
-                    {
-                        "message_name": item.message_name,
-                        "CAN_ID": item.can_id,
-                        "Offset_us": item.offset_us,
-                        "definition_index": item.definition_index,
-                    }
-                    for item in candidate.assignments
-                ],
-                "result_assignments": [
-                    {
-                        "message_name": item.message_name,
-                        "CAN_ID": item.can_id,
-                        "Offset_us": item.offset_us,
-                        "definition_index": item.definition_index,
-                    }
-                    for item in search.result_assignments
-                ],
+                "runtime_seconds": search.elapsed_seconds,
+                "triple_search": triple_search_audit_dict(
+                    search.triple_search_audit
+                ),
             }
-            selected_payload.append(candidate_payload)
+            candidate_runs.append(candidate_run)
             audit_rows.append(
                 {
                     "schema_version": 1,
                     "network": network_prefix,
+                    "ablation_group": label,
                     "pool_size": pool_size,
-                    **candidate_payload,
+                    "triple_enabled": enabled,
+                    "peak_budget_us": result.peak_budget_us,
+                    "peak_guardrail": [
+                        peak.objective.violation_count,
+                        peak.objective.violation_excess,
+                    ],
+                    **candidate_run,
                 }
             )
         runs.append(
             {
-                "requested_pool_size": pool_size,
+                "group": label,
+                "pool_size": pool_size,
+                "triple_enabled": enabled,
                 "actual_pool_size": len(result.selected_peak_candidates),
                 "objective": list(result.objective.as_tuple()),
                 "assignment_hash": result.assignment_hash,
@@ -177,18 +171,19 @@ def run_candidate_pool_study(
                     }
                     for item in result.assignments
                 ],
-                "selected_candidates": selected_payload,
+                "candidate_searches": candidate_runs,
             }
         )
 
     results_dir = output / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = results_dir / "candidate_pool_comparison.csv"
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as stream:
+    with (results_dir / "triple_ablation.csv").open(
+        "w", encoding="utf-8-sig", newline=""
+    ) as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    with (results_dir / "candidate_pool_audit.jsonl").open(
+    with (results_dir / "triple_ablation_audit.jsonl").open(
         "w", encoding="utf-8", newline="\n"
     ) as stream:
         for row in audit_rows:
@@ -207,14 +202,13 @@ def run_candidate_pool_study(
             "objective": list(peak.objective.as_tuple()),
             "assignment_hash": peak.assignment_hash,
         },
-        "pool_sizes": list(pool_sizes),
-        "runs": runs,
+        "variants": runs,
         "method_boundary": (
-            "each selected Peak candidate receives exactly one unchanged Balanced "
-            "1-opt plus Pair Search; no per-candidate random restart is added"
+            "only conflict-directed three-message relocation is ablated; objective, "
+            "Peak GCLS, 1-opt, Pair Search, and Peak-pool selection are unchanged"
         ),
     }
-    (results_dir / "candidate_pool_summary.json").write_text(
+    (results_dir / "triple_ablation_summary.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return payload
