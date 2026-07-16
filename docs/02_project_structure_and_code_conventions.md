@@ -31,9 +31,7 @@ canfd-offset-optimizer/
 │   ├── 01_research_and_design.md
 │   ├── 02_project_structure_and_code_conventions.md
 │   └── 03_implementation_plan.md
-├── scripts/
-│   ├── create_project.ps1
-│   └── create_project.cmd
+├── clean_pycache.cmd
 ├── src/
 │   └── canfd_offset_optimizer/
 │       ├── __init__.py
@@ -109,9 +107,9 @@ canfd-offset-optimizer/
 
 Codex 编码时必须优先读取的三份设计文档。代码与文档冲突时，不得自行猜测，应在提交说明中列出冲突。
 
-### `scripts/`
+### `clean_pycache.cmd`
 
-只放项目维护脚本，不放核心业务逻辑。
+仅递归删除仓库中的 `__pycache__` 目录，不执行项目创建、依赖安装或核心业务逻辑。
 
 ### `src/`
 

@@ -1,0 +1,40 @@
+VERSION "minimal sanitized CAN FD fixture"
+
+NS_ :
+    BA_DEF_
+    BA_
+    BA_DEF_DEF_
+
+BS_:
+
+BU_: VCU
+
+BO_ 913 Msg391: 8 VCU
+ SG_ Value : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 2147484768 Msg460Ext: 16 VCU
+ SG_ Value2 : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 350 EventOnly: 8 VCU
+ SG_ EventValue : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 400 RxCyclic: 8 Vector__XXX
+ SG_ RxValue : 0|8@1+ (1,0) [0|255] "" VCU
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 10000;
+BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;
+BA_DEF_ BO_ "GenMsgSendType" STRING;
+BA_DEF_ BO_ "VFrameFormat" STRING;
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_DEF_DEF_ "GenMsgStartDelayTime" 0;
+BA_DEF_DEF_ "GenMsgSendType" "Event";
+BA_DEF_DEF_ "VFrameFormat" "StandardCAN_FD";
+BA_ "GenMsgCycleTime" BO_ 913 20;
+BA_ "GenMsgStartDelayTime" BO_ 913 15;
+BA_ "GenMsgSendType" BO_ 913 "Cyclic";
+BA_ "VFrameFormat" BO_ 913 "StandardCAN_FD";
+BA_ "GenMsgCycleTime" BO_ 2147484768 100;
+BA_ "GenMsgSendType" BO_ 2147484768 "Cyclic";
+BA_ "VFrameFormat" BO_ 2147484768 "ExtendedCAN_FD";
+BA_ "GenMsgCycleTime" BO_ 400 50;
+BA_ "GenMsgSendType" BO_ 400 "Cyclic";
