@@ -136,6 +136,7 @@ class OptimizationConfig:
     conflict_candidate_cap: int = 6
     pair_neighbor_steps: tuple[int, ...] = (1, 2, 3)
     variance_offset_cap: int = 3
+    peak_candidate_pool_size: int = 1
     random_restarts: InitVar[int | None] = None
 
     def __post_init__(self, random_restarts: int | None) -> None:
@@ -158,6 +159,14 @@ class OptimizationConfig:
                     source_kind="legacy",
                     legacy_additional_restarts=random_restarts,
                 ),
+            )
+        if (
+            isinstance(self.peak_candidate_pool_size, bool)
+            or not isinstance(self.peak_candidate_pool_size, int)
+            or self.peak_candidate_pool_size not in {1, 4, 8, 16, 32}
+        ):
+            raise ConfigurationError(
+                "optimization.peak_candidate_pool_size must be one of 1, 4, 8, 16, 32"
             )
         integer_fields = (
             self.slot_width_us,
@@ -355,6 +364,7 @@ def load_project_config(path: Path) -> ProjectConfig:
             "conflict_candidate_cap",
             "pair_neighbor_steps",
             "variance_offset_cap",
+            "peak_candidate_pool_size",
         },
         "optimization",
     )
@@ -466,6 +476,9 @@ def load_project_config(path: Path) -> ProjectConfig:
         ),
         pair_neighbor_steps=tuple(steps),
         variance_offset_cap=_required_int(optimization_raw, "variance_offset_cap", 3),
+        peak_candidate_pool_size=_required_int(
+            optimization_raw, "peak_candidate_pool_size", 1
+        ),
     )
     mode_value = model_raw.get("weight_mode", WeightMode.FRAME_TIME_US.value)
     try:

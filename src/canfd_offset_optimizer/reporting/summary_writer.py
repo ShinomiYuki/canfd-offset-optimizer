@@ -97,6 +97,9 @@ def build_summary(
             "peak_tolerance_type": config.objective.peak_tolerance.type.value,
             "peak_tolerance_value": config.objective.peak_tolerance.value,
             "variance_offset_cap": config.optimization.variance_offset_cap,
+            "peak_candidate_pool_size": (
+                config.optimization.peak_candidate_pool_size
+            ),
         },
         "yaml_overrides": {
             key: value
@@ -152,6 +155,8 @@ def build_summary(
                 result.peak_reference_elapsed_seconds
             ),
             "balanced_fallback_reason": result.balanced_fallback_reason,
+            "peak_candidate_archive_size": len(result.peak_candidate_archive),
+            "selected_peak_candidate_count": len(result.selected_peak_candidates),
         },
         "average_load": network.average_load if physical_time_weight else None,
         "average_weight_rate": network.average_load,
@@ -209,6 +214,64 @@ def build_summary(
         "peak_reference_restarts": [
             {"seed": record.seed, "objective": record.objective.as_tuple()}
             for record in result.peak_reference_restart_records
+        ],
+        "peak_candidate_archive": [
+            {
+                "source_attempt_index": candidate.source_attempt_index,
+                "source_seed": candidate.source_seed,
+                "peak_objective": candidate.objective.as_tuple(),
+                "assignment_hash": candidate.assignment_hash,
+                "steady_phase_hash": candidate.steady_phase_hash,
+                "steady_phases": list(candidate.steady_phases),
+                "assignments": [
+                    {
+                        "message_name": item.message_name,
+                        "can_id": item.can_id,
+                        "offset_us": item.offset_us,
+                        "definition_index": item.definition_index,
+                    }
+                    for item in candidate.assignments
+                ],
+            }
+            for candidate in result.peak_candidate_archive
+        ],
+        "selected_peak_candidates": [
+            {
+                "pool_index": index,
+                "source_attempt_index": candidate.source_attempt_index,
+                "source_seed": candidate.source_seed,
+                "peak_objective": candidate.objective.as_tuple(),
+                "assignment_hash": candidate.assignment_hash,
+                "steady_phase_hash": candidate.steady_phase_hash,
+                "steady_phases": list(candidate.steady_phases),
+                "assignments": [
+                    {
+                        "message_name": item.message_name,
+                        "can_id": item.can_id,
+                        "offset_us": item.offset_us,
+                        "definition_index": item.definition_index,
+                    }
+                    for item in candidate.assignments
+                ],
+            }
+            for index, candidate in enumerate(result.selected_peak_candidates)
+        ],
+        "balanced_candidate_searches": [
+            {
+                "pool_index": record.pool_index,
+                "source_attempt_index": record.source_attempt_index,
+                "source_seed": record.source_seed,
+                "candidate_assignment_hash": record.candidate_assignment_hash,
+                "candidate_steady_phase_hash": record.candidate_steady_phase_hash,
+                "objective_before": record.objective_before.as_tuple(),
+                "objective_after": record.objective_after.as_tuple(),
+                "strictly_improved": record.strictly_improved,
+                "result_assignment_hash": record.result_assignment_hash,
+                "runtime_seconds": record.elapsed_seconds,
+                "evaluation_count": record.evaluation_count,
+                "accepted_moves": record.accepted_moves,
+            }
+            for record in result.balanced_candidate_searches
         ],
         "runtime_seconds": result.elapsed_seconds,
         "warnings": list(network.warnings),

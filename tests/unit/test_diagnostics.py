@@ -10,6 +10,9 @@ from typing import cast
 import pytest
 
 from canfd_offset_optimizer.diagnostics import cpsat_verify
+from canfd_offset_optimizer.diagnostics.candidate_pool_study import (
+    run_candidate_pool_study,
+)
 from canfd_offset_optimizer.diagnostics.restart_study import (
     _balanced_is_stable,
     _recommended_checkpoint,
@@ -70,6 +73,30 @@ def test_restart_study_writes_jsonl_summaries_and_plot(tmp_path: Path) -> None:
     assert (
         tmp_path / "plots" / "TEST_batch_objective_distribution.png"
     ).is_file()
+
+
+def test_candidate_pool_study_writes_auditable_grid(tmp_path: Path) -> None:
+    summary = run_candidate_pool_study(
+        _loaded(),
+        tmp_path,
+        "TEST",
+        seed=3,
+        total_attempts=4,
+        pool_sizes=(1, 4),
+    )
+    assert summary["pool_sizes"] == [1, 4]
+    runs = cast(list[dict[str, object]], summary["runs"])
+    assert [run["requested_pool_size"] for run in runs] == [1, 4]
+    audit_path = tmp_path / "results" / "candidate_pool_audit.jsonl"
+    audit = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+    assert audit
+    assert all(row["candidate_assignment_hash"] for row in audit)
+    assert all(row["candidate_steady_phase_hash"] for row in audit)
+    assert all("balanced_objective_before" in row for row in audit)
+    assert (tmp_path / "results" / "candidate_pool_comparison.csv").read_bytes().startswith(
+        b"\xef\xbb\xbf"
+    )
+    assert (tmp_path / "results" / "candidate_pool_summary.json").is_file()
 
 
 def test_restart_saturation_and_balanced_escalation_rules() -> None:

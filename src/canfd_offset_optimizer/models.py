@@ -399,6 +399,103 @@ def hash_offset_assignments(assignments: tuple[OffsetAssignment, ...]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def steady_phase_vector(
+    assignments: tuple[OffsetAssignment, ...],
+    messages: tuple[CanMessage, ...],
+) -> tuple[int, ...]:
+    """Return canonical ``Offset mod Cycle`` values for a complete assignment."""
+    cycle_by_key = {
+        (message.definition_index, message.can_id, message.name): message.cycle_time_us
+        for message in messages
+    }
+    ordered = sorted(
+        assignments,
+        key=lambda item: (item.definition_index, item.can_id, item.message_name),
+    )
+    try:
+        return tuple(
+            item.offset_us
+            % cycle_by_key[(item.definition_index, item.can_id, item.message_name)]
+            for item in ordered
+        )
+    except KeyError as exc:
+        raise ValueError("assignment does not match the message set") from exc
+
+
+def hash_steady_phases(phases: tuple[int, ...]) -> str:
+    """Return a stable SHA-256 over a canonical steady-phase vector."""
+    encoded = json.dumps(phases, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class PeakCandidate:
+    """! @brief 一个可审计的 Peak 局部最优 assignment 候选。"""
+
+    source_attempt_index: int
+    source_seed: int | None
+    objective: ObjectiveValue
+    assignments: tuple[OffsetAssignment, ...]
+    assignment_hash: str
+    steady_phases: tuple[int, ...]
+    steady_phase_hash: str
+
+    def __post_init__(self) -> None:
+        if self.source_attempt_index < -1:
+            raise ValueError("peak candidate source attempt must be -1 or non-negative")
+        if self.objective.mode is not ObjectiveMode.PEAK:
+            raise ValueError("peak candidate objective must use peak mode")
+        if not self.assignments or len(self.assignments) != len(self.steady_phases):
+            raise ValueError("peak candidate requires one steady phase per assignment")
+        if self.assignment_hash != hash_offset_assignments(self.assignments):
+            raise ValueError("peak candidate assignment hash mismatch")
+        if self.steady_phase_hash != hash_steady_phases(self.steady_phases):
+            raise ValueError("peak candidate steady-phase hash mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class BalancedCandidateSearchRecord:
+    """! @brief 从一个 Peak 候选执行一次现有 Balanced 局部搜索的审计记录。"""
+
+    pool_index: int
+    source_attempt_index: int
+    source_seed: int | None
+    candidate_assignment_hash: str
+    candidate_steady_phase_hash: str
+    objective_before: ObjectiveValue
+    objective_after: ObjectiveValue
+    result_assignments: tuple[OffsetAssignment, ...]
+    result_assignment_hash: str
+    strictly_improved: bool
+    elapsed_seconds: float = field(compare=False)
+    evaluation_count: int
+    accepted_moves: int
+
+    def __post_init__(self) -> None:
+        if self.pool_index < 0 or self.source_attempt_index < -1:
+            raise ValueError("balanced candidate search indices are invalid")
+        if (
+            self.objective_before.mode is not ObjectiveMode.BALANCED
+            or self.objective_after.mode is not ObjectiveMode.BALANCED
+            or self.objective_before.peak_budget_us
+            != self.objective_after.peak_budget_us
+        ):
+            raise ValueError("balanced candidate objectives must share one budget")
+        if self.strictly_improved != (self.objective_after < self.objective_before):
+            raise ValueError("balanced candidate improvement flag is inconsistent")
+        if self.result_assignment_hash != hash_offset_assignments(
+            self.result_assignments
+        ):
+            raise ValueError("balanced candidate result hash mismatch")
+        if (
+            not isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+            or self.evaluation_count < 0
+            or self.accepted_moves < 0
+        ):
+            raise ValueError("balanced candidate statistics must be non-negative")
+
+
 @dataclass(frozen=True, slots=True)
 class RestartExecutionSummary:
     """! @brief 一次 GCLS 运行实际采用的尝试数与停止原因。"""
@@ -446,6 +543,9 @@ class OptimizationResult:
     balanced_fallback_reason: str | None = None
     pre_restart_objective: ObjectiveValue | None = None
     pre_restart_assignments: tuple[OffsetAssignment, ...] = ()
+    peak_candidate_archive: tuple[PeakCandidate, ...] = ()
+    selected_peak_candidates: tuple[PeakCandidate, ...] = ()
+    balanced_candidate_searches: tuple[BalancedCandidateSearchRecord, ...] = ()
 
     def __post_init__(self) -> None:
         message_by_name = {message.name: message for message in self.messages}
@@ -464,6 +564,21 @@ class OptimizationResult:
             if assignment.offset_us not in message.allowed_offsets_us:
                 raise ValueError(f"result Offset is illegal for {message.name}")
         expected_names = set(message_by_name)
+        for candidate in self.peak_candidate_archive + self.selected_peak_candidates:
+            if {item.message_name for item in candidate.assignments} != expected_names:
+                raise ValueError("Peak candidate must assign every result message")
+            if candidate.steady_phases != steady_phase_vector(
+                candidate.assignments, self.messages
+            ):
+                raise ValueError("Peak candidate steady phases do not match Offset mod Cycle")
+            for item in candidate.assignments:
+                message = message_by_name[item.message_name]
+                if (
+                    item.can_id != message.can_id
+                    or item.definition_index != message.definition_index
+                    or item.offset_us not in message.allowed_offsets_us
+                ):
+                    raise ValueError("Peak candidate contains an invalid assignment")
         for record in self.restart_records:
             if {item.message_name for item in record.assignments} != expected_names:
                 raise ValueError("restart record must assign every result message")
@@ -526,16 +641,45 @@ class OptimizationResult:
                 self.balanced_fallback_reason.strip()
             ):
                 raise ValueError("balanced fallback reason must be non-empty")
+            if len(self.selected_peak_candidates) != len(
+                self.balanced_candidate_searches
+            ):
+                raise ValueError("balanced candidate pool/search count mismatch")
+            for index, (candidate, search) in enumerate(
+                zip(
+                    self.selected_peak_candidates,
+                    self.balanced_candidate_searches,
+                    strict=True,
+                )
+            ):
+                if (
+                    search.pool_index != index
+                    or search.candidate_assignment_hash != candidate.assignment_hash
+                    or search.candidate_steady_phase_hash
+                    != candidate.steady_phase_hash
+                ):
+                    raise ValueError("balanced candidate audit source mismatch")
+                if {item.message_name for item in search.result_assignments} != expected_names:
+                    raise ValueError("balanced candidate search result is incomplete")
         elif (
             self.peak_reference_objective is not None
             or self.peak_budget_us is not None
             or self.balanced_fallback_reason is not None
         ):
             raise ValueError("only balanced result may contain a peak reference")
+        if self.objective.mode is not ObjectiveMode.BALANCED and (
+            self.selected_peak_candidates or self.balanced_candidate_searches
+        ):
+            raise ValueError("only balanced results may contain candidate searches")
 
     def offset_by_name(self) -> dict[str, int]:
         """! @brief 返回便于查询的报文名到 Offset 映射副本。"""
         return {item.message_name: item.offset_us for item in self.assignments}
+
+    @property
+    def assignment_hash(self) -> str:
+        """Return the canonical SHA-256 of the final assignment."""
+        return hash_offset_assignments(self.assignments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,6 +741,9 @@ class AlgorithmComparisonResult:
     peak_reference_evaluation_count: int = 0
     peak_reference_elapsed_seconds: float = 0.0
     balanced_fallback_reason: str | None = None
+    peak_candidate_archive: tuple[PeakCandidate, ...] = ()
+    selected_peak_candidates: tuple[PeakCandidate, ...] = ()
+    balanced_candidate_searches: tuple[BalancedCandidateSearchRecord, ...] = ()
 
     def __post_init__(self) -> None:
         expected = ("original", "minimum", "greedy", "greedy_1opt", "gcls")
@@ -628,6 +775,10 @@ class AlgorithmComparisonResult:
                 or objective.sum_square_load > reference.sum_square_load
             ):
                 raise ValueError("balanced comparison violates peak-reference guarantees")
+            if len(self.selected_peak_candidates) != len(
+                self.balanced_candidate_searches
+            ):
+                raise ValueError("balanced comparison candidate pool/search mismatch")
         elif (
             self.peak_reference_objective is not None
             or self.peak_budget_us is not None
@@ -635,6 +786,10 @@ class AlgorithmComparisonResult:
             or self.balanced_fallback_reason is not None
         ):
             raise ValueError("only balanced comparison may contain peak reference metadata")
+        if self.stage("gcls").objective.mode is not ObjectiveMode.BALANCED and (
+            self.selected_peak_candidates or self.balanced_candidate_searches
+        ):
+            raise ValueError("only balanced comparison may contain candidate searches")
 
     def stage(self, name: str) -> ComparisonStageResult:
         """! @brief 按稳定名称查询一个阶段。"""

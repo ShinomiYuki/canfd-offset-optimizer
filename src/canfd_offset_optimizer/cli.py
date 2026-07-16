@@ -17,6 +17,10 @@ from typing import Iterator, Sequence
 
 from .config import ProjectConfig, RestartPolicy
 from .diagnostics.cpsat_verify import run_cpsat_verification
+from .diagnostics.candidate_pool_study import (
+    DEFAULT_POOL_SIZES,
+    run_candidate_pool_study,
+)
 from .diagnostics.restart_study import DEFAULT_CHECKPOINTS, run_restart_study
 from .diagnostics.tolerance_study import DEFAULT_TOLERANCES, run_tolerance_scan
 from .exceptions import CanfdOptimizerError
@@ -78,6 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cpsat = subparsers.add_parser(
         "verify-cpsat", help="verify balanced Qss with optional OR-Tools CP-SAT"
     )
+    analyze_candidate_pools = subparsers.add_parser(
+        "analyze-candidate-pools",
+        help="compare diverse Peak candidate-pool sizes for Balanced search",
+    )
     all_commands = (
         optimize,
         compare,
@@ -85,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         analyze_restarts,
         scan_tolerances,
         verify_cpsat,
+        analyze_candidate_pools,
     )
     for command in all_commands:
         command.add_argument("--dbc", type=Path, required=True)
@@ -138,6 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cpsat.add_argument("--tolerance", type=float, default=0.05)
     verify_cpsat.add_argument("--time-limit-seconds", type=float, default=300.0)
     verify_cpsat.add_argument("--solver-seed", type=int, default=0)
+    analyze_candidate_pools.add_argument(
+        "--pool-sizes",
+        default=",".join(str(value) for value in DEFAULT_POOL_SIZES),
+        help="comma-separated subset of 1,4,8,16,32",
+    )
     return parser
 
 
@@ -414,6 +428,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "analyze-restarts",
             "scan-tolerances",
             "verify-cpsat",
+            "analyze-candidate-pools",
         }:
             diagnostic_loaded = load_project(
                 args.dbc,
@@ -421,7 +436,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.config,
                 weight_mode_override=WeightMode.FRAME_TIME_US,
                 channel_override=args.channel,
-                objective_mode_override=ObjectiveMode.PEAK,
+                objective_mode_override=(
+                    ObjectiveMode.BALANCED
+                    if args.command == "analyze-candidate-pools"
+                    else ObjectiveMode.PEAK
+                ),
             )
             diagnostic_loaded = _with_restart_policy_overrides(
                 diagnostic_loaded,
@@ -485,7 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     total_attempts=diagnostic_attempts,
                     tolerances=tolerances,
                 )
-            else:
+            elif args.command == "verify-cpsat":
                 run_cpsat_verification(
                     diagnostic_loaded,
                     output,
@@ -495,6 +514,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tolerance=args.tolerance,
                     time_limit_seconds=args.time_limit_seconds,
                     solver_seed=args.solver_seed,
+                )
+            else:
+                try:
+                    pool_sizes = tuple(
+                        int(value.strip())
+                        for value in args.pool_sizes.split(",")
+                        if value.strip()
+                    )
+                except ValueError as exc:
+                    raise CanfdOptimizerError(
+                        "--pool-sizes must contain comma-separated integers"
+                    ) from exc
+                run_candidate_pool_study(
+                    diagnostic_loaded,
+                    output,
+                    report_prefix,
+                    seed=args.seed,
+                    total_attempts=diagnostic_attempts,
+                    pool_sizes=pool_sizes,
                 )
             logger.info("Diagnostic reports written under %s", output)
             return 0

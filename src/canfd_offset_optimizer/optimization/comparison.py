@@ -200,6 +200,9 @@ def compare_algorithms(
         peak_reference_evaluation_count=gcls_result.peak_reference_evaluation_count,
         peak_reference_elapsed_seconds=gcls_result.peak_reference_elapsed_seconds,
         balanced_fallback_reason=gcls_result.balanced_fallback_reason,
+        peak_candidate_archive=gcls_result.peak_candidate_archive,
+        selected_peak_candidates=gcls_result.selected_peak_candidates,
+        balanced_candidate_searches=gcls_result.balanced_candidate_searches,
     )
 
 
@@ -228,4 +231,5 @@ def extract_peak_optimization_result(
         evaluation_count=gcls.evaluation_count,
         accepted_moves=gcls.accepted_moves,
         elapsed_seconds=gcls.elapsed_seconds,
+        peak_candidate_archive=comparison.peak_candidate_archive,
     )

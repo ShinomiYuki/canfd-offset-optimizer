@@ -60,9 +60,45 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     assert summary["field_sources"]["random_restarts"] == "CLI --restarts override"
     assert summary["effective_configuration"]["random_restarts"] == 1
     assert len(summary["input_hash"]) == 64
-    assert [record["seed"] for record in summary["restarts"]] == [42, 43]
+    assert [record["seed"] for record in summary["restarts"]] == [42]
+    assert len(summary["selected_peak_candidates"]) == 1
+    assert len(summary["balanced_candidate_searches"]) == 1
+    assert summary["algorithm"]["restart_stop_reason"] == "peak_candidate_pool_exhausted"
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_first_greedy"])
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_before"])
+
+
+def test_candidate_pool_diagnostic_cli_generates_audit_outputs(tmp_path: Path) -> None:
+    output = tmp_path / "candidate_pool"
+    assert main(
+        [
+            "analyze-candidate-pools",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--channel",
+            "CAN1",
+            "--restarts",
+            "3",
+            "--pool-sizes",
+            "1,4",
+        ]
+    ) == 0
+    summary = json.loads(
+        (output / "results" / "candidate_pool_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["pool_sizes"] == [1, 4]
+    assert (output / "results" / "candidate_pool_audit.jsonl").is_file()
+    assert (output / "results" / "candidate_pool_comparison.csv").read_bytes().startswith(
+        b"\xef\xbb\xbf"
+    )
 
 
 def test_cli_returns_nonzero_for_missing_input(
@@ -321,7 +357,8 @@ def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> 
         assert summary["network"]["data_bitrate_bit_s"] == 2_000_000
         assert summary["network"]["brs"] is True
         assert summary["field_sources"]["channel"] == "CLI --channel override"
-        assert [record["seed"] for record in summary["restarts"]] == [42, 43]
+        expected_seeds = [42, 43] if mode == "payload_bytes" else [42]
+        assert [record["seed"] for record in summary["restarts"]] == expected_seeds
     for mode in ("peak", "variance"):
         assert all(
             (output / "objective_modes" / mode / relative).is_file()

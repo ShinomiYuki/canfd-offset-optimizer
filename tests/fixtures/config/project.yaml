@@ -15,6 +15,7 @@ optimization:
   conflict_candidate_cap: 4
   pair_neighbor_steps: [1, 2, 3]
   variance_offset_cap: 3
+  peak_candidate_pool_size: 1
 model:
   weight_mode: frame_time_us
   average_load_limit: 0.75

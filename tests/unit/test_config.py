@@ -138,3 +138,19 @@ def test_invalid_objective_and_variance_configuration_is_explicit(
     path.write_text(yaml_text, encoding="utf-8")
     with pytest.raises(ConfigurationError, match=message):
         load_project_config(path)
+
+
+@pytest.mark.parametrize("value", [0, 2, 3, 5, 33, True])
+def test_peak_candidate_pool_size_rejects_values_outside_audited_grid(
+    value: int,
+) -> None:
+    with pytest.raises(ConfigurationError, match="peak_candidate_pool_size"):
+        OptimizationConfig(peak_candidate_pool_size=value)
+
+
+@pytest.mark.parametrize("value", [1, 4, 8, 16, 32])
+def test_peak_candidate_pool_size_accepts_supported_values(value: int) -> None:
+    assert (
+        OptimizationConfig(peak_candidate_pool_size=value).peak_candidate_pool_size
+        == value
+    )
