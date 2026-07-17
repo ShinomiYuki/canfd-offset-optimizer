@@ -65,8 +65,9 @@ DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提
 `BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
 `results_by_network_id` 映射。最终状态是
 `succeeded/failed/skipped/cancelled`。成功项包含完整 `GuiOptimizationResult`；失败项包含用户可读
-错误；部分失败不能丢失成功结果。批量根目录提供 CSV/JSON 汇总；只有成功网段创建产物目录，
-跳过网段仅在工程 summary 中记录原因。
+错误；部分失败不能丢失成功结果。批量根目录固定提供 `logs/`、`plots/`、`results/` 和 `dbc/`；
+`results/networks_summary.csv` 汇总所有网段，只有成功网段创建 Offset 明细、图表和 DBC 副本，
+失败、跳过和取消网段仍必须写独立日志。
 
 指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
 批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
@@ -90,5 +91,8 @@ DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提
 3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
 5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
-6. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
+6. 成功后自动导出当前网段的稳态负载图和热力图；绘图只重复 DTO 数组，不改变核心结果。
+7. DBC 输出必须从导入工作区副本生成，只允许字节级替换已有 Offset 属性的数字 token；不得调用
+   会重排 DBC 的整库序列化，不得覆盖原始用户文件，定位不唯一时失败关闭。
+8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
    后续公共 service 就绪后应替换此处导入，不影响 GUI contracts/widgets。

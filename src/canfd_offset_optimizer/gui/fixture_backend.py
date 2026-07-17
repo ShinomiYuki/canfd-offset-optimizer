@@ -13,6 +13,13 @@ from pathlib import Path
 from time import perf_counter, sleep
 from typing import Iterable
 
+from .artifact_outputs import (
+    create_output_layout,
+    write_batch_log,
+    write_load_curve_png,
+    write_load_heatmap_png,
+    write_network_log,
+)
 from .contracts import (
     BackendAvailability,
     BackendError,
@@ -42,8 +49,6 @@ from .contracts import (
 from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
-    export_batch_summary_json,
-    export_network_summary_json,
 )
 
 
@@ -335,6 +340,7 @@ class FixtureBackend:
         output_id = self._session_id(request.inspection.session.project_name)
         output_directory = self._unique_directory(request.output_root, output_id)
         output_directory.mkdir(parents=True, exist_ok=False)
+        create_output_layout(output_directory)
         network_results: list[NetworkBatchResult] = []
         networks = request.inspection.optimizable_networks
         # Requests may have been inspected by a different FixtureBackend instance.
@@ -532,38 +538,37 @@ class FixtureBackend:
                 f"完成 {attempts} attempts",
                 "生成网段用户产物",
             ),
-            output_directory=output_directory
+            output_directory=create_output_layout(output_directory).results
             / self._safe_name(f"{network.display_name}_{network.network_id[-8:]}"),
         )
-        return self._write_success_outputs(result)
+        return self._write_success_outputs(result, output_directory)
 
-    def _write_success_outputs(self, result: GuiOptimizationResult) -> GuiOptimizationResult:
+    def _write_success_outputs(
+        self, result: GuiOptimizationResult, batch_output: Path
+    ) -> GuiOptimizationResult:
         assert result.output_directory is not None
+        layout = create_output_layout(batch_output)
         result.output_directory.mkdir(parents=True, exist_ok=True)
         offsets = export_assignments_csv(result, result.output_directory / "offsets.csv")
-        metrics = export_network_summary_json(result, result.output_directory / "metrics.json")
-        curves = result.output_directory / "load_curves.json"
-        curves.write_text(
-            json.dumps(
-                {
-                    "steady_before": result.steady_loads_before,
-                    "steady_after": result.steady_loads_after,
-                    "startup_before": result.startup_loads_before,
-                    "startup_after": result.startup_loads_after,
-                },
-                ensure_ascii=False,
-                indent=2,
+        stem = self._safe_name(result.display_name)
+        load_plot = write_load_curve_png(result, layout.plots / f"{stem}_load_curve.png")
+        heatmap = write_load_heatmap_png(result, layout.plots / f"{stem}_heatmap.png")
+        log_path = write_network_log(
+            NetworkBatchResult(
+                result.network_id,
+                result.network_name,
+                result.display_name,
+                result.source_file,
+                NetworkRunStatus.SUCCEEDED,
+                result.weight_mode,
+                result.mode,
+                result=result,
+                warnings=result.warnings,
+                logs=result.logs,
             ),
-            encoding="utf-8",
+            layout.logs / f"{stem}.log",
         )
-        log_path = result.output_directory / "run.log"
-        log_path.write_text("\n".join(result.logs) + "\n", encoding="utf-8")
-        completed = replace(
-            result,
-            exported_files=(offsets, metrics, curves, log_path),
-        )
-        export_network_summary_json(completed, metrics)
-        return completed
+        return replace(result, exported_files=(offsets, load_plot, heatmap, log_path))
 
     def _cancel_batch(
         self,
@@ -629,32 +634,22 @@ class FixtureBackend:
 
     @staticmethod
     def _write_non_success(output_directory: Path, item: NetworkBatchResult) -> None:
-        directory = output_directory / FixtureBackend._safe_name(
-            f"{item.display_name}_{item.network_id[-8:]}"
-        )
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "status.json").write_text(
-            json.dumps(
-                {
-                    "network_id": item.network_id,
-                    "network": item.network_name,
-                    "display_name": item.display_name,
-                    "source_file": item.source_file,
-                    "status": item.status.value,
-                    "error": item.error,
-                    "warnings": item.warnings,
-                    "logs": item.logs,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        layout = create_output_layout(output_directory)
+        write_network_log(
+            item,
+            layout.logs / f"{FixtureBackend._safe_name(item.display_name)}.log",
         )
 
     @staticmethod
     def _write_batch_outputs(batch: BatchOptimizationResult) -> None:
-        export_batch_summary_csv(batch, batch.output_directory / "summary.csv")
-        export_batch_summary_json(batch, batch.output_directory / "summary.json")
+        layout = create_output_layout(batch.output_directory)
+        export_batch_summary_csv(batch, layout.results / "networks_summary.csv")
+        for item in batch.network_results:
+            write_network_log(
+                item,
+                layout.logs / f"{FixtureBackend._safe_name(item.display_name)}.log",
+            )
+        write_batch_log(batch, layout.logs / "batch.log")
 
     @staticmethod
     def _emit_network_finished(
@@ -958,8 +953,8 @@ class FixtureBackend:
     ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
         before, after, startup_before, startup_after = FixtureBackend._LOAD_PROFILES[profile]
         return (
-            tuple(value for value in before),
-            tuple(value for value in after),
+            tuple(before[index % len(before)] for index in range(100)),
+            tuple(after[index % len(after)] for index in range(100)),
             tuple(value for value in startup_before),
             tuple(value for value in startup_after),
         )

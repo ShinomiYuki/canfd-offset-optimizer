@@ -49,11 +49,17 @@ from .contracts import (
     WeightMode,
     WorkspaceInspection,
 )
+from .artifact_outputs import (
+    create_output_layout,
+    write_batch_log,
+    write_load_curve_png,
+    write_load_heatmap_png,
+    write_network_log,
+)
+from .dbc_offset_writer import DbcOffsetReplacement, write_dbc_with_offsets
 from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
-    export_batch_summary_json,
-    export_network_summary_json,
 )
 from .workspace_io import WorkspaceImporter
 
@@ -207,6 +213,7 @@ class RealBackend(WorkspaceImporter):
             f"{self._session_id(session.project_name)}_real",
         )
         output_directory.mkdir(parents=True, exist_ok=False)
+        create_output_layout(output_directory)
         results: list[NetworkBatchResult] = []
         networks = request.inspection.networks
         arxml_channels, configured_channel = self._arxml_channel_context(session)
@@ -376,7 +383,8 @@ class RealBackend(WorkspaceImporter):
                 row.optimized_offset_us,
                 "core OptimizationResult.assignments",
             )
-        network_output = batch_output / self._safe_name(network.display_name)
+        layout = create_output_layout(batch_output)
+        network_output = layout.results / self._safe_name(network.display_name)
         network_output.mkdir(parents=False, exist_ok=False)
         detail = GuiOptimizationResult(
             network.network_id,
@@ -403,9 +411,49 @@ class RealBackend(WorkspaceImporter):
             ),
             output_directory=network_output,
         )
+        stem = self._safe_name(network.display_name)
         assignment_path = export_assignments_csv(detail, network_output / "offsets.csv")
-        summary_path = export_network_summary_json(detail, network_output / "summary.json")
-        return replace(detail, exported_files=(assignment_path, summary_path))
+        load_plot_path = write_load_curve_png(detail, layout.plots / f"{stem}_load_curve.png")
+        heatmap_path = write_load_heatmap_png(detail, layout.plots / f"{stem}_heatmap.png")
+        offset_by_name = {row.message_name: row.optimized_offset_us for row in rows}
+        replacements = tuple(
+            DbcOffsetReplacement(
+                message.name,
+                message.can_id,
+                message.is_extended,
+                offset_by_name[message.name],
+            )
+            for message in loaded.network.messages
+        )
+        dbc_output = layout.dbc / network.source_file
+        if dbc_output.exists():
+            dbc_output = layout.dbc / f"{stem}_{network.source_file}"
+        dbc_path = write_dbc_with_offsets(dbc_path, dbc_output, replacements)
+        log_path = write_network_log(
+            NetworkBatchResult(
+                network.network_id,
+                network.network_name,
+                network.display_name,
+                network.source_file,
+                NetworkRunStatus.SUCCEEDED,
+                request.weight_mode,
+                request.mode,
+                result=detail,
+                warnings=detail.warnings,
+                logs=detail.logs,
+            ),
+            layout.logs / f"{stem}.log",
+        )
+        return replace(
+            detail,
+            exported_files=(
+                assignment_path,
+                load_plot_path,
+                heatmap_path,
+                log_path,
+                dbc_path,
+            ),
+        )
 
     @staticmethod
     def _validate_offset_contract(
@@ -497,8 +545,14 @@ class RealBackend(WorkspaceImporter):
             errors=tuple(item.error for item in rows if item.status is NetworkRunStatus.FAILED and item.error),
             cancelled=cancelled,
         )
-        export_batch_summary_csv(batch, output_directory / "summary.csv")
-        export_batch_summary_json(batch, output_directory / "summary.json")
+        layout = create_output_layout(output_directory)
+        export_batch_summary_csv(batch, layout.results / "networks_summary.csv")
+        for item in rows:
+            write_network_log(
+                item,
+                layout.logs / f"{self._safe_name(item.display_name)}.log",
+            )
+        write_batch_log(batch, layout.logs / "batch.log")
         return batch
 
     @staticmethod

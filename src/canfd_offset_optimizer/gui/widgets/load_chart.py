@@ -16,13 +16,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..contracts import GuiOptimizationResult
+from ..load_presentation import (
+    DEFAULT_DISPLAY_DURATION_MS,
+    DISPLAY_DURATIONS_MS,
+    SLOT_WIDTH_MS,
+    STEADY_HYPERPERIOD_MS,
+    repeat_for_display,
+    steady_repeat_count,
+)
 from ..theme import ACCENT_COLOR
-
-
-SLOT_WIDTH_MS = 5
-STEADY_HYPERPERIOD_MS = 500
-DISPLAY_DURATIONS_MS = (500, 1_000, 2_000, 5_000)
-DEFAULT_DISPLAY_DURATION_MS = 2_000
 
 
 class _CurveCanvas(QWidget):
@@ -275,17 +277,17 @@ class LoadChart(QWidget):
             self.display_range_label.setEnabled(True)
             self.display_range_combo.setEnabled(True)
             display_duration_ms = self._selected_display_duration_ms()
-            repeat_count = display_duration_ms // STEADY_HYPERPERIOD_MS
+            repeat_count = steady_repeat_count(display_duration_ms)
             self.chart_title_label.setText(
                 f"{self._result.display_name} / 稳态负载，"
                 f"{STEADY_HYPERPERIOD_MS} ms 超周期重复展示 {repeat_count} 次 / "
                 f"{self._result.source_file}"
             )
             self.canvas.set_series(
-                self._repeat_for_display(
+                repeat_for_display(
                     self._result.original_steady_load, repeat_count
                 ),
-                self._repeat_for_display(
+                repeat_for_display(
                     self._result.optimized_steady_load, repeat_count
                 ),
                 display_duration_ms=display_duration_ms,
@@ -309,16 +311,11 @@ class LoadChart(QWidget):
     def _selected_display_duration_ms(self) -> int:
         value = self.display_range_combo.currentData()
         duration_ms = int(value)
-        if duration_ms not in DISPLAY_DURATIONS_MS:
-            raise ValueError("unsupported steady display duration")
-        if duration_ms % STEADY_HYPERPERIOD_MS:
-            raise ValueError("steady display duration must be a 500 ms multiple")
+        steady_repeat_count(duration_ms)
         return duration_ms
 
     @staticmethod
     def _repeat_for_display(
         values: tuple[int, ...], repeat_count: int
     ) -> tuple[int, ...]:
-        if repeat_count <= 0:
-            raise ValueError("repeat_count must be positive")
-        return tuple(value for _ in range(repeat_count) for value in values)
+        return repeat_for_display(values, repeat_count)

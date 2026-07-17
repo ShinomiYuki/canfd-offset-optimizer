@@ -68,6 +68,14 @@ def test_unified_import_automatically_inspects_and_enables_batch(
     )
     window = MainWindow(backend, dialog_handler=lambda *_args: None)
     qtbot.addWidget(window)
+    assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
+        "快速开始",
+        "结果概览",
+        "Offset 修改",
+        "负载曲线",
+        "负载热力图",
+        "运行日志与详情",
+    ]
     import_until_ready(qtbot, window, (source_project,))
 
     assert backend.import_calls == 1
@@ -116,6 +124,8 @@ def test_batch_locks_controls_then_shows_summary_and_selected_details(
     qtbot.waitUntil(lambda: window.selected_network is not None)
     assert window.assignment_table.model.rowCount() == 12
     assert window.load_chart.export_button.isEnabled()
+    assert window.load_heatmap.export_button.isEnabled()
+    assert window.load_heatmap.current_network_id == window.selected_network_id
     window.summary_panel.table.selectRow(1)
     qtbot.waitUntil(
         lambda: window.selected_network is not None

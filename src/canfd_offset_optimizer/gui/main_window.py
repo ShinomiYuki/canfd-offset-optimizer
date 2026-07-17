@@ -38,8 +38,10 @@ from .state import WorkflowState, WorkflowStateMachine
 from .widgets.assignment_table import AssignmentTable
 from .widgets.input_panel import InputPanel
 from .widgets.load_chart import LoadChart
+from .widgets.load_heatmap import LoadHeatmap
 from .widgets.metrics_panel import BatchSummaryPanel
 from .widgets.progress_panel import ProgressPanel
+from .widgets.quick_start_page import QuickStartPage
 from .widgets.settings_panel import SettingsPanel
 from .workers import BackendOperation, BackendWorker, WorkerFailure
 
@@ -92,6 +94,8 @@ class MainWindow(QMainWindow):
         self.metrics_panel = self.summary_panel
         self.assignment_table = AssignmentTable()
         self.load_chart = LoadChart()
+        self.load_heatmap = LoadHeatmap()
+        self.quick_start_page = QuickStartPage()
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("选择汇总表中的网段后显示日志、错误和警告详情")
@@ -119,14 +123,16 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.settings_panel)
         left_layout.addWidget(self.progress_panel)
         left_layout.addStretch(1)
-        tabs = QTabWidget()
-        tabs.addTab(self.summary_panel, "结果概览")
-        tabs.addTab(self.assignment_table, "Offset 修改")
-        tabs.addTab(self.load_chart, "负载曲线")
-        tabs.addTab(details_page, "运行日志与详情")
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.quick_start_page, "快速开始")
+        self.tabs.addTab(self.summary_panel, "结果概览")
+        self.tabs.addTab(self.assignment_table, "Offset 修改")
+        self.tabs.addTab(self.load_chart, "负载曲线")
+        self.tabs.addTab(self.load_heatmap, "负载热力图")
+        self.tabs.addTab(details_page, "运行日志与详情")
         splitter = QSplitter()
         splitter.addWidget(left)
-        splitter.addWidget(tabs)
+        splitter.addWidget(self.tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
@@ -140,6 +146,7 @@ class MainWindow(QMainWindow):
         self.summary_panel.open_output_requested.connect(self.open_output_directory)
         self.assignment_table.export_requested.connect(self._choose_assignment_export)
         self.load_chart.export_requested.connect(self._choose_chart_export)
+        self.load_heatmap.export_requested.connect(self._choose_heatmap_export)
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(100)
         self._elapsed_timer.timeout.connect(self._refresh_elapsed)
@@ -254,6 +261,13 @@ class MainWindow(QMainWindow):
         del result
         exported = self.load_chart.export_png(path)
         self._append_log(f"当前网段负载曲线已导出：{exported}")
+        return exported
+
+    def export_heatmap_to(self, path: Path) -> Path:
+        result = self._selected_result()
+        del result
+        exported = self.load_heatmap.export_png(path)
+        self._append_log(f"当前网段负载热力图已导出：{exported}")
         return exported
 
     def open_output_directory(self) -> None:
@@ -431,9 +445,15 @@ class MainWindow(QMainWindow):
                 network_id=item.network_id,
                 display_name=item.display_name,
             )
+            self.load_heatmap.clear_result(
+                "无成功结果",
+                network_id=item.network_id,
+                display_name=item.display_name,
+            )
         else:
             self.assignment_table.set_result(item.result)
             self.load_chart.set_result(item.result)
+            self.load_heatmap.set_result(item.result)
         details = [
             f"网段：{item.network_name}",
             f"network_id：{item.network_id}",
@@ -450,6 +470,7 @@ class MainWindow(QMainWindow):
         self._selected_network_id = None
         self.assignment_table.clear_result()
         self.load_chart.clear_result()
+        self.load_heatmap.clear_result()
         self.details_network_label.setText("当前网段：请选择一个网段")
         self.details_network_label.setToolTip("")
         self.log_view.setPlainText("请选择一个网段")
@@ -545,6 +566,18 @@ class MainWindow(QMainWindow):
         )
         if path:
             self._safe_export("导出负载曲线", lambda: self.export_chart_to(Path(path)))
+
+    def _choose_heatmap_export(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出当前网段负载热力图",
+            str(self._default_export_directory() / "load_heatmap.png"),
+            "PNG (*.png)",
+        )
+        if path:
+            self._safe_export(
+                "导出负载热力图", lambda: self.export_heatmap_to(Path(path))
+            )
 
     def _safe_export(self, action_name: str, action: Callable[[], Path]) -> None:
         try:

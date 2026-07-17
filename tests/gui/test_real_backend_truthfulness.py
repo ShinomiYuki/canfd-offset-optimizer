@@ -409,6 +409,23 @@ def test_real_backend_short_run_maps_only_core_data(
         row.message_name: row.offset_us for row in core_result.assignments
     }
     assert item.result.actual_attempts == core_result.restart_execution.actual_attempts
+    output_dbc = batch.output_directory / "dbc" / "CAR_VCU_PT Message.dbc"
+    assert output_dbc.is_file()
+    assert (batch.output_directory / "plots" / "PT_load_curve.png").is_file()
+    assert (batch.output_directory / "plots" / "PT_heatmap.png").is_file()
+    assert (batch.output_directory / "results" / "networks_summary.csv").is_file()
+    assert (batch.output_directory / "logs" / "PT.log").is_file()
+    assert (batch.output_directory / "logs" / "batch.log").is_file()
+    assert (source / "CAR_VCU_PT Message.dbc").read_text(encoding="utf-8") == dbc_text
+    exported_text = output_dbc.read_text(encoding="utf-8")
+    for row in item.result.assignments:
+        raw_id = row.can_id
+        if raw_id == 0x460:
+            raw_id |= 0x80000000
+        assert (
+            f'BA_ "GenMsgStartDelayTime" BO_ {raw_id} '
+            f'{row.optimized_offset_us // 1_000};'
+        ) in exported_text
 
 
 def test_app_composition_mentions_real_backend_and_no_mock_fallback() -> None:

@@ -81,17 +81,23 @@ def test_batch_runs_sequentially_and_writes_project_and_network_outputs(
     assert result.status is BatchRunStatus.SUCCEEDED
     assert result.succeeded_count == len(batch_request.inspection.networks)
     assert [item.network_name for item in result.network_results] == ["BD", "GL", "SU"]
-    assert (result.output_directory / "summary.csv").is_file()
-    assert (result.output_directory / "summary.json").is_file()
+    assert {path.name for path in result.output_directory.iterdir() if path.is_dir()} == {
+        "dbc",
+        "logs",
+        "plots",
+        "results",
+    }
+    assert (result.output_directory / "results" / "networks_summary.csv").is_file()
+    assert (result.output_directory / "logs" / "batch.log").is_file()
     for item in result.network_results:
         assert item.result is not None
         assert item.result.output_directory is not None
-        assert {path.name for path in item.result.exported_files} == {
-            "offsets.csv",
-            "metrics.json",
-            "load_curves.json",
-            "run.log",
-        }
+        assert item.result.output_directory.parent == result.output_directory / "results"
+        exported_names = {path.name for path in item.result.exported_files}
+        assert "offsets.csv" in exported_names
+        assert f"{item.display_name}_load_curve.png" in exported_names
+        assert f"{item.display_name}_heatmap.png" in exported_names
+        assert f"{item.display_name}.log" in exported_names
     started = [
         update.network_name
         for update in progress
@@ -124,11 +130,12 @@ def test_one_network_failure_and_skip_do_not_abort_remaining_networks(
     }
     for item in result.network_results:
         suffix = item.network_id[-8:]
-        directory = result.output_directory / f"{item.display_name}_{suffix}"
+        directory = result.output_directory / "results" / f"{item.display_name}_{suffix}"
         if item.status is NetworkRunStatus.SUCCEEDED:
             assert (directory / "offsets.csv").is_file()
         else:
-            assert (directory / "status.json").is_file()
+            assert not directory.exists()
+            assert (result.output_directory / "logs" / f"{item.display_name}.log").is_file()
 
 
 def test_project_level_failure_is_not_silently_converted_to_results(
@@ -189,4 +196,5 @@ def test_cancellation_retains_completed_network_and_marks_remaining(
         NetworkRunStatus.CANCELLED,
         NetworkRunStatus.SKIPPED,
     ]
-    assert (partial.output_directory / "summary.json").is_file()
+    assert (partial.output_directory / "results" / "networks_summary.csv").is_file()
+    assert (partial.output_directory / "logs" / "batch.log").is_file()

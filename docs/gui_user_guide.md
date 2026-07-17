@@ -62,18 +62,37 @@ GUI 真实适配器对候选集合失败关闭：必须精确等于
 后台使用 `QObject + QThread`。取消 token 在网段边界以及每个 GCLS restart observer
 回调处检查；不使用 `QThread.terminate()`。已完成结果保留，未开始的可优化网段标记取消。
 
-## 结果与曲线
+## 快速开始、结果与图表
 
-成功网段目录包含：
+右侧“快速开始”页用三步说明导入、设置和批量运行，并以浅显语言解释权重、目标模式、
+Balanced 容差、重启策略、Attempts、候选池、3-opt、显示范围及输出目录。该页面只提供说明，
+不会自动更改参数或启动任务。
+
+每次批量运行创建固定分类目录：
 
 ```text
 user_output/<timestamp>_<project>_real/
-├── summary.csv
-├── summary.json
-└── <network>/
-    ├── offsets.csv
-    └── summary.json
+├── logs/
+│   ├── batch.log
+│   └── <network>.log
+├── plots/
+│   ├── <network>_load_curve.png
+│   └── <network>_heatmap.png
+├── results/
+│   ├── networks_summary.csv
+│   └── <network>/offsets.csv
+└── dbc/
+    └── <原 DBC 文件名>.dbc
 ```
+
+`results/networks_summary.csv` 汇总所有网段（包括失败、跳过和取消）；成功网段的 Offset 明细放在
+各自子目录。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
+0～2000 ms 的稳态负载曲线和热力图。
+
+`dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。写入器只在已有
+`GenMsgStartDelayTime`、`GenMsgDelayTime` 或 `MsgStartDelayTime` 报文属性行中替换 Offset 数字；
+编码、换行、空格、注释、顺序及所有其它字节保持不变。参与优化的报文缺少原 Offset、存在重复
+Offset 属性或无法精确定位时会失败关闭，不插入字段、不猜测、不整文件重排。
 
 Offset 表中的报文名、CAN ID、周期和原始 Offset 来自核心加载模型；优化 Offset、指标、
 Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult`。切换网段时 GUI 先清空
@@ -84,6 +103,9 @@ Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult
 重复展示 4 次，在固定宽度画布中显示 0～2000 ms；可切换 500、1000、2000 或 5000 ms，
 不会插值、修改 DTO 或重新运行优化。标题会明确标注超周期重复次数。启动窗口始终只显示核心
 返回的真实范围，并禁用稳态显示范围选项。导出 PNG 使用当前选择的完整显示范围。
+
+“负载热力图”页使用与负载曲线相同的原始/优化后数组和稳态重复规则：上排为原始负载，下排为
+优化后负载，颜色越深表示时隙负载越高。启动窗口同样只显示核心真实范围，不进行周期复制。
 
 ## 验收
 
