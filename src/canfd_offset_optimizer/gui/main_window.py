@@ -128,7 +128,9 @@ class MainWindow(QMainWindow):
         request = self.input_panel.inspection_request()
         errors = request.validation_errors()
         if errors:
-            self._show_error("输入检查失败", "\n".join(errors))
+            message = "\n".join(errors)
+            self._append_log(f"输入错误：{'；'.join(errors)}")
+            self._show_error("输入检查失败", message)
             return
         if not self._state.can_transition(WorkflowState.INSPECTING):
             return
@@ -148,11 +150,14 @@ class MainWindow(QMainWindow):
                 self.input_panel.inspection_request(), self.input_panel.output_directory()
             )
         except (TypeError, ValueError) as exc:
+            self._append_log(f"设置错误：{exc}")
             self._show_error("优化设置无效", str(exc))
             return
         errors = request.validation_errors()
         if errors:
-            self._show_error("无法开始优化", "\n".join(errors))
+            message = "\n".join(errors)
+            self._append_log(f"请求错误：{'；'.join(errors)}")
+            self._show_error("无法开始优化", message)
             return
         if not self._state.can_transition(WorkflowState.RUNNING):
             return
@@ -198,9 +203,13 @@ class MainWindow(QMainWindow):
         return exported
 
     def open_output_directory(self) -> None:
-        path = self.input_panel.output_directory()
-        path.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
+        try:
+            path = self.input_panel.output_directory()
+            path.mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+                raise OSError("系统未能打开输出目录")
+        except Exception as exc:  # GUI slot must not leak an exception to the event loop.
+            self._report_action_failure("打开输出目录", exc)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.task_active:
@@ -356,7 +365,7 @@ class MainWindow(QMainWindow):
             self, "导出 Offset CSV", self._default_export_path("offsets.csv"), "CSV (*.csv)"
         )
         if path:
-            self.export_assignments_to(Path(path))
+            self._safe_export("导出 Offset CSV", lambda: self.export_assignments_to(Path(path)))
 
     def _choose_summary_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -366,7 +375,7 @@ class MainWindow(QMainWindow):
             "JSON (*.json)",
         )
         if path:
-            self.export_summary_to(Path(path))
+            self._safe_export("导出运行摘要", lambda: self.export_summary_to(Path(path)))
 
     def _choose_chart_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -376,4 +385,18 @@ class MainWindow(QMainWindow):
             "PNG (*.png)",
         )
         if path:
-            self.export_chart_to(Path(path))
+            self._safe_export("导出负载曲线", lambda: self.export_chart_to(Path(path)))
+
+    def _safe_export(self, action_name: str, action: Callable[[], Path]) -> None:
+        try:
+            action()
+        except Exception as exc:  # GUI slot must not leak an exception to the event loop.
+            self._report_action_failure(action_name, exc)
+
+    def _report_action_failure(self, action_name: str, exc: Exception) -> None:
+        self._append_log(f"{action_name}失败：{exc}")
+        self._show_error(
+            f"{action_name}失败",
+            f"无法完成{action_name}，请检查输出路径、权限和系统关联设置。",
+            f"{type(exc).__name__}: {exc}",
+        )
