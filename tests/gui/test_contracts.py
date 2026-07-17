@@ -37,6 +37,8 @@ def test_request_validation_reports_missing_inputs(tmp_path: Path) -> None:
 
 
 def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="restart mode"):
+        RestartSettings("adaptive")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="min_attempts"):
         RestartSettings(RestartMode.ADAPTIVE, min_attempts=81, max_attempts=80)
     inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml")
@@ -48,6 +50,17 @@ def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
             0.05,
             RestartSettings(),
             3,
+            False,
+            tmp_path / "out",
+        )
+    with pytest.raises(ValueError, match="optimization mode"):
+        GuiOptimizationRequest(
+            inspection,
+            "PT_CAN",
+            "balanced",  # type: ignore[arg-type]
+            0.05,
+            RestartSettings(),
+            4,
             False,
             tmp_path / "out",
         )
