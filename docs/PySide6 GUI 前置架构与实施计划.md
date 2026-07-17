@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> 本文为前置评估记录。GUI 分支的执行边界以 `docs/gui_architecture_plan.md` 为准；
+> 当前没有稳定 OptimizationService，因此本分支只实现隔离契约和 MockBackend，不修改核心算法。
 # PySide6 GUI 前置架构与实施计划
 
 ## 一、仓库检查结论
