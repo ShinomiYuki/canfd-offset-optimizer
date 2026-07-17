@@ -163,7 +163,8 @@ class MainWindow(QMainWindow):
             return
         self._state.transition(WorkflowState.RUNNING)
         self._append_log(
-            f"开始 Mock 优化：网段={request.network_name}，模式={request.mode.value}，"
+            f"开始 Mock 优化：网段={request.network_name}，权重={request.weight_mode.value}，"
+            f"模式={request.mode.value}，"
             f"3-opt={'开启' if request.enable_triple_search else '关闭'}"
         )
 

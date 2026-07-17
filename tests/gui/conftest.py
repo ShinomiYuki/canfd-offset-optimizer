@@ -14,6 +14,7 @@ from canfd_offset_optimizer.gui.contracts import (
     InputInspectionRequest,
     OptimizationMode,
     RestartSettings,
+    WeightMode,
 )
 from canfd_offset_optimizer.gui.mock_backend import MockBackend
 
@@ -35,7 +36,8 @@ def gui_inputs(tmp_path: Path) -> InputInspectionRequest:
 def gui_request(tmp_path: Path, gui_inputs: InputInspectionRequest) -> GuiOptimizationRequest:
     return GuiOptimizationRequest(
         gui_inputs,
-        "PT_CAN",
+        "PT",
+        WeightMode.FRAME_TIME_US,
         OptimizationMode.BALANCED,
         0.05,
         RestartSettings(),

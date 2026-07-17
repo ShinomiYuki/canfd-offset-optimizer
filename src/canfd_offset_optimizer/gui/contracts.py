@@ -18,6 +18,13 @@ class OptimizationMode(str, Enum):
     VARIANCE = "variance"
 
 
+class WeightMode(str, Enum):
+    """User-selectable message weight semantics."""
+
+    PAYLOAD_BYTES = "payload_bytes"
+    FRAME_TIME_US = "frame_time_us"
+
+
 class RestartMode(str, Enum):
     """User-facing restart policy selection."""
 
@@ -60,7 +67,7 @@ class NetworkSummary:
 
     name: str
     message_count: int
-    weight_mode: str
+    available_weight_modes: tuple[WeightMode, ...]
     description: str = ""
 
     def __post_init__(self) -> None:
@@ -68,8 +75,12 @@ class NetworkSummary:
             raise ValueError("network name must not be empty")
         if self.message_count <= 0:
             raise ValueError("network message_count must be positive")
-        if not self.weight_mode.strip():
-            raise ValueError("network weight_mode must not be empty")
+        if not self.available_weight_modes:
+            raise ValueError("network must provide at least one weight mode")
+        if any(not isinstance(mode, WeightMode) for mode in self.available_weight_modes):
+            raise ValueError("network weight mode is unsupported")
+        if len(set(self.available_weight_modes)) != len(self.available_weight_modes):
+            raise ValueError("network weight modes must be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +123,7 @@ class GuiOptimizationRequest:
 
     inspection: InputInspectionRequest
     network_name: str
+    weight_mode: WeightMode
     mode: OptimizationMode
     balanced_tolerance: float
     restart: RestartSettings
@@ -120,6 +132,8 @@ class GuiOptimizationRequest:
     output_directory: Path
 
     def __post_init__(self) -> None:
+        if not isinstance(self.weight_mode, WeightMode):
+            raise ValueError("weight mode is unsupported")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("optimization mode is unsupported")
         if not isinstance(self.restart, RestartSettings):
@@ -132,6 +146,8 @@ class GuiOptimizationRequest:
             raise ValueError("candidate_pool_size is unsupported")
         if not isinstance(self.enable_triple_search, bool):
             raise ValueError("enable_triple_search must be boolean")
+        if self.weight_mode is WeightMode.PAYLOAD_BYTES and self.mode is not OptimizationMode.PEAK:
+            raise ValueError("payload_bytes weight only supports peak mode")
 
     def validation_errors(self) -> tuple[str, ...]:
         errors = list(self.inspection.validation_errors())
@@ -218,6 +234,7 @@ class GuiOptimizationResult:
     """Stable view-ready result; GUI code must treat it as immutable."""
 
     network_name: str
+    weight_mode: WeightMode
     mode: OptimizationMode
     original_metrics: ObjectiveMetrics
     optimized_metrics: ObjectiveMetrics
@@ -233,6 +250,8 @@ class GuiOptimizationResult:
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.weight_mode, WeightMode):
+            raise ValueError("result weight mode is unsupported")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("result optimization mode is unsupported")
         if not self.network_name.strip() or not self.stop_reason.strip():

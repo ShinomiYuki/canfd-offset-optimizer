@@ -11,6 +11,7 @@ from .contracts import (
     OptimizationCancelled,
     ProgressCallback,
     ProgressUpdate,
+    WeightMode,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "OptimizationCancelled",
     "ProgressCallback",
     "ProgressUpdate",
+    "WeightMode",
 ]

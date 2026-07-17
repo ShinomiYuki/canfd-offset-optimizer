@@ -24,6 +24,7 @@ def test_csv_json_and_png_exports_are_explicit_user_outputs(
     assert "报文,CAN ID" in csv_path.read_text(encoding="utf-8-sig")
     summary = json.loads(json_path.read_text(encoding="utf-8"))
     assert summary["network"] == gui_result.network_name
+    assert summary["weight_mode"] == gui_result.weight_mode.value
     assert summary["original_metrics"]["Zss"] == gui_result.original_metrics.zss
     assert png_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert not (tmp_path / "output" / "diagnostics").exists()

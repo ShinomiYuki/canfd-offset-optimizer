@@ -20,6 +20,7 @@ from .contracts import (
     ProgressPhase,
     ProgressUpdate,
     RestartMode,
+    WeightMode,
 )
 
 
@@ -67,11 +68,16 @@ class MockBackend:
         warnings = ["当前使用 MockBackend，网段和结果仅用于 GUI 联调。"]
         if self._extra_warning:
             warnings.append(self._extra_warning)
+        weight_modes = (
+            (WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US)
+            if request.arxml_directory is not None
+            else (WeightMode.PAYLOAD_BYTES,)
+        )
         return InputSummary(
             networks=(
-                NetworkSummary("PT_CAN", 42, "frame_time_us", "动力 CAN FD 网段"),
-                NetworkSummary("BODY_CAN", 31, "frame_time_us", "车身 CAN FD 网段"),
-                NetworkSummary("ADAS_CAN", 56, "frame_time_us", "辅助驾驶 CAN FD 网段"),
+                NetworkSummary("PT", 42, weight_modes),
+                NetworkSummary("DA", 31, weight_modes),
+                NetworkSummary("DK", 56, weight_modes),
             ),
             warnings=tuple(warnings),
         )
@@ -129,6 +135,8 @@ class MockBackend:
         self._tick(cancellation_token)
         assignments = self._assignments(request.network_name)
         warnings = ["MockBackend 结果不可用于工程交付。"]
+        if request.weight_mode is WeightMode.PAYLOAD_BYTES:
+            warnings.append("Payload 权重仅衡量报文载荷长度，不代表物理总线占用时间。")
         if request.enable_triple_search:
             warnings.append("已模拟启用高质量离线 3-opt；未执行真实核心搜索。")
         if self._extra_warning:
@@ -140,6 +148,7 @@ class MockBackend:
         startup_after = tuple(410 + int(44 * (1 + sin(index * 0.91 + 0.4))) for index in range(18))
         return GuiOptimizationResult(
             network_name=request.network_name,
+            weight_mode=request.weight_mode,
             mode=request.mode,
             original_metrics=before,
             optimized_metrics=after,

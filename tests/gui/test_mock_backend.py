@@ -14,6 +14,7 @@ from canfd_offset_optimizer.gui.contracts import (
     OptimizationCancelled,
     OptimizationMode,
     RestartSettings,
+    WeightMode,
 )
 from canfd_offset_optimizer.gui.mock_backend import MockBackend
 
@@ -31,7 +32,8 @@ def _inputs(tmp_path: Path) -> InputInspectionRequest:
 def _request(tmp_path: Path) -> GuiOptimizationRequest:
     return GuiOptimizationRequest(
         _inputs(tmp_path),
-        "PT_CAN",
+        "PT",
+        WeightMode.FRAME_TIME_US,
         OptimizationMode.BALANCED,
         0.05,
         RestartSettings(),
@@ -46,7 +48,11 @@ def test_mock_backend_inspects_multiple_networks_and_emits_progress(tmp_path: Pa
     summary = MockBackend(delay_seconds=0).inspect_input(
         _inputs(tmp_path), progress.append, CancellationToken()
     )
-    assert [item.name for item in summary.networks] == ["PT_CAN", "BODY_CAN", "ADAS_CAN"]
+    assert [item.name for item in summary.networks] == ["PT", "DA", "DK"]
+    assert summary.networks[0].available_weight_modes == (
+        WeightMode.PAYLOAD_BYTES,
+        WeightMode.FRAME_TIME_US,
+    )
     assert len(progress) == 3
     assert summary.warnings
 
@@ -57,7 +63,8 @@ def test_mock_backend_returns_complete_immutable_result_without_writing(tmp_path
     result = MockBackend(delay_seconds=0).optimize(
         request, progress.append, CancellationToken()
     )
-    assert result.network_name == "PT_CAN"
+    assert result.network_name == "PT"
+    assert result.weight_mode is WeightMode.FRAME_TIME_US
     assert result.actual_attempts == request.restart.min_attempts
     assert result.optimized_metrics.qss < result.original_metrics.qss
     assert len(result.assignments) == 12

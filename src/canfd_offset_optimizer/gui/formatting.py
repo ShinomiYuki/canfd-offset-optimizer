@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .contracts import GuiOptimizationResult, ObjectiveMetrics
+from .contracts import GuiOptimizationResult, ObjectiveMetrics, WeightMode
 
 
 def format_can_id(can_id: int) -> str:
@@ -22,6 +22,12 @@ def format_milliseconds(microseconds: int) -> str:
 
 def format_integer(value: int) -> str:
     return f"{value:,}"
+
+
+def format_weight_mode(mode: WeightMode) -> str:
+    if mode is WeightMode.FRAME_TIME_US:
+        return "帧时间（frame_time_us）"
+    return "Payload 长度（payload_bytes）"
 
 
 def metrics_dict(metrics: ObjectiveMetrics) -> dict[str, int | float]:
@@ -59,6 +65,7 @@ def export_summary_json(result: GuiOptimizationResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, Any] = {
         "network": result.network_name,
+        "weight_mode": result.weight_mode.value,
         "mode": result.mode.value,
         "original_metrics": metrics_dict(result.original_metrics),
         "optimized_metrics": metrics_dict(result.optimized_metrics),

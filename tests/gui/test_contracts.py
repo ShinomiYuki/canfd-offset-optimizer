@@ -12,6 +12,7 @@ from canfd_offset_optimizer.gui.contracts import (
     OptimizationMode,
     RestartMode,
     RestartSettings,
+    WeightMode,
 )
 
 
@@ -22,6 +23,7 @@ def test_request_validation_reports_missing_inputs(tmp_path: Path) -> None:
     request = GuiOptimizationRequest(
         inspection,
         "PT_CAN",
+        WeightMode.FRAME_TIME_US,
         OptimizationMode.BALANCED,
         0.05,
         RestartSettings(),
@@ -46,6 +48,7 @@ def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
         GuiOptimizationRequest(
             inspection,
             "PT_CAN",
+            WeightMode.FRAME_TIME_US,
             OptimizationMode.PEAK,
             0.05,
             RestartSettings(),
@@ -57,7 +60,20 @@ def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
         GuiOptimizationRequest(
             inspection,
             "PT_CAN",
+            WeightMode.FRAME_TIME_US,
             "balanced",  # type: ignore[arg-type]
+            0.05,
+            RestartSettings(),
+            4,
+            False,
+            tmp_path / "out",
+        )
+    with pytest.raises(ValueError, match="payload_bytes"):
+        GuiOptimizationRequest(
+            inspection,
+            "PT_CAN",
+            WeightMode.PAYLOAD_BYTES,
+            OptimizationMode.BALANCED,
             0.05,
             RestartSettings(),
             4,

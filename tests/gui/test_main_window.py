@@ -94,7 +94,8 @@ def test_network_loading_success_duplicate_guard_and_result_display(
 
     assert backend.inspect_calls == 1
     assert window.settings_panel.network_combo.count() == 3
-    assert window.settings_panel.network_combo.currentData() == "PT_CAN"
+    assert window.settings_panel.network_combo.currentText() == "PT"
+    assert window.settings_panel.network_combo.currentData() == "PT"
     assert window.progress_panel.run_button.isEnabled()
 
     window.start_optimization()
@@ -113,6 +114,7 @@ def test_network_loading_success_duplicate_guard_and_result_display(
 
     assert backend.optimize_calls == 1
     assert window.result is not None
+    assert window.metrics_panel.weight_mode_label.text().endswith("（frame_time_us）")
     assert window.metrics_panel.attempts_label.text() == "20"
     assert window.metrics_panel.export_summary_button.isEnabled()
     assert window.assignment_table.model.rowCount() == 12
