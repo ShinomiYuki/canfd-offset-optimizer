@@ -195,9 +195,12 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     assert gl.result is not None
     assert window.assignment_table.current_network_id == gl.network_id
     assert window.load_chart.current_network_id == gl.network_id
-    assert window.load_chart.canvas.before_series == gl.result.original_steady_load
-    assert window.load_chart.canvas.after_series == gl.result.optimized_steady_load
-    assert "GL / 稳态负载" in window.load_chart.chart_title_label.text()
+    assert window.load_chart.canvas.before_series == gl.result.original_steady_load * 4
+    assert window.load_chart.canvas.after_series == gl.result.optimized_steady_load * 4
+    assert window.load_chart.canvas.before_series is not gl.result.original_steady_load
+    assert "GL / 稳态负载，500 ms 超周期重复展示 4 次" in (
+        window.load_chart.chart_title_label.text()
+    )
     assert gl.network_id in window.log_view.toPlainText()
 
     window.summary_panel.network_filter.setText("SU")
@@ -206,11 +209,13 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     assert window.assignment_table.current_network_id == su.network_id
     assert window.load_chart.current_network_id == su.network_id
     assert su.result is not None
-    assert window.load_chart.canvas.before_series == su.result.original_steady_load
-    assert window.load_chart.canvas.after_series == su.result.optimized_steady_load
-    assert window.load_chart.canvas.before_series is su.result.original_steady_load
+    assert window.load_chart.canvas.before_series == su.result.original_steady_load * 4
+    assert window.load_chart.canvas.after_series == su.result.optimized_steady_load * 4
+    assert window.load_chart.canvas.before_series is not su.result.original_steady_load
     assert window.load_chart.canvas.before_series is not gl.result.original_steady_load
-    assert "SU / 稳态负载" in window.load_chart.chart_title_label.text()
+    assert "SU / 稳态负载，500 ms 超周期重复展示 4 次" in (
+        window.load_chart.chart_title_label.text()
+    )
     assert su.network_id in window.log_view.toPlainText()
     assert window.summary_panel.proxy.index(0, 0).data() == "SU"
     assert "Message list" in window.summary_panel.proxy.index(0, 1).data()

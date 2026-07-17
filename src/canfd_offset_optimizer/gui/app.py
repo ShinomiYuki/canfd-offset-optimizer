@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from .contracts import OptimizationBackend
 from .main_window import MainWindow
+from .theme import apply_application_theme
 from .unavailable_backend import UnavailableBackend
 
 
@@ -34,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     assert isinstance(application, QApplication)
     application.setApplicationName("CAN FD Offset Optimizer")
+    apply_application_theme(application)
     backend = create_backend()
     window = MainWindow(backend)
     window.show()
