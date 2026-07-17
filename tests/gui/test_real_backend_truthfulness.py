@@ -342,6 +342,32 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     assert not (batch.output_directory / "EMPTY").exists()
 
 
+def test_real_import_uses_bundled_default_when_project_yaml_is_missing(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source_without_config"
+    source.mkdir()
+    (source / "CAR_VCU_PT Message.dbc").write_bytes(DBC_FIXTURE.read_bytes())
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+
+    session = backend.import_inputs(
+        (source,), lambda update: None, CancellationToken()
+    )
+    config_record = next(
+        record for record in session.records if record.kind.value == "config"
+    )
+    copied = session.session_directory / "config" / "project.yaml"
+    expected = Path("input/config/project.yaml")
+    assert copied.read_text(encoding="utf-8") == expected.read_text(encoding="utf-8")
+    assert "内置默认 project.yaml" in config_record.note
+
+    inspection = backend.inspect_workspace(
+        session, lambda update: None, CancellationToken()
+    )
+    assert inspection.missing_required == ()
+    assert any("内置默认 project.yaml" in warning for warning in inspection.warnings)
+
+
 def test_default_mock_backend_fails_closed_and_writes_no_output(tmp_path: Path) -> None:
     backend = MockBackend(workspace_root=tmp_path)
     assert not backend.availability.can_optimize
@@ -405,6 +431,8 @@ def test_real_backend_short_run_maps_only_core_data(
     assert item.result.optimized_metrics.qss == core_result.objective.sum_square_load
     assert item.result.steady_loads_after == core_result.steady_slot_loads
     assert item.result.startup_loads_after == core_result.startup_slot_loads
+    assert item.result.steady_counts_after == core_result.steady_slot_counts
+    assert item.result.startup_counts_after == core_result.startup_slot_counts
     assert {row.message_name: row.optimized_offset_us for row in item.result.assignments} == {
         row.message_name: row.offset_us for row in core_result.assignments
     }
@@ -500,6 +528,10 @@ def test_ic_and_su_selection_bind_fixed_assignments_curves_and_titles(
             steady_loads_after=after,
             startup_loads_before=tuple(value + 1 for value in before),
             startup_loads_after=tuple(value + 1 for value in after),
+            steady_counts_before=tuple(1 for _ in before),
+            steady_counts_after=tuple(1 for _ in after),
+            startup_counts_before=tuple(1 for _ in before),
+            startup_counts_after=tuple(1 for _ in after),
         )
 
     ic = result_for("IC", (9, 4, 7), (5, 4, 3))

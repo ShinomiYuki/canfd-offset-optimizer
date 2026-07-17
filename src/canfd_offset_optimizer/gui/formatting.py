@@ -111,6 +111,10 @@ def export_network_summary_json(result: GuiOptimizationResult, path: Path) -> Pa
         "steady_loads_after": list(result.steady_loads_after),
         "startup_loads_before": list(result.startup_loads_before),
         "startup_loads_after": list(result.startup_loads_after),
+        "steady_counts_before": list(result.steady_counts_before),
+        "steady_counts_after": list(result.steady_counts_after),
+        "startup_counts_before": list(result.startup_counts_before),
+        "startup_counts_after": list(result.startup_counts_after),
         "logs": list(result.logs),
         "exported_files": [str(item) for item in result.exported_files],
     }

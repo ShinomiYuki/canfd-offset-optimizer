@@ -10,10 +10,12 @@ import zlib
 
 from .contracts import BatchOptimizationResult, GuiOptimizationResult, NetworkBatchResult
 from .load_presentation import (
+    CONGESTION_COLORS,
     DEFAULT_DISPLAY_DURATION_MS,
     SLOT_WIDTH_MS,
     STEADY_HYPERPERIOD_MS,
     repeat_for_display,
+    congestion_level,
     steady_repeat_count,
 )
 from .theme import ACCENT_COLOR
@@ -163,32 +165,29 @@ def write_load_curve_png(
 def write_load_heatmap_png(
     result: GuiOptimizationResult,
     path: Path,
-    *,
-    display_duration_ms: int = DEFAULT_DISPLAY_DURATION_MS,
 ) -> Path:
-    repeat_count = steady_repeat_count(display_duration_ms)
-    before = repeat_for_display(result.original_steady_load, repeat_count)
-    after = repeat_for_display(result.optimized_steady_load, repeat_count)
+    counts_before = result.original_steady_count
+    counts_after = result.optimized_steady_count
     width, height = 1_200, 340
     left, top, right, row_height = 60, 35, 1_175, 115
     canvas = _Raster(width, height, (255, 255, 255))
-    maximum = max(max(before), max(after), 1)
-    base = (245, 245, 245)
-    for row, values in enumerate((before, after)):
+    colors: tuple[Rgb, ...] = tuple(
+        (raw[0], raw[1], raw[2])
+        for raw in (bytes.fromhex(value.removeprefix("#")) for value in CONGESTION_COLORS)
+    )
+    for row, counts in enumerate((counts_before, counts_after)):
         y0 = top + row * row_height
-        for index, value in enumerate(values):
-            ratio = value / maximum
-            color: Rgb = (
-                round(base[0] + (_ACCENT_RGB[0] - base[0]) * ratio),
-                round(base[1] + (_ACCENT_RGB[1] - base[1]) * ratio),
-                round(base[2] + (_ACCENT_RGB[2] - base[2]) * ratio),
+        for index, count in enumerate(counts):
+            x0 = left + (right - left) * index // len(counts)
+            x1 = left + (right - left) * (index + 1) // len(counts)
+            canvas.rectangle(
+                x0,
+                y0,
+                max(x0 + 1, x1),
+                y0 + row_height,
+                colors[congestion_level(count)],
             )
-            x0 = left + (right - left) * index // len(values)
-            x1 = left + (right - left) * (index + 1) // len(values)
-            canvas.rectangle(x0, y0, max(x0 + 1, x1), y0 + row_height, color)
-    for boundary in range(0, display_duration_ms + 1, STEADY_HYPERPERIOD_MS):
-        x = left + (right - left) * boundary // display_duration_ms
-        canvas.line(x, top, x, top + 2 * row_height, (180, 180, 180))
+            canvas.line(x0, y0, x0, y0 + row_height, (208, 208, 208))
     canvas.line(left, top, right, top, (100, 100, 100))
     canvas.line(left, top + row_height, right, top + row_height, (100, 100, 100))
     canvas.line(left, top + 2 * row_height, right, top + 2 * row_height, (100, 100, 100))

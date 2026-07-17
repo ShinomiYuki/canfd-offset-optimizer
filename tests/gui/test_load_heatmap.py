@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from canfd_offset_optimizer.gui.contracts import BatchOptimizationResult
+from canfd_offset_optimizer.gui.load_presentation import congestion_level
 from canfd_offset_optimizer.gui.widgets.load_heatmap import LoadHeatmap
 
 
@@ -17,7 +18,7 @@ def _result_with_known_loads(batch_result: BatchOptimizationResult):
     )
 
 
-def test_heatmap_repeats_each_steady_series_without_mutating_result(
+def test_heatmap_uses_one_real_steady_window_and_core_congestion_counts(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:
     result = _result_with_known_loads(batch_result)
@@ -28,13 +29,30 @@ def test_heatmap_repeats_each_steady_series_without_mutating_result(
 
     heatmap.set_result(result)
 
-    assert heatmap.canvas.before_series == original * 4
-    assert heatmap.canvas.after_series == optimized * 4
-    assert len(heatmap.canvas.before_series) == 400
-    assert heatmap.canvas.time_coordinates_ms == tuple(range(0, 2_000, 5))
+    assert heatmap.canvas.before_series is original
+    assert heatmap.canvas.after_series is optimized
+    assert heatmap.canvas.counts_before is result.original_steady_count
+    assert heatmap.canvas.counts_after is result.optimized_steady_count
+    assert len(heatmap.canvas.before_series) == 100
+    assert heatmap.canvas.display_duration_ms == 500
+    assert heatmap.canvas.time_coordinates_ms == tuple(range(0, 500, 5))
     assert result.original_steady_load is original
     assert result.optimized_steady_load is optimized
-    assert "500 ms 超周期重复展示 4 次" in heatmap.title_label.text()
+    assert "核心真实范围 500 ms" in heatmap.title_label.text()
+    assert "重复" not in heatmap.title_label.text()
+    assert not hasattr(heatmap, "display_range_combo")
+
+
+def test_congestion_levels_match_main_branch_heatmap_method() -> None:
+    assert [congestion_level(value) for value in (0, 1, 2, 3, 4, 5, 9)] == [
+        0,
+        1,
+        2,
+        3,
+        3,
+        4,
+        4,
+    ]
 
 
 def test_heatmap_startup_is_not_repeated_and_png_uses_current_view(
@@ -48,8 +66,9 @@ def test_heatmap_startup_is_not_repeated_and_png_uses_current_view(
 
     heatmap.window_combo.setCurrentIndex(1)
 
-    assert not heatmap.display_range_combo.isEnabled()
     assert heatmap.canvas.before_series is result.original_startup_load
     assert heatmap.canvas.after_series is result.optimized_startup_load
+    assert heatmap.canvas.counts_before is result.original_startup_count
+    assert heatmap.canvas.counts_after is result.optimized_startup_count
     output = heatmap.export_png(tmp_path / "startup_heatmap.png")
     assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

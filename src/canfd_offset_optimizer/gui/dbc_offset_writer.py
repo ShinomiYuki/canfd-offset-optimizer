@@ -7,10 +7,17 @@ from pathlib import Path
 import re
 
 
-_OFFSET_ATTRIBUTE = rb"(?:GenMsgStartDelayTime|GenMsgDelayTime|MsgStartDelayTime)"
+# Mirrors dbc_parser.DBC_ATTRIBUTES["start_delay"] precedence without importing
+# the core-private parser into this GUI-only byte writer.
+_OFFSET_ATTRIBUTES = (
+    b"GenMsgStartDelayTime",
+    b"GenMsgDelayTime",
+    b"MsgStartDelayTime",
+)
+_OFFSET_ATTRIBUTE = rb"(?:" + rb"|".join(_OFFSET_ATTRIBUTES) + rb")"
 _OFFSET_LINE = re.compile(
-    rb"(?m)^(?P<prefix>[ \t]*BA_[ \t]+\"" + _OFFSET_ATTRIBUTE
-    + rb"\"[ \t]+BO_[ \t]+(?P<frame_id>[0-9]+)[ \t]+)"
+    rb"(?m)^(?P<prefix>[ \t]*BA_[ \t]+\"(?P<attribute>" + _OFFSET_ATTRIBUTE
+    + rb")\"[ \t]+BO_[ \t]+(?P<frame_id>[0-9]+)[ \t]+)"
     rb"(?P<value>[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))"
     rb"(?P<suffix>[ \t]*;[^\r\n]*)(?P<carriage_return>\r?)$"
 )
@@ -58,11 +65,21 @@ def write_dbc_with_offsets(
         frame_id = int(match.group("frame_id"))
         if frame_id in by_raw_id:
             matches_by_id.setdefault(frame_id, []).append(match)
-    invalid = [
-        item.message_name
-        for frame_id, item in by_raw_id.items()
-        if len(matches_by_id.get(frame_id, ())) != 1
-    ]
+    selected_by_id: dict[int, re.Match[bytes]] = {}
+    invalid: list[str] = []
+    for frame_id, item in by_raw_id.items():
+        candidates = matches_by_id.get(frame_id, ())
+        preferred: list[re.Match[bytes]] = []
+        for attribute in _OFFSET_ATTRIBUTES:
+            preferred = [
+                match for match in candidates if match.group("attribute") == attribute
+            ]
+            if preferred:
+                break
+        if len(preferred) != 1:
+            invalid.append(item.message_name)
+        else:
+            selected_by_id[frame_id] = preferred[0]
     if invalid:
         raise ValueError(
             "DBC 中参与优化的报文必须各有且仅有一个原 Offset 属性："
@@ -71,7 +88,7 @@ def write_dbc_with_offsets(
 
     selected = sorted(
         (
-            (matches_by_id[frame_id][0], item)
+            (selected_by_id[frame_id], item)
             for frame_id, item in by_raw_id.items()
         ),
         key=lambda pair: pair[0].start("value"),

@@ -61,7 +61,7 @@ from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
 )
-from .workspace_io import WorkspaceImporter
+from .workspace_io import DEFAULT_CONFIG_NOTE, WorkspaceImporter
 
 
 REQUIRED_ALLOWED_OFFSETS_US = tuple(range(15_000, 100_001, 5_000))
@@ -404,6 +404,10 @@ class RealBackend(WorkspaceImporter):
             self._copy_int_tuple(core_result.steady_slot_loads),
             self._copy_int_tuple(initial_state.startup_slot_loads),
             self._copy_int_tuple(core_result.startup_slot_loads),
+            steady_counts_before=self._copy_int_tuple(initial_state.steady_slot_counts),
+            steady_counts_after=self._copy_int_tuple(core_result.steady_slot_counts),
+            startup_counts_before=self._copy_int_tuple(initial_state.startup_slot_counts),
+            startup_counts_after=self._copy_int_tuple(core_result.startup_slot_counts),
             logs=(
                 "数据源：core load_project + run_gcls",
                 f"arxml_channel={channel_override or 'not_used'}",
@@ -678,6 +682,8 @@ class RealBackend(WorkspaceImporter):
     @staticmethod
     def _inspection_warnings(session: ImportSession) -> tuple[str, ...]:
         warnings: list[str] = []
+        if any(record.note == DEFAULT_CONFIG_NOTE for record in session.records):
+            warnings.append(DEFAULT_CONFIG_NOTE)
         unrecognized = sum(record.kind is InputKind.UNRECOGNIZED for record in session.records)
         invalid = sum(record.status is ImportRecordStatus.INVALID for record in session.records)
         if unrecognized:

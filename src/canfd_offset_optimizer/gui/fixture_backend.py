@@ -50,6 +50,11 @@ from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
 )
+from .workspace_io import (
+    DEFAULT_CONFIG_NOTE,
+    DEFAULT_PROJECT_CONFIG_PATH,
+    add_default_project_config,
+)
 
 
 class FixtureBackend:
@@ -100,6 +105,7 @@ class FixtureBackend:
         fail_networks: Iterable[str] = (),
         skip_networks: Iterable[str] = (),
         extra_warning: str | None = None,
+        default_config_path: Path = DEFAULT_PROJECT_CONFIG_PATH,
     ) -> None:
         if delay_seconds < 0:
             raise ValueError("delay_seconds must be non-negative")
@@ -110,6 +116,7 @@ class FixtureBackend:
         self._fail_networks = frozenset(fail_networks)
         self._skip_networks = frozenset(skip_networks)
         self._extra_warning = extra_warning
+        self._default_config_path = default_config_path
         self._profile_index_by_network_id: dict[str, int] = {}
 
     @property
@@ -226,6 +233,22 @@ class FixtureBackend:
                 )
             self._tick(cancellation_token)
 
+        default_record = add_default_project_config(
+            session_directory,
+            records,
+            imported_at,
+            self._default_config_path,
+        )
+        if default_record is not None:
+            progress_callback(
+                ProgressUpdate(
+                    ProgressPhase.IMPORTING,
+                    DEFAULT_CONFIG_NOTE,
+                    elapsed_seconds=perf_counter() - started,
+                    overall_completed=total,
+                    overall_total=total,
+                )
+            )
         manifest_path = session_directory / "import_manifest.json"
         session = ImportSession(
             session_id=session_id,
@@ -509,6 +532,12 @@ class FixtureBackend:
             )
         before, after = self._metrics(request.mode, profile)
         steady_before, steady_after, startup_before, startup_after = self._load_curves(profile)
+        (
+            steady_counts_before,
+            steady_counts_after,
+            startup_counts_before,
+            startup_counts_after,
+        ) = self._load_counts(profile)
         result = GuiOptimizationResult(
             network_id=network.network_id,
             network_name=network.network_name,
@@ -531,6 +560,10 @@ class FixtureBackend:
             steady_loads_after=steady_after,
             startup_loads_before=startup_before,
             startup_loads_after=startup_after,
+            steady_counts_before=steady_counts_before,
+            steady_counts_after=steady_counts_after,
+            startup_counts_before=startup_counts_before,
+            startup_counts_after=startup_counts_after,
             logs=(
                 f"开始网段 {network.network_name}（Mock 后端）",
                 f"network_id={network.network_id}",
@@ -849,6 +882,8 @@ class FixtureBackend:
 
     def _inspection_warnings(self, session: ImportSession) -> tuple[str, ...]:
         warnings = ["当前使用 FixtureBackend，文件仅按扩展名分类。"]
+        if any(record.note == DEFAULT_CONFIG_NOTE for record in session.records):
+            warnings.append(DEFAULT_CONFIG_NOTE)
         counts = {
             status: sum(record.status is status for record in session.records)
             for status in ImportRecordStatus
@@ -957,4 +992,17 @@ class FixtureBackend:
             tuple(after[index % len(after)] for index in range(100)),
             tuple(value for value in startup_before),
             tuple(value for value in startup_after),
+        )
+
+    @staticmethod
+    def _load_counts(
+        profile: int,
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+        before_pattern = (0, 1, 2, 3, 5, 2, 1, 4, 0, 2)
+        after_pattern = (0, 1, 2, 2, 3, 2, 1, 2, 0, 1)
+        return (
+            tuple(before_pattern[(index + profile) % len(before_pattern)] for index in range(100)),
+            tuple(after_pattern[(index + profile) % len(after_pattern)] for index in range(100)),
+            tuple(before_pattern[(index + profile) % len(before_pattern)] for index in range(8)),
+            tuple(after_pattern[(index + profile) % len(after_pattern)] for index in range(8)),
         )

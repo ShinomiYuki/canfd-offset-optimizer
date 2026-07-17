@@ -166,12 +166,11 @@ def test_partial_failure_remains_browsable_and_does_not_hide_successes(
     assert "模拟网段 GL 优化失败" in window.log_view.toPlainText()
 
 
-def test_missing_required_input_is_explicit_and_batch_stays_disabled(
+def test_missing_dbc_is_explicit_while_default_config_is_automatic(
     qtbot, tmp_path: Path, workspace_root: Path
 ) -> None:
     project = tmp_path / "incomplete"
     project.mkdir()
-    (project / "DA.dbc").write_text("DA", encoding="utf-8")
     window = MainWindow(
         FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
         dialog_handler=lambda *_args: None,
@@ -183,7 +182,10 @@ def test_missing_required_input_is_explicit_and_batch_stays_disabled(
         and window.workflow_state is WorkflowState.INCOMPLETE,
         timeout=5_000,
     )
-    assert "项目配置" in window.input_panel.required_label.text()
+    assert "DBC" in window.input_panel.required_label.text()
+    assert "项目配置" not in window.input_panel.required_label.text()
+    assert window.import_session is not None
+    assert (window.import_session.session_directory / "config/project.yaml").is_file()
     assert not window.progress_panel.run_button.isEnabled()
     assert not window.settings_panel.isEnabled()
 

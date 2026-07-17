@@ -86,9 +86,34 @@ def test_invalid_and_unrecognized_inputs_are_retained_and_reported(
     inspection = backend.inspect_workspace(
         session, lambda _update: None, CancellationToken()
     )
-    assert set(inspection.missing_required) == {InputKind.DBC, InputKind.CONFIG}
+    assert set(inspection.missing_required) == {InputKind.DBC}
     assert not inspection.can_optimize
     assert any("无法识别" in warning for warning in inspection.warnings)
+    assert any("内置默认 project.yaml" in warning for warning in inspection.warnings)
+
+
+def test_missing_user_config_copies_exact_bundled_default_into_session(
+    backend: FixtureBackend, tmp_path: Path
+) -> None:
+    dbc = tmp_path / "PT.dbc"
+    dbc.write_text("PT", encoding="utf-8")
+
+    session = backend.import_inputs((dbc,), lambda _update: None, CancellationToken())
+
+    config = next(record for record in session.records if record.kind is InputKind.CONFIG)
+    assert config.workspace_relative_path == Path("config/project.yaml")
+    assert "内置默认 project.yaml" in config.note
+    copied = session.session_directory / config.workspace_relative_path
+    expected = Path("src/canfd_offset_optimizer/gui/default_project.yaml")
+    assert copied.read_text(encoding="utf-8") == expected.read_text(encoding="utf-8")
+    assert Path("input/config/project.yaml").read_text(
+        encoding="utf-8"
+    ) == expected.read_text(encoding="utf-8")
+    inspection = backend.inspect_workspace(
+        session, lambda _update: None, CancellationToken()
+    )
+    assert inspection.missing_required == ()
+    assert inspection.can_optimize
 
 
 def test_same_content_is_deduplicated_and_name_conflict_is_stably_renamed(
@@ -105,7 +130,9 @@ def test_same_content_is_deduplicated_and_name_conflict_is_stably_renamed(
     session = backend.import_inputs(
         (first, duplicate, conflict), lambda _update: None, CancellationToken()
     )
-    statuses = [record.status for record in session.records]
+    statuses = [
+        record.status for record in session.records if record.kind is InputKind.DBC
+    ]
     assert statuses.count(ImportRecordStatus.IMPORTED) == 1
     assert statuses.count(ImportRecordStatus.DUPLICATE) == 1
     assert statuses.count(ImportRecordStatus.CONFLICT_RENAMED) == 1

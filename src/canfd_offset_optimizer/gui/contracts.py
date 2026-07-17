@@ -367,6 +367,10 @@ class GuiOptimizationResult:
     steady_loads_after: tuple[int, ...]
     startup_loads_before: tuple[int, ...]
     startup_loads_after: tuple[int, ...]
+    steady_counts_before: tuple[int, ...]
+    steady_counts_after: tuple[int, ...]
+    startup_counts_before: tuple[int, ...]
+    startup_counts_after: tuple[int, ...]
     logs: tuple[str, ...] = ()
     output_directory: Path | None = None
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
@@ -399,6 +403,26 @@ class GuiOptimizationResult:
             raise ValueError("steady load arrays must have equal lengths")
         if len(self.startup_loads_before) != len(self.startup_loads_after):
             raise ValueError("startup load arrays must have equal lengths")
+        count_arrays = (
+            self.steady_counts_before,
+            self.steady_counts_after,
+            self.startup_counts_before,
+            self.startup_counts_after,
+        )
+        if any(not array for array in count_arrays):
+            raise ValueError("result congestion count arrays must not be empty")
+        if any(value < 0 for array in count_arrays for value in array):
+            raise ValueError("result congestion count arrays must be non-negative")
+        if any(
+            len(counts) != len(loads)
+            for counts, loads in (
+                (self.steady_counts_before, self.steady_loads_before),
+                (self.steady_counts_after, self.steady_loads_after),
+                (self.startup_counts_before, self.startup_loads_before),
+                (self.startup_counts_after, self.startup_loads_after),
+            )
+        ):
+            raise ValueError("congestion count arrays must align with load arrays")
 
     @property
     def original_steady_load(self) -> tuple[int, ...]:
@@ -415,6 +439,22 @@ class GuiOptimizationResult:
     @property
     def optimized_startup_load(self) -> tuple[int, ...]:
         return self.startup_loads_after
+
+    @property
+    def original_steady_count(self) -> tuple[int, ...]:
+        return self.steady_counts_before
+
+    @property
+    def optimized_steady_count(self) -> tuple[int, ...]:
+        return self.steady_counts_after
+
+    @property
+    def original_startup_count(self) -> tuple[int, ...]:
+        return self.startup_counts_before
+
+    @property
+    def optimized_startup_count(self) -> tuple[int, ...]:
+        return self.startup_counts_after
 
 
 @dataclass(frozen=True, slots=True)

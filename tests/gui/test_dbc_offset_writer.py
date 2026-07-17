@@ -20,6 +20,7 @@ def test_writer_changes_only_existing_offset_numeric_tokens_in_a_copy(
         b'BO_ 2147483939 MsgExt: 8 VCU\r\n'
         b'BA_ "GenMsgCycleTime" BO_ 100 20; // untouched\r\n'
         b'BA_ "GenMsgStartDelayTime" BO_ 100 15; // offset A\r\n'
+        b'BA_ "GenMsgDelayTime" BO_ 100 5; // not the start Offset\r\n'
         b'BA_ "GenMsgStartDelayTime" BO_ 2147483939 20;\r\n'
     )
     source.write_bytes(original)

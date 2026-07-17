@@ -28,6 +28,47 @@ from .contracts import (
 )
 
 
+DEFAULT_PROJECT_CONFIG_PATH = Path(__file__).with_name("default_project.yaml")
+DEFAULT_CONFIG_NOTE = "用户未提供项目配置；已使用内置默认 project.yaml"
+
+
+def add_default_project_config(
+    session_directory: Path,
+    records: list[ImportRecord],
+    imported_at: str,
+    default_config_path: Path = DEFAULT_PROJECT_CONFIG_PATH,
+) -> ImportRecord | None:
+    """Copy the bundled default when no usable YAML/YML was imported."""
+
+    if any(
+        record.kind is InputKind.CONFIG
+        and record.workspace_relative_path is not None
+        and record.status is not ImportRecordStatus.INVALID
+        for record in records
+    ):
+        return None
+    source = default_config_path.resolve(strict=False)
+    if not source.is_file():
+        raise BackendError(f"内置默认项目配置不存在：{source}")
+    content = source.read_bytes()
+    relative = Path("config/project.yaml")
+    destination = session_directory / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    record = ImportRecord(
+        source.resolve(),
+        relative,
+        InputKind.CONFIG,
+        ImportRecordStatus.IMPORTED,
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+        imported_at,
+        note=DEFAULT_CONFIG_NOTE,
+    )
+    records.append(record)
+    return record
+
+
 class WorkspaceImporter:
     """Copy inputs into one immutable ``user_input`` session."""
 
@@ -45,8 +86,14 @@ class WorkspaceImporter:
         InputKind.UNRECOGNIZED: "unrecognized",
     }
 
-    def __init__(self, workspace_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        workspace_root: Path | None = None,
+        *,
+        default_config_path: Path = DEFAULT_PROJECT_CONFIG_PATH,
+    ) -> None:
         self._workspace_root = (workspace_root or Path.cwd()).resolve()
+        self._default_config_path = default_config_path
 
     def import_inputs(
         self,
@@ -134,6 +181,22 @@ class WorkspaceImporter:
                         note=f"无法读取或复制：{exc}",
                     )
                 )
+        default_record = add_default_project_config(
+            session_directory,
+            records,
+            imported_at,
+            self._default_config_path,
+        )
+        if default_record is not None:
+            progress_callback(
+                ProgressUpdate(
+                    ProgressPhase.IMPORTING,
+                    DEFAULT_CONFIG_NOTE,
+                    elapsed_seconds=perf_counter() - started,
+                    overall_completed=total,
+                    overall_total=total,
+                )
+            )
         manifest_path = session_directory / "import_manifest.json"
         session = ImportSession(
             session_id, project_name, self._workspace_root, session_directory,

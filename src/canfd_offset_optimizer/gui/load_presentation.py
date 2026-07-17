@@ -7,6 +7,26 @@ SLOT_WIDTH_MS = 5
 STEADY_HYPERPERIOD_MS = 500
 DISPLAY_DURATIONS_MS = (500, 1_000, 2_000, 5_000)
 DEFAULT_DISPLAY_DURATION_MS = 2_000
+CONGESTION_COLORS = (
+    "#FFFFFF",
+    "#B7E4C7",
+    "#FFE082",
+    "#FFB74D",
+    "#EF5350",
+)
+CONGESTION_LABELS = ("0 帧", "1 帧", "2 帧", "3～4 帧", "5 帧及以上")
+
+
+def congestion_level(release_count: int) -> int:
+    """Map release counts exactly like main reporting.congestion_plotter."""
+
+    if release_count < 0:
+        raise ValueError("release_count must be non-negative")
+    if release_count <= 2:
+        return release_count
+    if release_count <= 4:
+        return 3
+    return 4
 
 
 def steady_repeat_count(display_duration_ms: int) -> int:

@@ -33,7 +33,12 @@ user_input/<timestamp>_<project>/
 原文件不被修改。`import_manifest.json` 记录原始绝对路径、工作区相对路径、类型、
 大小、SHA-256、导入时间、去重/冲突状态和解析使用状态。
 
-至少需要一个 DBC 和唯一一个 YAML/YML 配置。ARXML 可选：
+至少需要一个 DBC。YAML/YML 项目配置和 ARXML 均可选：
+
+- 用户没有提供 YAML/YML 时，导入器自动把程序内置的 `default_project.yaml` 复制为本次
+  `user_input/<session>/config/project.yaml`。内置文件内容与仓库
+  `input/config/project.yaml` 一致，并在 `import_manifest.json` 和日志中明确标记；
+- 用户提供一个 YAML/YML 时优先使用用户文件，不叠加默认配置；提供多个仍属于阻塞冲突；
 
 - 仅 DBC + 配置：只能选择 `payload_bytes + Peak`；
 - 提供 ARXML：核心先发现 Controller `SHORT-NAME`，再按 DBC 来源签名做唯一对应；
@@ -87,12 +92,13 @@ user_output/<timestamp>_<project>_real/
 
 `results/networks_summary.csv` 汇总所有网段（包括失败、跳过和取消）；成功网段的 Offset 明细放在
 各自子目录。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
-0～2000 ms 的稳态负载曲线和热力图。
+0～2000 ms 的重复稳态负载曲线，以及不重复的单个稳态窗口拥挤热力图。
 
 `dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。写入器只在已有
 `GenMsgStartDelayTime`、`GenMsgDelayTime` 或 `MsgStartDelayTime` 报文属性行中替换 Offset 数字；
-编码、换行、空格、注释、顺序及所有其它字节保持不变。参与优化的报文缺少原 Offset、存在重复
-Offset 属性或无法精确定位时会失败关闭，不插入字段、不猜测、不整文件重排。
+编码、换行、空格、注释、顺序及所有其它字节保持不变。属性选择顺序与核心 parser 一致；例如
+同时存在 `GenMsgStartDelayTime` 和 `GenMsgDelayTime` 时只覆盖前者，后者保持不变。参与优化的报文
+缺少原 Offset、同一优先属性重复或无法精确定位时会失败关闭，不插入字段、不猜测、不整文件重排。
 
 Offset 表中的报文名、CAN ID、周期和原始 Offset 来自核心加载模型；优化 Offset、指标、
 Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult`。切换网段时 GUI 先清空
@@ -104,8 +110,10 @@ Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult
 不会插值、修改 DTO 或重新运行优化。标题会明确标注超周期重复次数。启动窗口始终只显示核心
 返回的真实范围，并禁用稳态显示范围选项。导出 PNG 使用当前选择的完整显示范围。
 
-“负载热力图”页使用与负载曲线相同的原始/优化后数组和稳态重复规则：上排为原始负载，下排为
-优化后负载，颜色越深表示时隙负载越高。启动窗口同样只显示核心真实范围，不进行周期复制。
+“负载热力图”页参考主分支 `congestion_plotter` 的拥挤热力图语义：上排为原始方案，下排为
+优化后方案；颜色按同一时隙释放帧数固定分为白色 0 帧、绿色 1 帧、黄色 2 帧、橙色 3～4 帧、
+红色 5 帧及以上。帧数来自核心时隙快照，不从负载值推测。稳态和启动热力图均只显示核心返回
+的单个真实窗口，不使用负载曲线的多超周期重复规则。
 
 ## 验收
 

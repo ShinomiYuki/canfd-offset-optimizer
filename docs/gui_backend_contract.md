@@ -53,7 +53,10 @@ Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `
 每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
 `network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
 
-DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提供 `payload_bytes`。生产适配器通过
+DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导入器必须把随程序发布、内容与仓库
+`input/config/project.yaml` 一致的默认配置复制到会话 `config/project.yaml`，并在 manifest 与警告中
+标明来源；一个用户配置优先于默认配置，多个用户配置仍阻塞。没有可用 ARXML 时只提供
+`payload_bytes`。生产适配器通过
 核心 parser 发现 Controller `SHORT-NAME`，再以 DBC 来源签名进行唯一关联；匹配歧义时不得猜测，
 对应网段只开放 `payload_bytes`。GUI 原样显示 `DA` 等网段名，不扩写。
 
@@ -91,7 +94,8 @@ DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提
 3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
 5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
-6. 成功后自动导出当前网段的稳态负载图和热力图；绘图只重复 DTO 数组，不改变核心结果。
+6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线可重复 DTO 稳态数组；热力图必须使用
+   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。
 7. DBC 输出必须从导入工作区副本生成，只允许字节级替换已有 Offset 属性的数字 token；不得调用
    会重排 DBC 的整库序列化，不得覆盖原始用户文件，定位不唯一时失败关闭。
 8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
