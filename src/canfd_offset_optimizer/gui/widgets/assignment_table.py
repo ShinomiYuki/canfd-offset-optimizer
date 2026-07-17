@@ -7,6 +7,7 @@ from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QTableView,
@@ -23,6 +24,8 @@ class AssignmentTable(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.current_network_label = QLabel("当前网段：请选择一个网段")
+        self.current_network_id: str | None = None
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("按报文名或 CAN ID 筛选")
         self.changed_only_check = QCheckBox("只看已修改报文")
@@ -44,6 +47,7 @@ class AssignmentTable(QWidget):
         controls.addWidget(self.copy_button)
         controls.addWidget(self.export_button)
         layout = QVBoxLayout(self)
+        layout.addWidget(self.current_network_label)
         layout.addLayout(controls)
         layout.addWidget(self.table, 1)
         self.filter_edit.textChanged.connect(self.proxy.set_query)
@@ -55,10 +59,32 @@ class AssignmentTable(QWidget):
         self._copy_shortcut.activated.connect(self.copy_selected_rows)
 
     def set_result(self, result: GuiOptimizationResult) -> None:
+        self.current_network_id = result.network_id
+        self.current_network_label.setText(f"当前网段：{result.display_name}")
+        self.current_network_label.setToolTip(
+            f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
+        )
         self.model.set_assignments(result.assignments)
         self.table.resizeColumnsToContents()
         self.export_button.setEnabled(True)
         self._update_copy_enabled()
+
+    def clear_result(
+        self,
+        message: str = "请选择一个网段",
+        *,
+        network_id: str | None = None,
+        display_name: str | None = None,
+    ) -> None:
+        self.current_network_id = network_id
+        title = display_name or message
+        self.current_network_label.setText(f"当前网段：{title}")
+        if display_name:
+            self.current_network_label.setText(f"当前网段：{display_name}（{message}）")
+        self.current_network_label.setToolTip("")
+        self.model.set_assignments(())
+        self.copy_button.setEnabled(False)
+        self.export_button.setEnabled(False)
 
     def _update_copy_enabled(self) -> None:
         self.copy_button.setEnabled(bool(self.table.selectionModel().selectedRows()))

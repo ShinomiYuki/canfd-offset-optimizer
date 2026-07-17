@@ -2,11 +2,10 @@
 
 ## 1. 当前定位
 
-本 GUI 是面向日常工程流程的桌面 MVP，但当前后端是 **MockBackend**。窗口标题、输入警告和
-结果警告都会标明 Mock 状态。Mock 结果不能作为车辆网络设计、验证或交付依据。
-
-真实优化器尚未接入，因为仓库当前没有稳定的公共 OptimizationService、结构化进度和协作式
-取消接口。GUI 不会以调用 CLI 或 optimizer 私有函数的方式绕过这一边界。
+GUI 已采用“统一工程导入 + 全网段顺序批量优化”工作流。当前后端仍是
+**MockBackend**，所有结果仅用于界面与流程联调，不能作为工程设计、验证或交付依据。
+真实核心尚无满足 GUI 所需的稳定批量 service、结构化进度和协作式取消接口，因此 GUI 不直接
+调用 CLI、parser DTO 或 optimizer 私有实现。
 
 ## 2. 安装与启动
 
@@ -14,98 +13,118 @@ Python 3.11 或更高版本：
 
 ```bash
 python -m pip install -e ".[gui,dev]"
-```
-
-任选一种方式启动：
-
-```bash
 python -m canfd_offset_optimizer.gui
-canfd-offset-gui
 ```
 
-只使用 CLI 的用户不需要安装 `gui` extra；包初始化和 CLI 导入路径不会导入 PySide6。
+Windows 也可双击：
 
-## 3. 完整操作流程
+```text
+scripts\start_gui.cmd
+```
 
-1. 在“输入与输出”区域选择 DBC 和项目 YAML 配置。
-2. 如项目需要，选择 ARXML 目录。
-3. 显式选择用户输出目录。GUI 不会默认写入 `output/diagnostics/`。
-4. 点击“读取网段”。输入检查在后台线程执行，完成后网段列表可用。
-5. 选择网段、权重、优化模式、Balanced tolerance 和 Restart 策略。
-6. 必要时展开“高级选项”设置 attempts、candidate pool 和 3-opt。
-7. 点击“开始优化”，在运行状态区查看阶段、attempt、耗时和日志摘要。
-8. 在“结果概览”“Offset 修改”“负载曲线”和“运行日志”标签页审阅结果。
-9. 将 Offset CSV、运行摘要 JSON 和负载曲线 PNG 导出到用户选择的位置。
+脚本以仓库根目录为工作目录，并在缺少 PySide6 时给出安装提示。只使用 CLI 的用户无需安装
+`gui` extra。
 
-输入路径变化后必须重新读取网段，避免用旧的网段摘要启动新请求。
+## 3. 统一工程导入
 
-## 4. 设置说明
+在“统一工程导入”区域可一次拖入：
 
-- 网段下拉框直接显示 backend 返回的名称（例如 `PT`、`DA`、`DK`），不会扩写缩写或附加报文数量。
-- **Payload 长度（payload_bytes）**：只依据 Payload 长度加权，不代表物理总线占用时间。
-- **帧时间（frame_time_us）**：依赖 ARXML 中可用的总线时序。没有可用 ARXML 时不提供此选项。
-- **Peak**：严格峰值模式。
-- **Balanced**：默认推荐模式；默认 tolerance 为 `0.05`。
-- **Variance**：实验模式。
-- **Restart 自动**：使用自适应最少/最多 attempts。
-- **Restart 固定**：使用固定 attempts。
-- **Candidate pool**：可选 `1/4/8/16/32`。
-- **冲突导向 3-opt**：默认关闭。它是高质量离线搜索选项，真实接入后可能显著增加运行时间。
+- 一个或多个文件；
+- 一个或多个目录；
+- 文件和目录的任意混合。
 
-只有 DBC/项目配置而没有可用 ARXML 总线时序时，权重下拉框只显示 `payload_bytes`。按照核心
-现有语义，Payload 权重同时固定使用 `peak`，Balanced tolerance 不可用。提供 ARXML 后可在
-两种权重之间选择；GUI 默认选择 `frame_time_us` 和 Balanced。
+目录会被递归扫描。每次导入都会创建独立目录：
 
-GUI 只把这些选项写入不可变请求，不解释或重写核心算法语义。
+```text
+user_input/<timestamp>_<project>/
+```
 
-## 5. 运行、取消与关闭
+原始文件不会被移动或修改。工作区按 `dbc/config/arxml/unrecognized` 分类并保留目录结构，
+同时写入 `import_manifest.json`，记录原始绝对路径、工作区相对路径、类型、大小、SHA-256、
+导入时间、去重/冲突状态和是否参与解析。
 
-输入检查和优化都运行在专用 `QThread` 中，主窗口在任务期间仍可拖动、重绘和响应。任务运行时：
+- 同名同内容：按 SHA-256 去重；
+- 同名不同内容：添加稳定哈希后缀，不覆盖文件；
+- 无法识别或无效输入：保留记录，并在界面明确提示；
+- “清空当前会话”只清理界面状态，不删除原始文件或历史 `user_input` 会话。
 
-- 会锁定可能破坏当前请求的输入和设置；
-- 防止重复启动；
-- 保留“取消”按钮。
+必需输入为至少一个 DBC 和唯一项目 YAML/YML 配置；ARXML 为可选输入。多个项目配置会被视为
+阻塞冲突。导入完成后 GUI 自动检查工作区副本并发现所有 DBC 网段，无需手工选择网段。
+主窗口只显示“已发现网段：N 个”和导入统计，不展开长文件名。点击“查看详情”可在“网段详情”
+和“导入文件详情”两个标签页查看稳定 network_id、来源 DBC、完整 hash 与路径。详情窗口和主界面
+共享同一会话模型，不维护可能过期的副本。
 
-取消是协作式的。点击后状态显示“正在请求停止”，后台在下一个安全检查点确认后才进入“任务已
-取消”，GUI 不使用强制终止线程。任务运行时关闭窗口会先询问；确认后同样请求协作式停止，并在
-worker 正常退出后关闭窗口。
+网段名称直接显示为 `BD`、`GL`、`SU` 等简洁原名，不扩写缩写。完整 DBC 文件名仅作为来源
+信息和 Tooltip，不作为结果查询键。
 
-## 6. 结果与导出
+## 4. 全网段批量设置
 
-结果概览显示优化前后的 `Zss`、`Qss`、标准差、`Zst`、`Qst`、`Nvio`、`Vvio`，以及实际
-attempts、停止原因、总耗时和 warnings。
+一份不可变设置快照应用到全部已发现网段：
 
-Offset 表支持：
+- 权重：`payload_bytes` 或 `frame_time_us`；
+- 模式：Peak、Balanced、Variance；
+- Balanced tolerance；
+- Adaptive/Fixed restart 和 attempts；
+- Candidate pool：`1/4/8/16/32`；
+- 可选冲突导向 3-opt。
 
-- 按报文名或 CAN ID 筛选；
-- 只看已修改报文；
-- 按各列排序；
-- 复制选中行；
-- 导出带 UTF-8 BOM 的 CSV。
+只有 DBC 和配置、没有 ARXML 时，只能选择 `payload_bytes`，并固定为 Peak。提供 ARXML 后可在
+两种权重中选择，默认使用 `frame_time_us + Balanced`。权重选项取全部网段支持能力的交集，
+不会对不同网段静默采用不同设置。
 
-负载曲线可切换稳态/启动窗口并导出 PNG。曲线数组、指标和 Offset 都直接来自 backend result，
-GUI 不重新计算核心目标或负载模型。
+## 5. 批量运行、进度与取消
 
-## 7. 错误与技术详情
+点击“开始全部网段优化”后，backend 按发现顺序逐个处理网段。界面显示当前网段、网段序号、
+attempt、网段状态、总耗时和总体进度。某个网段失败或被配置为跳过时，错误被记录，后续网段仍
+继续运行；工程级失败则终止任务。
 
-可预期的后端错误会显示简明中文说明。意外异常的主消息不会显示 Python traceback；需要排查时，
-可展开错误对话框中的技术详情。日志标签页保留阶段、警告、取消和错误摘要。
+导入、检查和优化都由 `QObject + QThread` worker 执行。任务期间输入和设置被锁定，重复启动被
+忽略。取消使用线程安全 token：当前网段在安全检查点结束，已完成网段及产物保留，当前网段标记
+取消，尚未开始的网段标记跳过。GUI 不调用 `QThread.terminate()`。关闭运行中的窗口时会先确认，
+确认后采用相同的协作式停止流程。
 
-常见问题：
+## 6. 输出和结果浏览
 
-- “读取网段”不可用：DBC 或项目配置路径尚未填写。
-- “开始优化”不可用：尚未成功读取网段、输入已变化，或未选择输出目录。
-- 点击取消后没有立即停止：后台正在等待下一个协作式取消检查点。
-- 结果带 Mock 警告：这是当前 MVP 的预期行为，真实后端尚未接入。
+每次批量运行默认创建：
+
+```text
+user_output/<timestamp>_<project>/
+├── summary.csv
+├── summary.json
+├── DA/
+├── DK/
+└── PT/
+```
+
+成功网段目录包含 `offsets.csv`、`metrics.json`、`load_curves.json` 和 `run.log`；失败、跳过或
+取消网段包含 `status.json`。工程汇总不会因单个网段失败而丢失。
+
+默认结果页每个网段一行，支持按网段名、最终状态和最小 Zss 改善筛选，并支持列排序。表格显示
+状态、模式、原始/优化后 Zss 与 Qss、标准差、改善值、attempts、停止原因、耗时和警告数。
+选择某一行只切换该网段的 Offset 表、负载曲线和日志详情，不会重新运行或修改结果。选择关系由
+稳定 `network_id` 驱动，因此排序和筛选后仍指向正确结果。失败网段显示空 Offset/曲线及自身错误；
+没有选择时显示“请选择一个网段”，不会回退到最后完成的网段。
+
+MockBackend 使用 `SHA-256(network_id)` 派生可复现的网段差异。标准差、Zss 改善、Attempts、
+Offset 和四组曲线均来自该网段自己的 DTO；Mock 标识继续保留，数据不代表真实优化器结果。
+
+## 7. 常见问题
+
+- **无法开始运行**：检查“缺少必需输入”或“工程冲突”提示。
+- **只有一种权重**：工程未提供 ARXML，因此只能使用 Payload + Peak。
+- **一个网段失败**：从汇总表选择该网段查看错误；其他成功网段仍可浏览和导出。
+- **取消后仍有输出**：这是预期行为，已完成结果和批量摘要会被保留。
+- **结果带 Mock 警告**：当前真实后端尚未接入。
 
 ## 8. 开发验收
 
-Windows PowerShell：
-
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
+$env:TEMP = (Resolve-Path ".tmp").Path
+$env:TMP = $env:TEMP
 python -m pytest -q tests/gui
 python -m pytest -q
 python -m ruff check src tests
 python -m mypy src
+git diff --check
 ```

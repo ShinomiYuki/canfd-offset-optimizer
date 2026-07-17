@@ -80,14 +80,17 @@ python -m canfd_offset_optimizer.gui
 canfd-offset-gui
 ```
 
-当前 GUI 明确使用 **MockBackend**：可以完成输入检查、网段选择、后台运行、协作式取消、
-结果查看以及 CSV/JSON/PNG 导出，但结果仅用于界面联调，**不能用于工程交付**。仓库当前尚无
-稳定的公共 OptimizationService；在核心线程提供
-`docs/gui_backend_contract.md` 所列接口前，GUI 不会直接调用 optimizer 私有实现。
+Windows 可直接双击 `scripts\start_gui.cmd` 一键启动。
+
+当前 GUI 明确使用 **MockBackend**：可一次拖入多个文件、目录或两者混合，递归复制到版本化
+`user_input` 工作区，自动发现全部 DBC 网段，并按顺序执行工程级批量优化。结果页提供全网段
+状态/指标汇总、筛选排序、单网段 Offset/曲线/日志详情，以及版本化 `user_output` 工程摘要和
+每网段产物。单网段失败不会阻断后续网段；取消会保留已完成结果。Mock 结果仅用于界面联调，
+**不能用于工程交付**。真实核心接入边界见 `docs/gui_backend_contract.md`。
 
 GUI 支持选择 `payload_bytes` 和 `frame_time_us` 两种权重。未提供可用 ARXML 总线时序时，
-只能选择 `payload_bytes`，并按核心现有语义固定使用 `peak` 模式。网段下拉框直接显示后端返回
-的名称（如 `PT`、`DA`、`DK`），不扩写或解释网段缩写。
+只能选择 `payload_bytes`，并按核心现有语义固定使用 `peak` 模式。界面直接显示发现的名称
+（如 `PT`、`DA`、`DK`），不扩写或解释网段缩写。
 
 使用说明见 `docs/gui_user_guide.md`，架构边界见 `docs/gui_architecture_plan.md`。
 

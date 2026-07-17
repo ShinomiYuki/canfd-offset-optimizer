@@ -1,4 +1,4 @@
-"""Pure workflow state machine used by the GUI controller."""
+"""Pure workflow state machine for import, inspection and batch optimization."""
 
 from __future__ import annotations
 
@@ -7,52 +7,67 @@ from enum import Enum
 
 class WorkflowState(str, Enum):
     IDLE = "idle"
+    IMPORTING = "importing"
     INSPECTING = "inspecting"
+    INCOMPLETE = "incomplete"
     READY = "ready"
     RUNNING = "running"
     CANCELLING = "cancelling"
     SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
 
+_TERMINAL_RESTARTS = frozenset(
+    {WorkflowState.IMPORTING, WorkflowState.READY, WorkflowState.RUNNING}
+)
 _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
-    WorkflowState.IDLE: frozenset({WorkflowState.INSPECTING}),
-    WorkflowState.INSPECTING: frozenset(
+    WorkflowState.IDLE: frozenset({WorkflowState.IMPORTING}),
+    WorkflowState.IMPORTING: frozenset(
         {
-            WorkflowState.READY,
+            WorkflowState.INSPECTING,
             WorkflowState.CANCELLING,
             WorkflowState.FAILED,
             WorkflowState.CANCELLED,
         }
     ),
-    WorkflowState.READY: frozenset({WorkflowState.INSPECTING, WorkflowState.RUNNING}),
+    WorkflowState.INSPECTING: frozenset(
+        {
+            WorkflowState.READY,
+            WorkflowState.INCOMPLETE,
+            WorkflowState.CANCELLING,
+            WorkflowState.FAILED,
+            WorkflowState.CANCELLED,
+        }
+    ),
+    WorkflowState.INCOMPLETE: frozenset({WorkflowState.IMPORTING}),
+    WorkflowState.READY: frozenset({WorkflowState.IMPORTING, WorkflowState.RUNNING}),
     WorkflowState.RUNNING: frozenset(
         {
             WorkflowState.CANCELLING,
             WorkflowState.SUCCEEDED,
+            WorkflowState.PARTIAL,
             WorkflowState.FAILED,
             WorkflowState.CANCELLED,
         }
     ),
     WorkflowState.CANCELLING: frozenset(
-        {WorkflowState.SUCCEEDED, WorkflowState.FAILED, WorkflowState.CANCELLED}
+        {
+            WorkflowState.SUCCEEDED,
+            WorkflowState.PARTIAL,
+            WorkflowState.FAILED,
+            WorkflowState.CANCELLED,
+        }
     ),
-    WorkflowState.SUCCEEDED: frozenset(
-        {WorkflowState.INSPECTING, WorkflowState.READY, WorkflowState.RUNNING}
-    ),
-    WorkflowState.FAILED: frozenset(
-        {WorkflowState.INSPECTING, WorkflowState.READY, WorkflowState.RUNNING}
-    ),
-    WorkflowState.CANCELLED: frozenset(
-        {WorkflowState.INSPECTING, WorkflowState.READY, WorkflowState.RUNNING}
-    ),
+    WorkflowState.SUCCEEDED: _TERMINAL_RESTARTS,
+    WorkflowState.PARTIAL: _TERMINAL_RESTARTS,
+    WorkflowState.FAILED: _TERMINAL_RESTARTS,
+    WorkflowState.CANCELLED: _TERMINAL_RESTARTS,
 }
 
 
 class WorkflowStateMachine:
-    """Reject invalid lifecycle transitions instead of silently corrupting UI state."""
-
     def __init__(self) -> None:
         self._state = WorkflowState.IDLE
 
@@ -69,3 +84,6 @@ class WorkflowStateMachine:
                 f"invalid GUI state transition: {self._state.value} -> {target.value}"
             )
         self._state = target
+
+    def reset(self) -> None:
+        self._state = WorkflowState.IDLE

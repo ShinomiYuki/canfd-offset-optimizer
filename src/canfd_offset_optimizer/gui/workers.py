@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from .contracts import (
     BackendError,
+    BatchOptimizationCancelled,
     CancellationToken,
     OptimizationCancelled,
     ProgressCallback,
@@ -34,7 +35,7 @@ class BackendWorker(QObject):
     progress = Signal(object)
     succeeded = Signal(object)
     failed = Signal(object)
-    cancelled = Signal()
+    cancelled = Signal(object)
     finished = Signal()
 
     def __init__(self, operation: BackendOperation, token: CancellationToken) -> None:
@@ -46,8 +47,10 @@ class BackendWorker(QObject):
     def run(self) -> None:
         try:
             result = self._operation(self._emit_progress, self._token)
+        except BatchOptimizationCancelled as exc:
+            self.cancelled.emit(exc.partial_result)
         except OptimizationCancelled:
-            self.cancelled.emit()
+            self.cancelled.emit(None)
         except BackendError as exc:
             self.failed.emit(WorkerFailure(str(exc), traceback.format_exc()))
         except Exception as exc:  # GUI boundary must preserve unexpected technical details.

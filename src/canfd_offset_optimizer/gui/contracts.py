@@ -1,4 +1,4 @@
-"""Stable DTO and backend protocol boundary consumed by the GUI."""
+"""Immutable GUI DTOs for workspace import and all-network optimization."""
 
 from __future__ import annotations
 
@@ -7,103 +7,187 @@ from enum import Enum
 from math import isfinite
 from pathlib import Path
 from threading import Event
-from typing import Callable, Protocol, runtime_checkable
+from types import MappingProxyType
+from typing import Callable, Mapping, Protocol, runtime_checkable
+
+
+class InputKind(str, Enum):
+    """File classifications exposed by an import backend."""
+
+    DBC = "dbc"
+    CONFIG = "config"
+    ARXML = "arxml"
+    OTHER_SUPPORTED = "other_supported"
+    UNRECOGNIZED = "unrecognized"
+    INVALID = "invalid"
+
+
+class ImportRecordStatus(str, Enum):
+    """Stable status for one source file or invalid source path."""
+
+    IMPORTED = "imported"
+    DUPLICATE = "duplicate"
+    CONFLICT_RENAMED = "conflict_renamed"
+    INVALID = "invalid"
 
 
 class OptimizationMode(str, Enum):
-    """User-facing optimization modes supported by the core project."""
-
     PEAK = "peak"
     BALANCED = "balanced"
     VARIANCE = "variance"
 
 
 class WeightMode(str, Enum):
-    """User-selectable message weight semantics."""
-
     PAYLOAD_BYTES = "payload_bytes"
     FRAME_TIME_US = "frame_time_us"
 
 
 class RestartMode(str, Enum):
-    """User-facing restart policy selection."""
-
     ADAPTIVE = "adaptive"
     FIXED = "fixed"
 
 
 class ProgressPhase(str, Enum):
-    """Coarse phases that are stable enough for presentation."""
-
+    IMPORTING = "importing"
     INSPECTING = "inspecting"
     PREPARING = "preparing"
-    PEAK_SEARCH = "peak_search"
-    BALANCED_SEARCH = "balanced_search"
+    NETWORK_RUNNING = "network_running"
     FINALIZING = "finalizing"
 
 
+class NetworkRunStatus(str, Enum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELLED = "cancelled"
+
+
+class BatchRunStatus(str, Enum):
+    SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 @dataclass(frozen=True, slots=True)
-class InputInspectionRequest:
-    """Paths required to inspect one GUI project selection."""
+class ImportRecord:
+    """Manifest record for one discovered source file or invalid source path."""
 
-    dbc_path: Path
-    config_path: Path
-    arxml_directory: Path | None = None
+    original_path: Path
+    workspace_relative_path: Path | None
+    kind: InputKind
+    status: ImportRecordStatus
+    size_bytes: int | None
+    sha256: str | None
+    imported_at: str
+    used_by_parser: bool = False
+    note: str = ""
 
-    def validation_errors(self) -> tuple[str, ...]:
-        errors: list[str] = []
-        if not self.dbc_path.is_file():
-            errors.append(f"DBC 文件不存在：{self.dbc_path}")
-        if not self.config_path.is_file():
-            errors.append(f"项目配置不存在：{self.config_path}")
-        if self.arxml_directory is not None and not self.arxml_directory.is_dir():
-            errors.append(f"ARXML 目录不存在：{self.arxml_directory}")
-        return tuple(errors)
+    def __post_init__(self) -> None:
+        if not self.original_path.is_absolute():
+            raise ValueError("manifest original_path must be absolute")
+        if self.status is ImportRecordStatus.INVALID:
+            if self.workspace_relative_path is not None:
+                raise ValueError("invalid source must not have a workspace path")
+        elif self.workspace_relative_path is None:
+            raise ValueError("copied or duplicate source requires a workspace path")
+        if self.size_bytes is not None and self.size_bytes < 0:
+            raise ValueError("manifest size must be non-negative")
+        if self.sha256 is not None and len(self.sha256) != 64:
+            raise ValueError("manifest sha256 must use 64 hexadecimal characters")
+        if not self.imported_at:
+            raise ValueError("manifest import time must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class ImportSession:
+    """One immutable user_input workspace session."""
+
+    session_id: str
+    project_name: str
+    workspace_root: Path
+    session_directory: Path
+    manifest_path: Path
+    created_at: str
+    records: tuple[ImportRecord, ...]
+
+    def __post_init__(self) -> None:
+        if not self.session_id or not self.project_name:
+            raise ValueError("import session identity must not be empty")
+        if not self.session_directory.is_absolute() or not self.manifest_path.is_absolute():
+            raise ValueError("import session paths must be absolute")
+        if not self.records:
+            raise ValueError("import session must contain at least one record")
+
+    def records_of_kind(self, kind: InputKind) -> tuple[ImportRecord, ...]:
+        return tuple(record for record in self.records if record.kind is kind)
 
 
 @dataclass(frozen=True, slots=True)
 class NetworkSummary:
-    """One selectable network returned by backend inspection."""
+    """One discovered network with stable identity and explicit source metadata."""
 
-    name: str
+    network_id: str
+    network_name: str
+    display_name: str
+    source_file: str
+    source_workspace_path: Path
+    is_optimizable: bool
     message_count: int
     available_weight_modes: tuple[WeightMode, ...]
-    description: str = ""
+    warnings: tuple[str, ...] = ()
+    unoptimizable_reason: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.name.strip():
-            raise ValueError("network name must not be empty")
-        if self.message_count <= 0:
-            raise ValueError("network message_count must be positive")
-        if not self.available_weight_modes:
-            raise ValueError("network must provide at least one weight mode")
+        identity = (self.network_id, self.network_name, self.display_name, self.source_file)
+        if any(not value.strip() for value in identity):
+            raise ValueError("network identity and source fields must not be empty")
+        if self.source_workspace_path.is_absolute():
+            raise ValueError("network source_workspace_path must be relative")
+        if self.message_count < 0:
+            raise ValueError("network message_count must be non-negative")
+        if self.is_optimizable and self.message_count <= 0:
+            raise ValueError("optimizable network message_count must be positive")
+        if self.is_optimizable and not self.available_weight_modes:
+            raise ValueError("optimizable network must provide at least one weight mode")
+        if not self.is_optimizable and not self.unoptimizable_reason:
+            raise ValueError("non-optimizable network requires a reason")
         if any(not isinstance(mode, WeightMode) for mode in self.available_weight_modes):
             raise ValueError("network weight mode is unsupported")
         if len(set(self.available_weight_modes)) != len(self.available_weight_modes):
             raise ValueError("network weight modes must be unique")
-        if WeightMode.PAYLOAD_BYTES not in self.available_weight_modes:
+        if self.is_optimizable and WeightMode.PAYLOAD_BYTES not in self.available_weight_modes:
             raise ValueError("network must always support payload_bytes weight")
 
 
 @dataclass(frozen=True, slots=True)
-class InputSummary:
-    """Backend inspection result with stable selectable network order."""
+class WorkspaceInspection:
+    """Workspace-only inspection result used to gate batch optimization."""
 
+    session: ImportSession
     networks: tuple[NetworkSummary, ...]
+    missing_required: tuple[InputKind, ...] = ()
     warnings: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        names = tuple(item.name for item in self.networks)
-        if not names:
-            raise ValueError("inspection must return at least one network")
-        if len(set(names)) != len(names):
-            raise ValueError("inspection network names must be unique")
+        network_ids = tuple(network.network_id for network in self.networks)
+        if len(set(network_ids)) != len(network_ids):
+            raise ValueError("inspection network IDs must be unique")
+        if len(set(self.missing_required)) != len(self.missing_required):
+            raise ValueError("missing input kinds must be unique")
+
+    @property
+    def can_optimize(self) -> bool:
+        return bool(self.optimizable_networks) and not self.missing_required and not self.errors
+
+    @property
+    def optimizable_networks(self) -> tuple[NetworkSummary, ...]:
+        return tuple(network for network in self.networks if network.is_optimizable)
 
 
 @dataclass(frozen=True, slots=True)
 class RestartSettings:
-    """Restart settings mirrored from the existing public configuration semantics."""
-
     mode: RestartMode = RestartMode.ADAPTIVE
     fixed_attempts: int = 21
     min_attempts: int = 20
@@ -120,66 +204,77 @@ class RestartSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class GuiOptimizationRequest:
-    """Complete immutable request sent through the GUI backend protocol."""
+class GuiBatchOptimizationRequest:
+    """One immutable request applied to every discovered network."""
 
-    inspection: InputInspectionRequest
-    network_name: str
+    inspection: WorkspaceInspection
     weight_mode: WeightMode
     mode: OptimizationMode
     balanced_tolerance: float
     restart: RestartSettings
     candidate_pool_size: int
     enable_triple_search: bool
-    output_directory: Path
+    output_root: Path
 
     def __post_init__(self) -> None:
+        if not self.inspection.can_optimize:
+            raise ValueError("workspace inspection is not ready for optimization")
         if not isinstance(self.weight_mode, WeightMode):
             raise ValueError("weight mode is unsupported")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("optimization mode is unsupported")
         if not isinstance(self.restart, RestartSettings):
             raise ValueError("restart settings are invalid")
-        if not self.network_name.strip():
-            raise ValueError("network_name must not be empty")
         if not isfinite(self.balanced_tolerance) or not 0 <= self.balanced_tolerance <= 1:
             raise ValueError("balanced_tolerance must be finite and in [0, 1]")
         if self.candidate_pool_size not in {1, 4, 8, 16, 32}:
             raise ValueError("candidate_pool_size is unsupported")
         if not isinstance(self.enable_triple_search, bool):
             raise ValueError("enable_triple_search must be boolean")
-        if (
-            self.weight_mode is WeightMode.FRAME_TIME_US
-            and self.inspection.arxml_directory is None
+        if any(
+            self.weight_mode not in network.available_weight_modes
+            for network in self.inspection.optimizable_networks
         ):
-            raise ValueError("frame_time_us weight requires an ARXML directory")
+            raise ValueError("selected weight mode is not available for every network")
         if self.weight_mode is WeightMode.PAYLOAD_BYTES and self.mode is not OptimizationMode.PEAK:
             raise ValueError("payload_bytes weight only supports peak mode")
-
-    def validation_errors(self) -> tuple[str, ...]:
-        errors = list(self.inspection.validation_errors())
-        if not self.output_directory:
-            errors.append("请选择用户输出目录")
-        elif self.output_directory.exists() and not self.output_directory.is_dir():
-            errors.append(f"输出路径不是目录：{self.output_directory}")
-        return tuple(errors)
+        if self.output_root.exists() and not self.output_root.is_dir():
+            raise ValueError("output_root must be a directory")
 
 
 @dataclass(frozen=True, slots=True)
 class ProgressUpdate:
-    """One thread-safe progress notification."""
+    """Thread-safe project or per-network progress update."""
 
     phase: ProgressPhase
     message: str
+    elapsed_seconds: float = 0.0
+    network_id: str | None = None
+    network_name: str | None = None
+    network_index: int | None = None
+    network_total: int | None = None
+    network_status: NetworkRunStatus | None = None
     attempt: int | None = None
     total_attempts: int | None = None
-    elapsed_seconds: float = 0.0
+    overall_completed: int = 0
+    overall_total: int = 0
 
     def __post_init__(self) -> None:
         if not self.message.strip():
             raise ValueError("progress message must not be empty")
         if not isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0:
             raise ValueError("progress elapsed_seconds must be non-negative")
+        if (self.network_index is None) != (self.network_total is None):
+            raise ValueError("network index and total must appear together")
+        if self.network_index is not None and (
+            self.network_index <= 0
+            or self.network_total is None
+            or self.network_total <= 0
+            or self.network_index > self.network_total
+            or not self.network_id
+            or not self.network_name
+        ):
+            raise ValueError("progress network range is invalid")
         if (self.attempt is None) != (self.total_attempts is None):
             raise ValueError("attempt and total_attempts must appear together")
         if self.attempt is not None and (
@@ -189,12 +284,14 @@ class ProgressUpdate:
             or self.attempt > self.total_attempts
         ):
             raise ValueError("progress attempt range is invalid")
+        if self.overall_completed < 0 or self.overall_total < 0:
+            raise ValueError("overall progress must be non-negative")
+        if self.overall_total and self.overall_completed > self.overall_total:
+            raise ValueError("overall completed must not exceed total")
 
 
 @dataclass(frozen=True, slots=True)
 class ObjectiveMetrics:
-    """Complete metrics already calculated by a backend."""
-
     zss: int
     qss: int
     standard_deviation: float
@@ -213,8 +310,6 @@ class ObjectiveMetrics:
 
 @dataclass(frozen=True, slots=True)
 class OffsetAssignmentRow:
-    """One immutable row for the GUI Offset comparison table."""
-
     message_name: str
     can_id: int
     cycle_time_us: int
@@ -238,9 +333,12 @@ class OffsetAssignmentRow:
 
 @dataclass(frozen=True, slots=True)
 class GuiOptimizationResult:
-    """Stable view-ready result; GUI code must treat it as immutable."""
+    """Complete immutable result for one network."""
 
+    network_id: str
     network_name: str
+    display_name: str
+    source_file: str
     weight_mode: WeightMode
     mode: OptimizationMode
     original_metrics: ObjectiveMetrics
@@ -254,6 +352,8 @@ class GuiOptimizationResult:
     steady_loads_after: tuple[int, ...]
     startup_loads_before: tuple[int, ...]
     startup_loads_after: tuple[int, ...]
+    logs: tuple[str, ...] = ()
+    output_directory: Path | None = None
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -261,8 +361,9 @@ class GuiOptimizationResult:
             raise ValueError("result weight mode is unsupported")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("result optimization mode is unsupported")
-        if not self.network_name.strip() or not self.stop_reason.strip():
-            raise ValueError("result network and stop reason must not be empty")
+        identity = (self.network_id, self.network_name, self.display_name, self.source_file)
+        if any(not value.strip() for value in identity) or not self.stop_reason.strip():
+            raise ValueError("result network identity, source and stop reason must not be empty")
         if not self.assignments:
             raise ValueError("result must contain assignments")
         if self.actual_attempts <= 0:
@@ -284,9 +385,138 @@ class GuiOptimizationResult:
         if len(self.startup_loads_before) != len(self.startup_loads_after):
             raise ValueError("startup load arrays must have equal lengths")
 
+    @property
+    def original_steady_load(self) -> tuple[int, ...]:
+        return self.steady_loads_before
+
+    @property
+    def optimized_steady_load(self) -> tuple[int, ...]:
+        return self.steady_loads_after
+
+    @property
+    def original_startup_load(self) -> tuple[int, ...]:
+        return self.startup_loads_before
+
+    @property
+    def optimized_startup_load(self) -> tuple[int, ...]:
+        return self.startup_loads_after
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkBatchResult:
+    """Status and optional detailed result for one network."""
+
+    network_id: str
+    network_name: str
+    display_name: str
+    source_file: str
+    status: NetworkRunStatus
+    weight_mode: WeightMode
+    mode: OptimizationMode
+    result: GuiOptimizationResult | None = None
+    error: str | None = None
+    warnings: tuple[str, ...] = ()
+    logs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        identity = (self.network_id, self.network_name, self.display_name, self.source_file)
+        if any(not value.strip() for value in identity):
+            raise ValueError("batch network identity and source must not be empty")
+        if self.status is NetworkRunStatus.SUCCEEDED and self.result is None:
+            raise ValueError("successful network requires a detailed result")
+        if self.status is not NetworkRunStatus.SUCCEEDED and self.result is not None:
+            raise ValueError("non-successful network must not contain a result")
+        if self.status is NetworkRunStatus.FAILED and not self.error:
+            raise ValueError("failed network requires an error")
+        if self.result is not None and (
+            self.result.network_id != self.network_id
+            or self.result.network_name != self.network_name
+            or self.result.source_file != self.source_file
+        ):
+            raise ValueError("batch row and detailed result network identity must match")
+
+    @property
+    def zss_improvement(self) -> int | None:
+        if self.result is None:
+            return None
+        return self.result.original_metrics.zss - self.result.optimized_metrics.zss
+
+
+@dataclass(frozen=True, slots=True)
+class BatchOptimizationResult:
+    """Project-level batch result retaining every completed network."""
+
+    project_name: str
+    import_session_directory: Path
+    import_manifest_path: Path
+    output_directory: Path
+    network_results: tuple[NetworkBatchResult, ...]
+    elapsed_seconds: float
+    warnings: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+    cancelled: bool = False
+    network_items_by_id: Mapping[str, NetworkBatchResult] = field(init=False, repr=False)
+    results_by_network_id: Mapping[str, GuiOptimizationResult] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.project_name or not self.network_results:
+            raise ValueError("batch result project and networks must not be empty")
+        item_map = {item.network_id: item for item in self.network_results}
+        if len(item_map) != len(self.network_results):
+            raise ValueError("batch result network IDs must be unique")
+        result_map = {
+            item.network_id: item.result
+            for item in self.network_results
+            if item.result is not None
+        }
+        object.__setattr__(self, "network_items_by_id", MappingProxyType(item_map))
+        object.__setattr__(self, "results_by_network_id", MappingProxyType(result_map))
+        if not isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0:
+            raise ValueError("batch elapsed_seconds must be non-negative")
+
+    @property
+    def succeeded_count(self) -> int:
+        return sum(item.status is NetworkRunStatus.SUCCEEDED for item in self.network_results)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(item.status is NetworkRunStatus.FAILED for item in self.network_results)
+
+    @property
+    def skipped_count(self) -> int:
+        return sum(item.status is NetworkRunStatus.SKIPPED for item in self.network_results)
+
+    @property
+    def cancelled_count(self) -> int:
+        return sum(item.status is NetworkRunStatus.CANCELLED for item in self.network_results)
+
+    @property
+    def status(self) -> BatchRunStatus:
+        if self.cancelled:
+            return BatchRunStatus.CANCELLED
+        if self.succeeded_count == len(self.network_results):
+            return BatchRunStatus.SUCCEEDED
+        if self.succeeded_count:
+            return BatchRunStatus.PARTIAL
+        return BatchRunStatus.FAILED
+
+    def result_for_network_id(self, network_id: str) -> GuiOptimizationResult:
+        return self.results_by_network_id[network_id]
+
+    def network_item_for_id(self, network_id: str) -> NetworkBatchResult:
+        return self.network_items_by_id[network_id]
+
 
 class OptimizationCancelled(RuntimeError):
-    """Raised by a backend after observing cooperative cancellation."""
+    """Raised after observing cooperative cancellation."""
+
+
+class BatchOptimizationCancelled(OptimizationCancelled):
+    """Cancellation carrying completed-network results."""
+
+    def __init__(self, partial_result: BatchOptimizationResult) -> None:
+        super().__init__("用户已请求停止批量优化")
+        self.partial_result = partial_result
 
 
 class BackendError(RuntimeError):
@@ -294,8 +524,6 @@ class BackendError(RuntimeError):
 
 
 class CancellationToken:
-    """Thread-safe cooperative cancellation shared with a worker."""
-
     def __init__(self) -> None:
         self._event = Event()
 
@@ -316,20 +544,28 @@ ProgressCallback = Callable[[ProgressUpdate], None]
 
 @runtime_checkable
 class OptimizationBackend(Protocol):
-    """Only interface the GUI may use to inspect and optimize projects."""
+    """Only interface the GUI may use for a workspace batch."""
 
-    def inspect_input(
+    def import_inputs(
         self,
-        request: InputInspectionRequest,
+        sources: tuple[Path, ...],
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
-    ) -> InputSummary:
-        """Validate input and return selectable networks."""
+    ) -> ImportSession:
+        """Copy and classify sources into a new user_input session."""
 
-    def optimize(
+    def inspect_workspace(
         self,
-        request: GuiOptimizationRequest,
+        session: ImportSession,
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
-    ) -> GuiOptimizationResult:
-        """Run one synchronous optimization without touching GUI objects."""
+    ) -> WorkspaceInspection:
+        """Inspect only workspace copies and discover every network."""
+
+    def optimize_all_networks(
+        self,
+        request: GuiBatchOptimizationRequest,
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+    ) -> BatchOptimizationResult:
+        """Optimize every discovered network sequentially."""

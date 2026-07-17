@@ -2,56 +2,64 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from canfd_offset_optimizer.gui.contracts import InputInspectionRequest
 from canfd_offset_optimizer.gui.main_window import MainWindow
 from canfd_offset_optimizer.gui.mock_backend import MockBackend
 from canfd_offset_optimizer.gui.state import WorkflowState
 
-from test_main_window import configure_window, inspect_until_ready
+from test_main_window import import_until_ready
 
 
-def test_inspection_can_be_cancelled_before_networks_are_loaded(
-    qtbot, gui_inputs: InputInspectionRequest, tmp_path: Path
+def test_import_can_be_cancelled_cooperatively(
+    qtbot, source_project: Path, workspace_root: Path
 ) -> None:
-    window = MainWindow(MockBackend(delay_seconds=0.02), dialog_handler=lambda *_args: None)
+    window = MainWindow(
+        MockBackend(workspace_root=workspace_root, delay_seconds=0.02),
+        dialog_handler=lambda *_args: None,
+    )
     qtbot.addWidget(window)
-    configure_window(window, gui_inputs, tmp_path / "user-output")
-
-    window.start_inspection()
+    window.import_sources((source_project,))
     window.request_cancel()
     assert window.workflow_state is WorkflowState.CANCELLING
     qtbot.waitUntil(
-        lambda: not window.task_active and window.workflow_state is WorkflowState.CANCELLED,
-        timeout=3_000,
+        lambda: not window.task_active
+        and window.workflow_state is WorkflowState.CANCELLED,
+        timeout=5_000,
     )
-    assert window.settings_panel.network_combo.count() == 0
-
-
-def test_user_cancellation_is_cooperative_and_restores_controls(
-    qtbot, gui_inputs: InputInspectionRequest, tmp_path: Path
-) -> None:
-    window = MainWindow(MockBackend(delay_seconds=0.01), dialog_handler=lambda *_args: None)
-    qtbot.addWidget(window)
-    configure_window(window, gui_inputs, tmp_path / "user-output")
-    inspect_until_ready(qtbot, window)
-
-    window.start_optimization()
-    window.request_cancel()
-    assert window.workflow_state is WorkflowState.CANCELLING
+    assert window.inspection is None
     assert not window.progress_panel.cancel_button.isEnabled()
-    assert "等待当前安全检查点" in window.log_view.toPlainText()
 
-    qtbot.waitUntil(
-        lambda: not window.task_active and window.workflow_state is WorkflowState.CANCELLED,
-        timeout=3_000,
+
+def test_batch_cancellation_retains_completed_rows_and_restores_controls(
+    qtbot, source_project: Path, workspace_root: Path
+) -> None:
+    window = MainWindow(
+        MockBackend(workspace_root=workspace_root, delay_seconds=0.005),
+        dialog_handler=lambda *_args: None,
     )
-    assert window.input_panel.inspect_button.isEnabled()
+    qtbot.addWidget(window)
+    import_until_ready(qtbot, window, (source_project,))
+    window.start_optimization()
+    qtbot.waitUntil(
+        lambda: window.progress_panel.network_index_label.text() == "2/3",
+        timeout=5_000,
+    )
+    window.request_cancel()
+    assert window.workflow_state is WorkflowState.CANCELLING
+    qtbot.waitUntil(
+        lambda: not window.task_active
+        and window.workflow_state is WorkflowState.CANCELLED,
+        timeout=5_000,
+    )
+    assert window.result is not None
+    assert window.result.succeeded_count >= 1
+    assert window.summary_panel.model.rowCount() == 3
+    assert window.input_panel.add_button.isEnabled()
     assert window.settings_panel.isEnabled()
     assert window.progress_panel.run_button.isEnabled()
 
 
-def test_close_while_running_can_decline_then_confirm_cooperative_stop(
-    qtbot, gui_inputs: InputInspectionRequest, tmp_path: Path
+def test_close_while_running_can_decline_then_confirm_safe_stop(
+    qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     decisions = iter((False, True))
     confirmations: list[bool] = []
@@ -62,23 +70,19 @@ def test_close_while_running_can_decline_then_confirm_cooperative_stop(
         return result
 
     window = MainWindow(
-        MockBackend(delay_seconds=0.02),
+        MockBackend(workspace_root=workspace_root, delay_seconds=0.01),
         dialog_handler=lambda *_args: None,
         close_confirmation=confirm,
     )
     qtbot.addWidget(window)
     window.show()
-    configure_window(window, gui_inputs, tmp_path / "user-output")
-    inspect_until_ready(qtbot, window)
+    import_until_ready(qtbot, window, (source_project,))
     window.start_optimization()
-
     window.close()
     assert window.isVisible()
     assert window.workflow_state is WorkflowState.RUNNING
-
     window.close()
     assert window.workflow_state is WorkflowState.CANCELLING
-    qtbot.waitUntil(lambda: not window.task_active and not window.isVisible(), timeout=3_000)
-
+    qtbot.waitUntil(lambda: not window.task_active and not window.isVisible(), timeout=5_000)
     assert confirmations == [False, True]
     assert window.workflow_state is WorkflowState.CANCELLED

@@ -1,70 +1,74 @@
-# GUI 架构计划
+# GUI 架构与批量工作区边界
 
-## 1. 仓库结论与公共入口
+## 1. 当前决策
 
-GUI 分支基线为 `0e3e6d6`。当前包根只公开领域模型；`load_project()`、`run_gcls()`、报告 writer 和 `cli.main()` 都不是面向桌面应用的稳定 service。仓库没有 `OptimizationService`、公共 request/result DTO、结构化阶段进度或协作式取消接口。
+仓库仍没有可直接满足 GUI 的稳定公共 OptimizationService。GUI 保持 Mock-first，不导入 parser
+中间 DTO、搜索状态、增量快照或 optimizer 私有函数。真实 service 就绪后只替换组合根注入的
+backend adapter，窗口、worker、DTO 和 view model 不应因核心内部结构变化而改变。
 
-因此本分支**不接入真实优化器**。按照 GUI 与核心线程的边界，本分支提供隔离的 `OptimizationBackend` Protocol 和 MockBackend。后续核心线程提供稳定 service 后，新增一个实现该 Protocol 的 adapter，并在 `app.py` 组合根替换注入对象；窗口、worker、view model 和 widgets 不得改变。
+## 2. 三段式 Backend Protocol
 
-## 2. GUI 与核心的数据边界
+`gui/contracts.py` 提供不可变 DTO 和同步 `OptimizationBackend`：
 
-GUI 只依赖 `gui/contracts.py` 中的不可变 DTO：
+1. `import_inputs(sources, progress, cancellation) -> ImportSession`
+2. `inspect_workspace(session, progress, cancellation) -> WorkspaceInspection`
+3. `optimize_all_networks(request, progress, cancellation) -> BatchOptimizationResult`
 
-- `InputInspectionRequest` / `InputSummary` / `NetworkSummary`；
-- `GuiOptimizationRequest`；
-- `ProgressUpdate` / `CancellationToken`；
-- `ObjectiveMetrics` / `OffsetAssignmentRow` / `GuiOptimizationResult`；
-- `OptimizationBackend` Protocol。
+统一导入复制原文件到版本化 `user_input` 会话，生成清单；检查阶段只读取工作区副本并发现全部
+网段；批量阶段顺序运行并在版本化 `user_output` 会话中生成工程摘要和每网段产物。
 
-GUI 禁止导入 `SearchState`、`SlotMap`、局部搜索缓存、restart 记录、增量评价快照、parser 中间类型或 optimizer 私有函数。GUI 不重新计算 Zss/Qss 等核心指标，所有指标、Offset 和负载数组均来自 backend result。
+核心边界 DTO 包括 `ImportRecord/ImportSession`、`NetworkSummary/WorkspaceInspection`、
+`GuiBatchOptimizationRequest`、`ProgressUpdate`、`GuiOptimizationResult`、
+`NetworkBatchResult/BatchOptimizationResult` 和 `CancellationToken`。所有跨线程集合使用 tuple，
+结果 dataclass 为 frozen。
 
-## 3. 文件结构
+网段使用稳定 `network_id` 作为唯一键，并独立保留 `network_name/display_name/source_file`。
+`BatchOptimizationResult.results_by_network_id` 是不可变映射；概览排序或筛选后的选择先读取行内
+network_id，再由主窗口统一驱动 Offset、曲线和日志三个详情页。
+
+## 3. 文件职责
 
 ```text
 src/canfd_offset_optimizer/gui/
-├── __init__.py
-├── __main__.py
-├── app.py
-├── main_window.py
-├── contracts.py
-├── backend.py
-├── mock_backend.py
-├── workers.py
-├── view_models.py
-├── state.py
-├── formatting.py
-└── widgets/
-    ├── __init__.py
-    ├── input_panel.py
-    ├── settings_panel.py
-    ├── progress_panel.py
-    ├── metrics_panel.py
-    ├── assignment_table.py
-    └── load_chart.py
+├── app.py                 # composition root，当前注入 MockBackend
+├── contracts.py           # 稳定 GUI DTO、Protocol、取消令牌
+├── backend.py             # backend 公共重导出
+├── mock_backend.py        # 工作区导入和确定性批量模拟
+├── workers.py             # QObject worker / QThread signal boundary
+├── state.py               # 纯工作流状态机
+├── main_window.py         # 编排，不解析输入、不计算指标
+├── view_models.py         # 只读批量汇总与 Offset models
+├── formatting.py          # 用户显式产物格式
+└── widgets/               # 导入、设置、进度、汇总、详情和曲线
 ```
 
-`tests/gui/` 覆盖 contract、校验、Mock、状态、worker 生命周期、主窗口、结果展示、导出和关闭窗口行为。PySide6 只位于 `gui` extra；CLI 包初始化路径不导入 GUI。
+主窗口只保留导入计数和“已发现网段：N 个”。`ProjectDetailsDialog` 直接复用 InputPanel 持有的
+`NetworkDetailsTableModel` 与 `ImportDetailsTableModel`，避免复制会话数据。
 
-## 4. 后台任务与取消
+PySide6 只存在于 GUI 包和 `gui` optional extra。CLI 导入路径不依赖 Qt。
 
-同步 backend 由 `QObject` worker 移入专用 `QThread`。worker 通过 signals 回传 progress、success、failure、cancelled 和 finished；GUI 主线程不执行 inspect/optimize。
+## 4. 工作流与失败隔离
 
-取消使用共享、线程安全的 `CancellationToken`。按钮将状态切换为 `cancelling` 并显示“正在请求停止”，不使用 `QThread.terminate()`。关闭窗口时提示用户；确认后发出取消并等待 worker 正常结束。任务状态固定为：`idle → inspecting → ready → running → cancelling → cancelled`，以及 success/failure 分支。
+主状态为 `idle → importing → inspecting → ready → running`，并进入 `succeeded/partial/failed`
+或经 `cancelling → cancelled`。输入缺失或冲突进入 `incomplete`，只能重新导入。
 
-## 5. Mock-first 与真实后端最小接口
+批量任务首版严格顺序执行，避免核心单线程增量 evaluator 的并发风险。单个网段失败不会中断后续
+网段；工程级初始化失败才进入工程失败。取消异常携带 `partial_result`，确保 worker 可以把已完成
+网段安全送回 GUI。
 
-MockBackend 必须支持多网段、输入校验、分阶段进度、成功/失败/取消/警告、指标、Offset 表和启动/稳态曲线；优化期间不写 `output/diagnostics` 或任何真实报告。
+## 5. 与增量快照核心线程的关系
 
-真实 adapter 的最小要求：
+本次重构只涉及 `src/.../gui/`、`tests/gui/`、GUI 文档和 README，不修改 optimizer、parser、
+reporting、models、CLI 或增量快照文件，因此没有直接代码冲突。真实 backend 接入仍应等待核心
+线程提供稳定批量 service、进度和取消检查点；adapter 不得把 `SearchState`、`SlotMap`、
+`TripleContributionCache`、parser 中间对象等泄露给 GUI。
 
-1. `inspect_input(request, progress_callback, cancellation_token) -> InputSummary`；
-2. `optimize(request, progress_callback, cancellation_token) -> GuiOptimizationResult`；
-3. 请求能够表达网段、`payload_bytes/frame_time_us` 权重、目标模式、Balanced tolerance、restart 策略、candidate pool 和 3-opt；
-4. 结果直接提供完整指标、attempt/停止原因、Offset、四组负载数组、warnings 和导出产物；
-5. 核心提供阶段/attempt 进度和协作式取消，不要求 GUI 触碰内部状态。
+## 6. 验收重点
 
-在上述 service 稳定前，发布入口明确标注 Mock 模式，不以 CLI 或私有函数冒充真实接入。
-
-## 6. 预计修改文件
-
-仅修改 GUI 范围：`pyproject.toml` 的 GUI extra/entry/test dependency、README GUI 说明、新增 `src/.../gui/`、`tests/gui/` 和三份 GUI 文档。不会修改 optimizer、SearchState、models、RestartPolicy、诊断、reporting、CLI、golden regression 或论文文件。
+- 文件/目录/混合拖入和递归扫描；
+- 工作区复制、manifest、哈希去重、稳定冲突改名、原文件不变；
+- 多网段自动发现、Payload/Frame Time 能力约束；
+- 顺序批量、单网段失败继续、工程失败、协作式取消保留部分结果；
+- 工程汇总、每网段产物、筛选/排序/详情切换；
+- QThread 生命周期、关闭窗口安全停止、CLI 不导入 PySide6；
+- 全量 pytest、ruff、strict mypy 和 `git diff --check`。

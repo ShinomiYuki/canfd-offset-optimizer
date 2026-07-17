@@ -1,29 +1,35 @@
-"""Backend boundary exports; no optimizer implementation is imported here."""
+"""Public GUI backend boundary; no optimizer implementation is imported here."""
 
 from .contracts import (
     BackendError,
+    BatchOptimizationCancelled,
+    BatchOptimizationResult,
     CancellationToken,
-    GuiOptimizationRequest,
+    GuiBatchOptimizationRequest,
     GuiOptimizationResult,
-    InputInspectionRequest,
-    InputSummary,
+    ImportSession,
+    NetworkBatchResult,
+    NetworkSummary,
     OptimizationBackend,
     OptimizationCancelled,
     ProgressCallback,
     ProgressUpdate,
-    WeightMode,
+    WorkspaceInspection,
 )
 
 __all__ = [
     "BackendError",
+    "BatchOptimizationCancelled",
+    "BatchOptimizationResult",
     "CancellationToken",
-    "GuiOptimizationRequest",
+    "GuiBatchOptimizationRequest",
     "GuiOptimizationResult",
-    "InputInspectionRequest",
-    "InputSummary",
+    "ImportSession",
+    "NetworkBatchResult",
+    "NetworkSummary",
     "OptimizationBackend",
     "OptimizationCancelled",
     "ProgressCallback",
     "ProgressUpdate",
-    "WeightMode",
+    "WorkspaceInspection",
 ]

@@ -2,141 +2,89 @@
 
 ## 1. 接入状态
 
-截至本分支基线 `0e3e6d6`，仓库没有稳定的公共 OptimizationService、GUI request/result、
-结构化阶段进度或协作式取消接口。因此当前 `app.py` 注入 `MockBackend`，**真实优化器未接入**。
-
-本文件定义核心线程需要提供的最小应用层能力。真实接入必须新增 adapter 实现
-`canfd_offset_optimizer.gui.contracts.OptimizationBackend`，不得让窗口或 widgets 导入
-`SearchState`、局部搜索缓存、增量快照、restart 内部记录或 optimizer 私有函数。
+当前 `app.py` 注入 `MockBackend`，真实优化器尚未接入。真实 adapter 必须实现
+`canfd_offset_optimizer.gui.contracts.OptimizationBackend`，不得让 GUI 导入核心私有类型。
 
 ## 2. 调用协议
 
 ```python
 class OptimizationBackend(Protocol):
-    def inspect_input(
+    def import_inputs(
         self,
-        request: InputInspectionRequest,
+        sources: tuple[Path, ...],
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
-    ) -> InputSummary: ...
+    ) -> ImportSession: ...
 
-    def optimize(
+    def inspect_workspace(
         self,
-        request: GuiOptimizationRequest,
+        session: ImportSession,
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
-    ) -> GuiOptimizationResult: ...
+    ) -> WorkspaceInspection: ...
+
+    def optimize_all_networks(
+        self,
+        request: GuiBatchOptimizationRequest,
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+    ) -> BatchOptimizationResult: ...
 ```
 
-两个方法都是同步方法，但由 GUI 的 worker 在专用 `QThread` 调用。backend：
+方法均同步，由 GUI worker 在专用 `QThread` 调用。Backend 不得创建或操作 QObject/widget，不得
+返回可变核心对象，不得直接更新界面。
 
-- 不得访问、创建或修改 QObject/widget；
-- 不得假定回调运行在 GUI 主线程；
-- 不得从自己的线程直接更新界面；
-- 必须把所有展示数据放入 DTO 或进度回调；
-- 不得返回可变的核心对象供 GUI 持有。
+## 3. 导入契约
 
-## 3. 输入检查
+Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `user_input` 会话。`ImportRecord`
+必须记录原始绝对路径、工作区相对路径、检测类型、状态、大小、SHA-256、时间和 parser 使用标志。
+重复文件去重；冲突文件稳定改名；不得覆盖或修改原始文件。清单必须可供后续审计。
 
-`InputInspectionRequest` 包含：
+## 4. 检查契约
 
-- `dbc_path: Path`；
-- `config_path: Path`；
-- `arxml_directory: Path | None`。
+检查只能读取 `ImportSession` 工作区副本。`WorkspaceInspection` 必须明确：
 
-backend 负责真实格式解析和语义校验。成功返回 `InputSummary`：
+- 全部名称唯一的 `NetworkSummary`；
+- 缺失的必需输入；
+- 阻塞错误和非阻塞 warnings；
+- 每个网段共同可用的权重能力。
 
-- 一个或多个、名称唯一的 `NetworkSummary`；
-- 每个网段的原始名称、报文数量和可用权重集合；
-- 面向用户的 warnings。
+每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
+`network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
 
-可用权重集合只能包含 `payload_bytes` 和 `frame_time_us`。没有可用 ARXML 总线时序时，backend
-必须只返回 `payload_bytes`。GUI 直接显示原始网段名称（如 `DA`），不扩写缩写或附加解释，
-也不接触 parser 中间模型。
+DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提供 `payload_bytes`；GUI 原样显示
+`DA` 等网段名，不扩写。
 
-## 4. 优化请求
+## 5. 批量请求与结果
 
-`GuiOptimizationRequest` 是不可变 DTO，包含：
+`GuiBatchOptimizationRequest` 对全部网段共享权重、模式、tolerance、restart、candidate pool、
+3-opt 和输出根目录。Backend 不得静默为不同网段改写设置。
 
-- 已验证的输入检查请求；
-- 网段名称；
-- `payload_bytes/frame_time_us` 权重；
-- `peak/balanced/variance` 模式；
-- Balanced tolerance；
-- `adaptive/fixed` restart 设置及 attempts；
-- candidate pool size；
-- 是否启用冲突导向 3-opt；
-- 用户显式选择的输出目录。
+`BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
+`results_by_network_id` 映射。最终状态是
+`succeeded/failed/skipped/cancelled`。成功项包含完整 `GuiOptimizationResult`；失败项包含用户可读
+错误；部分失败不能丢失成功结果。批量根目录提供 CSV/JSON 汇总，每网段目录提供成功产物或
+`status.json`。
 
-adapter 只能把这些字段映射到稳定的公共 service。字段缺失、组合不合法或核心不支持时，应抛出
-带用户可读消息的 `BackendError`，不能静默改写请求语义。
+指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
+批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
+也不得用最后完成的结果填充其他网段。
 
-`payload_bytes` 只允许 `peak`。GUI 会在该权重下锁定 Peak，但 adapter 仍必须独立校验，不能
-接受由其他调用方构造的 Payload + Balanced/Variance 请求。
+## 6. 进度、取消与错误
 
-## 5. 进度与取消
+`ProgressUpdate` 可表达 import/inspect/prepare/network/finalize 阶段、当前网段、序号、attempt、
+网段状态、耗时和总体进度。进度不得泄露搜索缓存或 parser 内部类型。
 
-backend 通过 `ProgressCallback(ProgressUpdate)` 发送粗粒度、稳定的展示信息：
+取消使用 `CancellationToken`。当前网段应在安全检查点停止，已完成网段保留，后续网段标记跳过，
+并抛出携带 `BatchOptimizationResult` 的 `BatchOptimizationCancelled`。禁止强制终止线程。
 
-- `inspecting`、`preparing`、`peak_search`、`balanced_search`、`finalizing` 阶段；
-- 简洁用户消息；
-- 可用时的当前/总 attempts；
-- 已用秒数。
+可预期错误抛 `BackendError`；意外异常由 worker 转换为安全主消息和独立技术详情。禁止吞异常、
+返回空半成品或把工程失败伪装成全部网段失败。
 
-进度不能泄露 assignment hash、solver branches/conflicts、缓存类名或内部 YAML 字段。
+## 7. 真实 Adapter 接入清单
 
-`CancellationToken` 是线程安全的协作式令牌。真实 service 应在解析阶段边界、restart/attempt
-边界和可安全中断的长循环中轮询，并通过 `raise_if_cancelled()` 抛出
-`OptimizationCancelled`。GUI 会保持 `cancelling` 状态直到 backend 确认，禁止使用
-`QThread.terminate()` 或伪装为立即停止。
-
-## 6. 优化结果
-
-`GuiOptimizationResult` 必须一次性提供：
-
-- 网段、权重和模式；
-- 原始/优化后的完整 `ObjectiveMetrics`；
-- 不可变 `OffsetAssignmentRow` 序列；
-- 实际 attempts、停止原因和总耗时；
-- warnings；
-- 稳态窗口优化前/后负载数组；
-- 启动窗口优化前/后负载数组；
-- backend 已生成的用户产物路径（如有）。
-
-`ObjectiveMetrics` 包含 `Zss/Qss/standard_deviation/Zst/Qst/Nvio/Vvio`。所有指标和负载数组
-必须由核心 service 计算；GUI 不得利用 Offset 重新实现目标函数或负载模型。数组前后长度必须
-匹配，所有 DTO 使用 frozen dataclass 和 tuple，避免窗口筛选、排序或导出时修改原结果。
-
-## 7. 错误边界
-
-- 可预期的输入、配置、求解或写出错误：抛出 `BackendError`，消息可以直接显示给用户。
-- 用户取消：抛出 `OptimizationCancelled`。
-- 其他异常：允许穿过 backend 边界；worker 会给出安全主消息，并把类型、消息和 traceback 仅放入
-  可展开的技术详情。
-- 禁止吞掉异常、返回半成品结果或用空数组表示失败。
-
-## 8. 核心线程需提供的最小公共接口
-
-真实接入前，核心线程仍需提供：
-
-1. 稳定、与 CLI 参数解析解耦的输入检查 service；
-2. 接受完整不可变请求并返回完整结果的同步优化 service；
-3. 阶段与 attempt 级结构化进度回调；
-4. 在安全检查点轮询的协作式取消；
-5. 对两种权重、三种目标、restart、candidate pool 和 3-opt 的明确公共映射；
-6. 核心直接计算并返回四组负载数组和全部指标；
-7. 面向用户的 warning、停止原因、实际 attempts 和产物路径；
-8. 不暴露 `SearchState`、增量评价快照、局部移动缓存或 optimizer 私有函数的 service DTO。
-
-只有上述接口完成等价性验证并稳定后，才可实现真实 adapter。
-
-## 9. Adapter 接入清单
-
-1. 新建独立 adapter 模块，实现 `OptimizationBackend`。
-2. adapter 只依赖核心公共 service 和 GUI contracts。
-3. 为每个请求字段、结果字段、异常、进度和取消路径增加 adapter 测试。
-4. 用同一输入验证 CLI/service 的核心结果等价，不修改 golden regression。
-5. 在 `app.py` 组合根将 `MockBackend()` 替换为真实 adapter；窗口和 widgets 不变。
-6. 更新 README、用户指南和窗口标题，明确真实后端已接入。
-
-当前状态停留在第 1 步之前：MockBackend 可完整驱动 GUI，但真实 adapter 等待核心公共接口。
+1. 核心先提供与 CLI 参数解析解耦的稳定工程导入/检查/批量 service。
+2. 提供阶段和 attempt 进度、线程安全取消检查点与部分结果语义。
+3. Adapter 只依赖核心公共 service 和 GUI contracts。
+4. 覆盖全部字段、错误、取消和产物映射，并验证 CLI/service 核心结果等价。
+5. 仅在 `app.py` 替换注入对象，再移除 Mock 标识；窗口和 widgets 不变。

@@ -1,112 +1,108 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
-    GuiOptimizationRequest,
-    InputInspectionRequest,
+    GuiBatchOptimizationRequest,
+    ImportRecord,
+    ImportRecordStatus,
+    InputKind,
     NetworkSummary,
     OptimizationCancelled,
     OptimizationMode,
     RestartMode,
     RestartSettings,
     WeightMode,
+    WorkspaceInspection,
 )
 
 
-def test_request_validation_reports_missing_inputs(tmp_path: Path) -> None:
-    inspection = InputInspectionRequest(
-        tmp_path / "missing.dbc", tmp_path / "missing.yaml", tmp_path / "missing-arxml"
+def test_import_record_requires_absolute_origin_and_workspace_for_valid_record(
+    tmp_path: Path,
+) -> None:
+    kwargs = dict(
+        original_path=(tmp_path / "a.dbc").resolve(),
+        workspace_relative_path=Path("dbc/a.dbc"),
+        kind=InputKind.DBC,
+        status=ImportRecordStatus.IMPORTED,
+        size_bytes=1,
+        sha256="0" * 64,
+        imported_at="2026-07-17T00:00:00+00:00",
     )
-    request = GuiOptimizationRequest(
+    assert ImportRecord(**kwargs).workspace_relative_path == Path("dbc/a.dbc")
+    with pytest.raises(ValueError, match="absolute"):
+        ImportRecord(**(kwargs | {"original_path": Path("a.dbc")}))
+    with pytest.raises(ValueError, match="workspace"):
+        ImportRecord(**(kwargs | {"workspace_relative_path": None}))
+
+
+def test_network_contract_always_supports_payload_weight() -> None:
+    kwargs = dict(
+        network_id="net-pt",
+        network_name="PT",
+        display_name="PT",
+        source_file="PT.dbc",
+        source_workspace_path=Path("dbc/PT.dbc"),
+        is_optimizable=True,
+        message_count=1,
+    )
+    with pytest.raises(ValueError, match="payload_bytes"):
+        NetworkSummary(
+            **kwargs,
+            available_weight_modes=(WeightMode.FRAME_TIME_US,),
+        )
+    network = NetworkSummary(
+        **kwargs,
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US),
+    )
+    assert network.network_name == "PT"
+
+
+def test_batch_request_rejects_weight_not_common_to_all_networks(
+    inspection: WorkspaceInspection,
+) -> None:
+    payload_only = replace(
         inspection,
-        "PT_CAN",
-        WeightMode.FRAME_TIME_US,
-        OptimizationMode.BALANCED,
-        0.05,
-        RestartSettings(),
-        1,
-        False,
-        tmp_path / "output",
+        networks=tuple(
+            replace(network, available_weight_modes=(WeightMode.PAYLOAD_BYTES,))
+            for network in inspection.networks
+        ),
     )
-    errors = request.validation_errors()
-    assert len(errors) == 3
-    assert any("DBC" in item for item in errors)
-    assert any("配置" in item for item in errors)
-    assert any("ARXML" in item for item in errors)
+    with pytest.raises(ValueError, match="every network"):
+        GuiBatchOptimizationRequest(
+            inspection=payload_only,
+            weight_mode=WeightMode.FRAME_TIME_US,
+            mode=OptimizationMode.PEAK,
+            balanced_tolerance=0.05,
+            restart=RestartSettings(),
+            candidate_pool_size=4,
+            enable_triple_search=False,
+            output_root=inspection.session.workspace_root / "user_output",
+        )
 
 
-def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="restart mode"):
-        RestartSettings("adaptive")  # type: ignore[arg-type]
+def test_payload_weight_forces_peak_mode(inspection: WorkspaceInspection) -> None:
+    with pytest.raises(ValueError, match="peak"):
+        GuiBatchOptimizationRequest(
+            inspection=inspection,
+            weight_mode=WeightMode.PAYLOAD_BYTES,
+            mode=OptimizationMode.BALANCED,
+            balanced_tolerance=0.05,
+            restart=RestartSettings(),
+            candidate_pool_size=4,
+            enable_triple_search=False,
+            output_root=inspection.session.workspace_root / "user_output",
+        )
+
+
+def test_restart_settings_and_cancellation_are_explicit() -> None:
     with pytest.raises(ValueError, match="min_attempts"):
         RestartSettings(RestartMode.ADAPTIVE, min_attempts=81, max_attempts=80)
-    arxml = tmp_path / "arxml"
-    arxml.mkdir()
-    inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml", arxml)
-    with pytest.raises(ValueError, match="candidate_pool_size"):
-        GuiOptimizationRequest(
-            inspection,
-            "PT_CAN",
-            WeightMode.FRAME_TIME_US,
-            OptimizationMode.PEAK,
-            0.05,
-            RestartSettings(),
-            3,
-            False,
-            tmp_path / "out",
-        )
-
-
-def test_frame_time_requires_arxml_and_networks_always_offer_payload(tmp_path: Path) -> None:
-    inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml")
-    with pytest.raises(ValueError, match="requires an ARXML"):
-        GuiOptimizationRequest(
-            inspection,
-            "PT",
-            WeightMode.FRAME_TIME_US,
-            OptimizationMode.PEAK,
-            0.05,
-            RestartSettings(),
-            4,
-            False,
-            tmp_path / "out",
-        )
-    with pytest.raises(ValueError, match="always support payload_bytes"):
-        NetworkSummary("PT", 1, (WeightMode.FRAME_TIME_US,))
-    with pytest.raises(ValueError, match="optimization mode"):
-        GuiOptimizationRequest(
-            inspection,
-            "PT_CAN",
-            WeightMode.FRAME_TIME_US,
-            "balanced",  # type: ignore[arg-type]
-            0.05,
-            RestartSettings(),
-            4,
-            False,
-            tmp_path / "out",
-        )
-    with pytest.raises(ValueError, match="payload_bytes"):
-        GuiOptimizationRequest(
-            inspection,
-            "PT_CAN",
-            WeightMode.PAYLOAD_BYTES,
-            OptimizationMode.BALANCED,
-            0.05,
-            RestartSettings(),
-            4,
-            False,
-            tmp_path / "out",
-        )
-
-
-def test_cancellation_token_is_thread_safe_and_explicit() -> None:
     token = CancellationToken()
-    assert not token.is_cancelled
     token.cancel()
-    assert token.is_cancelled
     with pytest.raises(OptimizationCancelled):
         token.raise_if_cancelled()

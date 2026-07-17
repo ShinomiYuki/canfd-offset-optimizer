@@ -30,3 +30,5 @@ output/diagnostics_smoke/*
 
 .vscode/
 /docs/严格代码审查与验收报告_2026-07-16.md
+user_input/
+user_output/
