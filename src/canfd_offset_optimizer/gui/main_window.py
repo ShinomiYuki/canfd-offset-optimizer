@@ -147,6 +147,7 @@ class MainWindow(QMainWindow):
         self.assignment_table.export_requested.connect(self._choose_assignment_export)
         self.load_chart.export_requested.connect(self._choose_chart_export)
         self.load_heatmap.export_requested.connect(self._choose_heatmap_export)
+        self.load_heatmap.network_selected.connect(self._select_network_from_heatmap)
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(100)
         self._elapsed_timer.timeout.connect(self._refresh_elapsed)
@@ -412,6 +413,7 @@ class MainWindow(QMainWindow):
 
     def _apply_batch_result(self, result: BatchOptimizationResult) -> None:
         self._result = result
+        self.load_heatmap.set_batch(result)
         self.summary_panel.set_batch(result)
         self._append_log(
             f"批量汇总：成功 {result.succeeded_count}，失败 {result.failed_count}，"
@@ -466,6 +468,10 @@ class MainWindow(QMainWindow):
         details.extend(item.logs)
         self.log_view.setPlainText("\n".join(details))
 
+    def _select_network_from_heatmap(self, network_id: str) -> None:
+        if not self.summary_panel.select_network_id(network_id):
+            self._select_network(network_id)
+
     def _clear_selected_network(self) -> None:
         self._selected_network_id = None
         self.assignment_table.clear_result()
@@ -485,6 +491,7 @@ class MainWindow(QMainWindow):
         self._result = None
         self._selected_network_id = None
         self.summary_panel.clear()
+        self.load_heatmap.clear_batch()
         self._clear_selected_network()
 
     def _refresh_controls(self) -> None:
@@ -502,6 +509,18 @@ class MainWindow(QMainWindow):
         )
         self.settings_panel.setEnabled(not active and ready)
         self.progress_panel.set_state(self._state.state, ready_to_run=ready and not active)
+        if self._state.state is WorkflowState.INCOMPLETE and self._inspection is not None:
+            if self._inspection.missing_required:
+                missing = "、".join(
+                    self.input_panel.kind_label(kind)
+                    for kind in self._inspection.missing_required
+                )
+                reason = f"工程缺少必需输入：{missing}"
+            elif self._inspection.errors:
+                reason = "工程存在配置冲突，不能开始"
+            else:
+                reason = "没有可优化网段；DBC 必须包含周期 CAN FD TX 报文"
+            self.progress_panel.set_unavailable_reason(reason)
 
     def _refresh_elapsed(self) -> None:
         if self._task_started:

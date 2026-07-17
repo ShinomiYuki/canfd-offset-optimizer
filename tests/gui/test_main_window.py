@@ -12,6 +12,7 @@ from canfd_offset_optimizer.gui.contracts import (
 )
 from canfd_offset_optimizer.gui.main_window import MainWindow
 from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
+from canfd_offset_optimizer.gui.real_backend import RealBackend
 from canfd_offset_optimizer.gui.state import WorkflowState
 
 
@@ -132,6 +133,13 @@ def test_batch_locks_controls_then_shows_summary_and_selected_details(
         and window.selected_network.network_name == "GL"
     )
     assert "网段：GL" in window.log_view.toPlainText()
+    su = next(item for item in window.result.network_results if item.network_name == "SU")
+    window.load_heatmap.network_combo.setCurrentIndex(
+        window.load_heatmap.network_combo.findData(su.network_id)
+    )
+    qtbot.waitUntil(lambda: window.selected_network_id == su.network_id)
+    assert window.load_heatmap.current_network_id == su.network_id
+    assert window.load_heatmap.network_combo.currentData() == su.network_id
     window.open_output_directory()
     assert opened == [window.result.output_directory]
 
@@ -188,6 +196,57 @@ def test_missing_dbc_is_explicit_while_default_config_is_automatic(
     assert (window.import_session.session_directory / "config/project.yaml").is_file()
     assert not window.progress_panel.run_button.isEnabled()
     assert not window.settings_panel.isEnabled()
+
+
+def test_single_dbc_without_user_config_uses_default_and_is_ready(
+    qtbot, tmp_path: Path, workspace_root: Path
+) -> None:
+    dbc = tmp_path / "PT.dbc"
+    dbc.write_text("PT", encoding="utf-8")
+    window = MainWindow(
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
+        dialog_handler=lambda *_args: None,
+    )
+    qtbot.addWidget(window)
+
+    import_until_ready(qtbot, window, (dbc,))
+
+    assert window.inspection is not None
+    assert window.inspection.missing_required == ()
+    assert window.inspection.can_optimize
+    assert window.progress_panel.status_label.text() == "全部网段已就绪"
+    assert window.progress_panel.run_button.isEnabled()
+    assert window.import_session is not None
+    assert (window.import_session.session_directory / "config/project.yaml").is_file()
+
+
+def test_single_unoptimizable_dbc_shows_precise_blocking_reason(
+    qtbot, tmp_path: Path, workspace_root: Path
+) -> None:
+    dbc = tmp_path / "BD.dbc"
+    classic = Path("tests/fixtures/dbc/minimal.dbc").read_text(encoding="utf-8").replace(
+        'BA_ "VFrameFormat" BO_ 913 "StandardCAN_FD";',
+        'BA_ "VFrameFormat" BO_ 913 "StandardCAN";',
+    )
+    dbc.write_text(classic, encoding="utf-8")
+    window = MainWindow(
+        RealBackend(workspace_root=workspace_root),
+        dialog_handler=lambda *_args: None,
+    )
+    qtbot.addWidget(window)
+    window.import_sources((dbc,))
+    qtbot.waitUntil(
+        lambda: not window.task_active
+        and window.workflow_state is WorkflowState.INCOMPLETE,
+        timeout=5_000,
+    )
+
+    assert window.inspection is not None
+    assert window.inspection.missing_required == ()
+    assert not window.inspection.optimizable_networks
+    assert "没有可优化" in window.input_panel.required_label.text()
+    assert "DBC 必须包含周期 CAN FD TX" in window.progress_panel.status_label.text()
+    assert not window.progress_panel.run_button.isEnabled()
 
 
 def test_clear_only_resets_current_gui_session_and_keeps_import_history(

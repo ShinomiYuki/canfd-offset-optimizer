@@ -43,15 +43,15 @@ def test_heatmap_uses_one_real_steady_window_and_core_congestion_counts(
     assert not hasattr(heatmap, "display_range_combo")
 
 
-def test_congestion_levels_match_main_branch_heatmap_method() -> None:
+def test_congestion_levels_use_requested_fixed_thresholds() -> None:
     assert [congestion_level(value) for value in (0, 1, 2, 3, 4, 5, 9)] == [
         0,
         1,
         2,
         3,
-        3,
         4,
-        4,
+        5,
+        5,
     ]
 
 
@@ -72,3 +72,24 @@ def test_heatmap_startup_is_not_repeated_and_png_uses_current_view(
     assert heatmap.canvas.counts_after is result.optimized_startup_count
     output = heatmap.export_png(tmp_path / "startup_heatmap.png")
     assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_heatmap_network_selector_emits_successful_network_identity(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    qtbot.addWidget(heatmap)
+    selected: list[str] = []
+    heatmap.network_selected.connect(selected.append)
+    successful = [item for item in batch_result.network_results if item.result is not None]
+
+    heatmap.set_batch(batch_result)
+    heatmap.set_result(successful[0].result)
+
+    assert heatmap.network_combo.isEnabled()
+    assert heatmap.network_combo.count() == len(successful)
+    assert heatmap.network_combo.currentData() == successful[0].network_id
+    heatmap.network_combo.setCurrentIndex(
+        heatmap.network_combo.findData(successful[1].network_id)
+    )
+    assert selected == [successful[1].network_id]

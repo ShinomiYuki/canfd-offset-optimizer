@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPaintEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QComboBox,
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..contracts import GuiOptimizationResult
+from ..contracts import BatchOptimizationResult, GuiOptimizationResult
 from ..load_presentation import (
     CONGESTION_COLORS,
     CONGESTION_LABELS,
@@ -93,7 +93,7 @@ class _HeatmapCanvas(QWidget):
                 if column_width >= 32 and count:
                     painter.setPen(
                         QColor("white")
-                        if congestion_level(count) == 4
+                        if congestion_level(count) >= 4
                         else QColor("#202020")
                     )
                     painter.drawText(
@@ -176,17 +176,22 @@ class _HeatmapCanvas(QWidget):
 
 class LoadHeatmap(QWidget):
     export_requested = Signal()
+    network_selected = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
         self.title_label = QLabel("拥挤热力图：无结果")
         self.current_network_id: str | None = None
+        self.network_combo = QComboBox()
+        self.network_combo.setEnabled(False)
         self.window_combo = QComboBox()
         self.window_combo.addItems(("稳态窗口", "启动窗口"))
         self.export_button = QPushButton("导出热力图 PNG")
         self.export_button.setEnabled(False)
         controls = QHBoxLayout()
+        controls.addWidget(QLabel("网段"))
+        controls.addWidget(self.network_combo)
         controls.addWidget(self.window_combo)
         controls.addStretch(1)
         controls.addWidget(self.export_button)
@@ -197,8 +202,28 @@ class LoadHeatmap(QWidget):
         layout.addLayout(controls)
         layout.addWidget(self.canvas, 1)
         self._result: GuiOptimizationResult | None = None
+        self.network_combo.currentIndexChanged.connect(self._network_changed)
         self.window_combo.currentIndexChanged.connect(self._refresh)
         self.export_button.clicked.connect(self.export_requested.emit)
+
+    def set_batch(self, batch: BatchOptimizationResult) -> None:
+        """Populate successful networks without emitting a stale selection."""
+
+        blocker = QSignalBlocker(self.network_combo)
+        self.network_combo.clear()
+        for item in batch.network_results:
+            if item.result is not None:
+                self.network_combo.addItem(item.display_name, item.network_id)
+        self.network_combo.setCurrentIndex(-1)
+        self.network_combo.setEnabled(self.network_combo.count() > 0)
+        del blocker
+
+    def clear_batch(self) -> None:
+        blocker = QSignalBlocker(self.network_combo)
+        self.network_combo.clear()
+        self.network_combo.setEnabled(False)
+        del blocker
+        self.clear_result()
 
     def set_result(self, result: GuiOptimizationResult) -> None:
         self._result = None
@@ -209,6 +234,7 @@ class LoadHeatmap(QWidget):
             f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
         )
         self._result = result
+        self._sync_network_combo(result.network_id)
         self.canvas.set_empty_message("运行结果未提供拥挤快照")
         self._refresh()
         self.export_button.setEnabled(True)
@@ -226,6 +252,7 @@ class LoadHeatmap(QWidget):
             label = f"{display_name}（{message}）"
         self.current_network_label.setText(f"当前网段：{label}")
         self.current_network_label.setToolTip("")
+        self._sync_network_combo(network_id)
         self.title_label.setText("拥挤热力图：无成功结果")
         self._result = None
         self.canvas.set_empty_message(message)
@@ -262,3 +289,16 @@ class LoadHeatmap(QWidget):
                 self._result.original_startup_count,
                 self._result.optimized_startup_count,
             )
+
+    def _sync_network_combo(self, network_id: str | None) -> None:
+        blocker = QSignalBlocker(self.network_combo)
+        index = self.network_combo.findData(network_id) if network_id is not None else -1
+        self.network_combo.setCurrentIndex(index)
+        del blocker
+
+    def _network_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        network_id = self.network_combo.itemData(index)
+        if isinstance(network_id, str):
+            self.network_selected.emit(network_id)

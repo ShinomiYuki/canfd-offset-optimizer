@@ -13,8 +13,9 @@ CONGESTION_COLORS = (
     "#FFE082",
     "#FFB74D",
     "#EF5350",
+    "#000000",
 )
-CONGESTION_LABELS = ("0 帧", "1 帧", "2 帧", "3～4 帧", "5 帧及以上")
+CONGESTION_LABELS = ("0 帧", "1 帧", "2 帧", "3 帧", "4 帧", "5 帧及以上")
 
 
 def congestion_level(release_count: int) -> int:
@@ -22,11 +23,9 @@ def congestion_level(release_count: int) -> int:
 
     if release_count < 0:
         raise ValueError("release_count must be non-negative")
-    if release_count <= 2:
-        return release_count
     if release_count <= 4:
-        return 3
-    return 4
+        return release_count
+    return 5
 
 
 def steady_repeat_count(display_duration_ms: int) -> int:

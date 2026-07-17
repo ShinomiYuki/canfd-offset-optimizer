@@ -99,9 +99,9 @@ class InputPanel(QGroupBox):
 
         self.session_label = QLabel("尚未导入工程")
         self.session_label.setWordWrap(True)
-        self.required_label = QLabel("缺少必需输入：DBC、项目配置")
+        self.required_label = QLabel("缺少必需输入：DBC")
         self.required_label.setWordWrap(True)
-        self.optional_label = QLabel("可选输入：未发现 ARXML")
+        self.optional_label = QLabel("可选输入：项目配置（缺省使用内置默认）、未发现 ARXML")
         self.networks_label = QLabel("已发现网段：0")
         self.networks_label.setWordWrap(True)
         self.count_labels: dict[InputKind, QLabel] = {}
@@ -158,6 +158,8 @@ class InputPanel(QGroupBox):
             self.required_label.setText(f"缺少必需输入：{'、'.join(missing)}")
         elif inspection.errors:
             self.required_label.setText("工程冲突：" + "；".join(inspection.errors))
+        elif not inspection.optimizable_networks:
+            self.required_label.setText("输入齐全，但没有可优化的周期 CAN FD TX 网段")
         else:
             self.required_label.setText("必需输入齐全")
         has_arxml = bool(inspection.session.records_of_kind(InputKind.ARXML))
@@ -175,8 +177,8 @@ class InputPanel(QGroupBox):
         self.details_dialog.hide()
         self.session_label.setText("尚未导入工程")
         self.session_label.setToolTip("")
-        self.required_label.setText("缺少必需输入：DBC、项目配置")
-        self.optional_label.setText("可选输入：未发现 ARXML")
+        self.required_label.setText("缺少必需输入：DBC")
+        self.optional_label.setText("可选输入：项目配置（缺省使用内置默认）、未发现 ARXML")
         self.networks_label.setText("已发现网段：0")
         for kind, label in self.count_labels.items():
             label.setText(f"{self._KIND_LABELS[kind]}：0")

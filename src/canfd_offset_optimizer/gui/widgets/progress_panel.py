@@ -106,6 +106,9 @@ class ProgressPanel(QGroupBox):
         self.progress_bar.setRange(0, maximum)
         self.progress_bar.setValue(maximum)
 
+    def set_unavailable_reason(self, message: str) -> None:
+        self.status_label.setText(message)
+
     @staticmethod
     def _status_text(status: NetworkRunStatus) -> str:
         return {

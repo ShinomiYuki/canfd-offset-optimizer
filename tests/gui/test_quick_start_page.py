@@ -18,3 +18,5 @@ def test_quick_start_explains_inputs_parameters_views_and_outputs(qtbot) -> None
     assert "logs/" in content
     assert "plots/" in content
     assert "results/" in content
+    assert "dbc/" in content
+    assert "原始用户 DBC 不会被修改" in content

@@ -365,6 +365,7 @@ def test_real_import_uses_bundled_default_when_project_yaml_is_missing(
         session, lambda update: None, CancellationToken()
     )
     assert inspection.missing_required == ()
+    assert inspection.can_optimize
     assert any("内置默认 project.yaml" in warning for warning in inspection.warnings)
 
 
