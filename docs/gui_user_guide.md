@@ -36,7 +36,9 @@ user_input/<timestamp>_<project>/
 至少需要一个 DBC 和唯一一个 YAML/YML 配置。ARXML 可选：
 
 - 仅 DBC + 配置：只能选择 `payload_bytes + Peak`；
-- 提供 ARXML：可选择 `payload_bytes` 或 `frame_time_us`；
+- 提供 ARXML：核心先发现 Controller `SHORT-NAME`，再按 DBC 来源签名做唯一对应；
+  全部可优化网段均有唯一、可解析的 Controller 时，可选择 `payload_bytes` 或
+  `frame_time_us`；无法唯一对应的网段只开放 `payload_bytes`，不会猜测通道；
 - `payload_bytes` 始终只支持 Peak。
 
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。

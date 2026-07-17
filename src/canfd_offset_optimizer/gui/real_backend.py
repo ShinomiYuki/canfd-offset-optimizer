@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
-from ..config import PeakToleranceConfig, RestartPolicy
+from ..config import PeakToleranceConfig, RestartPolicy, load_project_config
 from ..exceptions import CanfdOptimizerError
 from ..models import (
     ObjectiveMode as CoreObjectiveMode,
@@ -19,6 +19,7 @@ from ..models import (
     WeightMode as CoreWeightMode,
 )
 from ..optimization.gcls import run_gcls
+from ..parsers.arxml_parser import discover_arxml_channel_names
 from ..parsers.dbc_parser import parse_dbc
 from ..parsers.project_loader import LoadedProject, load_project
 from ..reporting.objective_mode_writer import load_statistics
@@ -97,14 +98,16 @@ class RealBackend(WorkspaceImporter):
             for kind, records in ((InputKind.DBC, dbc_records), (InputKind.CONFIG, config_records))
             if not records
         )
-        errors = (
-            ("发现多个项目配置，无法确定批量运行使用哪个配置。",)
-            if len(config_records) > 1 else ()
-        )
-        weight_modes = (
-            (WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US)
-            if arxml_records else (WeightMode.PAYLOAD_BYTES,)
-        )
+        errors: list[str] = []
+        if len(config_records) > 1:
+            errors.append("发现多个项目配置，无法确定批量运行使用哪个配置。")
+        arxml_channels: tuple[str, ...] = ()
+        configured_channel: str | None = None
+        if arxml_records and len(config_records) == 1:
+            try:
+                arxml_channels, configured_channel = self._arxml_channel_context(session)
+            except CanfdOptimizerError as exc:
+                errors.append(f"ARXML 通道检查失败：{type(exc).__name__}: {exc}")
         display_counts: dict[str, int] = {}
         networks: list[NetworkSummary] = []
         total = max(1, len(dbc_records))
@@ -127,12 +130,29 @@ class RealBackend(WorkspaceImporter):
                 message_count = len(parsed.messages)
                 optimizable = True
                 reason = None
-                warnings = parsed.warnings
+                network_warnings = list(parsed.warnings)
             except CanfdOptimizerError as exc:
                 message_count = 0
                 optimizable = False
                 reason = self._eligibility_reason(exc)
-                warnings = ()
+                network_warnings = []
+            available_weight_modes: tuple[WeightMode, ...] = ()
+            if optimizable:
+                modes = [WeightMode.PAYLOAD_BYTES]
+                frame_time_channel = self._resolve_frame_time_channel(
+                    path.name, configured_channel, arxml_channels
+                )
+                if frame_time_channel is not None:
+                    modes.append(WeightMode.FRAME_TIME_US)
+                    network_warnings.append(
+                        f"frame_time_us ARXML Controller：{frame_time_channel}"
+                    )
+                elif arxml_records:
+                    network_warnings.append(
+                        "未找到与来源 DBC 唯一对应的 ARXML Controller；"
+                        "该网段仅支持 payload_bytes。"
+                    )
+                available_weight_modes = tuple(modes)
             networks.append(
                 NetworkSummary(
                     network_id=network_id,
@@ -142,8 +162,8 @@ class RealBackend(WorkspaceImporter):
                     source_workspace_path=record.workspace_relative_path,
                     is_optimizable=optimizable,
                     message_count=message_count,
-                    available_weight_modes=weight_modes if optimizable else (),
-                    warnings=warnings,
+                    available_weight_modes=available_weight_modes,
+                    warnings=tuple(network_warnings),
                     unoptimizable_reason=reason,
                 )
             )
@@ -171,7 +191,7 @@ class RealBackend(WorkspaceImporter):
         self._write_manifest(updated_session)
         warnings = self._inspection_warnings(updated_session)
         return WorkspaceInspection(
-            updated_session, tuple(networks), missing, warnings, errors
+            updated_session, tuple(networks), missing, warnings, tuple(errors)
         )
 
     def optimize_all_networks(
@@ -189,6 +209,13 @@ class RealBackend(WorkspaceImporter):
         output_directory.mkdir(parents=True, exist_ok=False)
         results: list[NetworkBatchResult] = []
         networks = request.inspection.networks
+        arxml_channels, configured_channel = self._arxml_channel_context(session)
+        channel_overrides = {
+            network.network_id: self._resolve_frame_time_channel(
+                network.source_file, configured_channel, arxml_channels
+            )
+            for network in request.inspection.optimizable_networks
+        }
         total = len(networks)
         for index, network in enumerate(networks, start=1):
             if cancellation_token.is_cancelled:
@@ -217,6 +244,7 @@ class RealBackend(WorkspaceImporter):
                 detail = self._optimize_network(
                     request, network, index, total, output_directory,
                     progress_callback, cancellation_token,
+                    channel_overrides[network.network_id],
                 )
                 results.append(
                     NetworkBatchResult(
@@ -264,6 +292,7 @@ class RealBackend(WorkspaceImporter):
         batch_output: Path,
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
+        channel_override: str | None,
     ) -> GuiOptimizationResult:
         started = perf_counter()
         session = request.inspection.session
@@ -273,9 +302,14 @@ class RealBackend(WorkspaceImporter):
         arxml_root = session.session_directory / "arxml" if arxml_records else session.session_directory
         core_weight = CoreWeightMode(request.weight_mode.value)
         core_mode = CoreObjectiveMode(request.mode.value)
+        if request.weight_mode is WeightMode.FRAME_TIME_US and channel_override is None:
+            raise BackendError(
+                f"网段 {network.display_name} 没有唯一的 ARXML Controller 映射"
+            )
         loaded = load_project(
             dbc_path, arxml_root, config_path,
             weight_mode_override=core_weight,
+            channel_override=channel_override,
             objective_mode_override=core_mode,
         )
         if loaded.config.optimization.allowed_offsets_us != REQUIRED_ALLOWED_OFFSETS_US:
@@ -364,6 +398,7 @@ class RealBackend(WorkspaceImporter):
             self._copy_int_tuple(core_result.startup_slot_loads),
             logs=(
                 "数据源：core load_project + run_gcls",
+                f"arxml_channel={channel_override or 'not_used'}",
                 f"assignment_hash={core_result.assignment_hash}",
             ),
             output_directory=network_output,
@@ -505,6 +540,42 @@ class RealBackend(WorkspaceImporter):
             )
             for network in networks
         ]
+
+    @classmethod
+    def _arxml_channel_context(
+        cls, session: ImportSession
+    ) -> tuple[tuple[str, ...], str | None]:
+        config_path = cls._single_workspace_path(session, InputKind.CONFIG)
+        configured_channel = load_project_config(config_path).network.channel
+        if not cls._records_of_kind(session, InputKind.ARXML):
+            return (), configured_channel
+        arxml_root = session.session_directory / "arxml"
+        return discover_arxml_channel_names(arxml_root), configured_channel
+
+    @staticmethod
+    def _resolve_frame_time_channel(
+        source_file: str,
+        configured_channel: str | None,
+        available_channels: tuple[str, ...],
+    ) -> str | None:
+        if configured_channel in available_channels:
+            return configured_channel
+        stem = Path(source_file).stem
+        source_prefix = re.split(
+            r"[\s_-]+Message(?:[\s_-]+list)?\b",
+            stem,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        signature = re.sub(r"[^A-Za-z0-9]", "", source_prefix).casefold()
+        if not signature:
+            return None
+        matches = tuple(
+            channel
+            for channel in available_channels
+            if signature in re.sub(r"[^A-Za-z0-9]", "", channel).casefold()
+        )
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _unique_usable_records(session: ImportSession) -> tuple[ImportRecord, ...]:

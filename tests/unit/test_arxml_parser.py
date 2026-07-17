@@ -13,7 +13,10 @@ from canfd_offset_optimizer.exceptions import (
     InputFileError,
     MissingFieldError,
 )
-from canfd_offset_optimizer.parsers.arxml_parser import parse_arxml_directory
+from canfd_offset_optimizer.parsers.arxml_parser import (
+    discover_arxml_channel_names,
+    parse_arxml_directory,
+)
 
 
 FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "arxml"
@@ -28,6 +31,33 @@ def test_parse_channel_parameters() -> None:
         "/Can/CanControllerTxBitRateSwitch"
     )
     assert "kbit/s -> bit/s" in dict(channel.field_sources)["nominal_bitrate"]
+
+
+def test_discover_channel_names_from_minimal_arxml() -> None:
+    assert discover_arxml_channel_names(FIXTURE_DIR) == ("CAN1",)
+
+
+def test_discover_production_controller_names_ignores_duplicate_canif_name(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "controllers.arxml").write_text(
+        """<?xml version="1.0"?>
+<AUTOSAR xmlns="urn:test"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>Pkg</SHORT-NAME>
+<ELEMENTS>
+<ECUC-CONTAINER-VALUE><SHORT-NAME>CT_DA_1234</SHORT-NAME>
+<DEFINITION-REF>/CanIf/CanIfCtrlCfg</DEFINITION-REF></ECUC-CONTAINER-VALUE>
+<ECUC-CONTAINER-VALUE><SHORT-NAME>CT_DA_1234</SHORT-NAME>
+<DEFINITION-REF>/Can/CanController</DEFINITION-REF></ECUC-CONTAINER-VALUE>
+<ECUC-CONTAINER-VALUE><SHORT-NAME>CT_SU_5678</SHORT-NAME>
+<DEFINITION-REF>/Can/CanController</DEFINITION-REF></ECUC-CONTAINER-VALUE>
+</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>""",
+        encoding="utf-8",
+    )
+
+    assert discover_arxml_channel_names(tmp_path) == (
+        "CT_DA_1234",
+        "CT_SU_5678",
+    )
 
 
 def test_channel_parameters_can_be_resolved_through_autosar_references(

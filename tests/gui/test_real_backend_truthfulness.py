@@ -107,6 +107,27 @@ def _write_current_project_regression_fixture(root: Path) -> None:
     )
 
 
+def _write_multichannel_arxml(path: Path, channel_names: tuple[str, ...]) -> None:
+    controllers = "".join(
+        f"""
+<ECUC-CONTAINER-VALUE><SHORT-NAME>{channel}</SHORT-NAME>
+<DEFINITION-REF>/Can/CanController</DEFINITION-REF><PARAMETER-VALUES>
+<P><DEFINITION-REF>/Can/CanControllerBaudRate</DEFINITION-REF><VALUE>500</VALUE></P>
+<P><DEFINITION-REF>/Can/CanControllerFdBaudRate</DEFINITION-REF><VALUE>2000</VALUE></P>
+<P><DEFINITION-REF>/Can/CanControllerTxBitRateSwitch</DEFINITION-REF><VALUE>true</VALUE></P>
+</PARAMETER-VALUES></ECUC-CONTAINER-VALUE>
+"""
+        for channel in channel_names
+    )
+    path.write_text(
+        "<?xml version=\"1.0\"?>\n"
+        "<AUTOSAR xmlns=\"urn:test\"><AR-PACKAGES><AR-PACKAGE>"
+        "<SHORT-NAME>Pkg</SHORT-NAME><ELEMENTS>"
+        f"{controllers}</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>",
+        encoding="utf-8",
+    )
+
+
 def test_regression_csv_has_expected_network_counts_and_132_rows() -> None:
     rows = _csv_rows()
     assert len(rows) == 132
@@ -155,6 +176,80 @@ def test_current_project_fixture_discovers_12_optimizes_9_and_skips_3(
     assert "经典 CAN" in skipped["BD"].unoptimizable_reason
     assert "经典 CAN" in skipped["DM"].unoptimizable_reason
     assert "无可优化的周期 CAN FD TX" in skipped["DG"].unoptimizable_reason
+
+
+def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "multi_channel_project"
+    source.mkdir()
+    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;',
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;\n'
+        'BA_ "GenMsgStartDelayTime" BO_ 2147484768 20;',
+    )
+    (source / "CAR_VCU_DA Message list.dbc").write_text(dbc_text, encoding="utf-8")
+    (source / "CAR_VCU_SU Message list.dbc").write_text(dbc_text, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    channel_names = (
+        "CT_CAR_VCU_DAMessagelis_da123456",
+        "CT_CAR_VCU_SUMessagelis_su123456",
+    )
+    _write_multichannel_arxml(source / "controllers.arxml", channel_names)
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+
+    assert inspection.errors == ()
+    assert len(inspection.optimizable_networks) == 2
+    assert all(
+        network.available_weight_modes
+        == (WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US)
+        for network in inspection.optimizable_networks
+    )
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        weight_mode=WeightMode.FRAME_TIME_US,
+        mode=OptimizationMode.BALANCED,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
+        candidate_pool_size=1,
+        enable_triple_search=False,
+        output_root=tmp_path / "user_output",
+    )
+    batch = backend.optimize_all_networks(request, lambda update: None, token)
+
+    assert batch.succeeded_count == 2
+    selected_channels = {
+        log.removeprefix("arxml_channel=")
+        for item in batch.network_results
+        if item.result is not None
+        for log in item.result.logs
+        if log.startswith("arxml_channel=")
+    }
+    assert selected_channels == set(channel_names)
+
+
+def test_arxml_channel_resolution_fails_closed_on_ambiguous_source_match() -> None:
+    channels = (
+        "CT_CAR_VCU_DAMessagelis_first",
+        "CT_CAR_VCU_DAMessagelis_second",
+    )
+    assert (
+        RealBackend._resolve_frame_time_channel(
+            "CAR_VCU_DA Message list.dbc", "CAN1", channels
+        )
+        is None
+    )
+    assert (
+        RealBackend._resolve_frame_time_channel(
+            "CAR_VCU_DA Message list.dbc", channels[1], channels
+        )
+        == channels[1]
+    )
 
 
 @pytest.mark.parametrize(
