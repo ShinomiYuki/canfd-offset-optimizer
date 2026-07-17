@@ -81,6 +81,8 @@ class NetworkSummary:
             raise ValueError("network weight mode is unsupported")
         if len(set(self.available_weight_modes)) != len(self.available_weight_modes):
             raise ValueError("network weight modes must be unique")
+        if WeightMode.PAYLOAD_BYTES not in self.available_weight_modes:
+            raise ValueError("network must always support payload_bytes weight")
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +148,11 @@ class GuiOptimizationRequest:
             raise ValueError("candidate_pool_size is unsupported")
         if not isinstance(self.enable_triple_search, bool):
             raise ValueError("enable_triple_search must be boolean")
+        if (
+            self.weight_mode is WeightMode.FRAME_TIME_US
+            and self.inspection.arxml_directory is None
+        ):
+            raise ValueError("frame_time_us weight requires an ARXML directory")
         if self.weight_mode is WeightMode.PAYLOAD_BYTES and self.mode is not OptimizationMode.PEAK:
             raise ValueError("payload_bytes weight only supports peak mode")
 

@@ -8,6 +8,7 @@ from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
     GuiOptimizationRequest,
     InputInspectionRequest,
+    NetworkSummary,
     OptimizationCancelled,
     OptimizationMode,
     RestartMode,
@@ -43,7 +44,9 @@ def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
         RestartSettings("adaptive")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="min_attempts"):
         RestartSettings(RestartMode.ADAPTIVE, min_attempts=81, max_attempts=80)
-    inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml")
+    arxml = tmp_path / "arxml"
+    arxml.mkdir()
+    inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml", arxml)
     with pytest.raises(ValueError, match="candidate_pool_size"):
         GuiOptimizationRequest(
             inspection,
@@ -56,6 +59,24 @@ def test_restart_and_advanced_settings_are_validated(tmp_path: Path) -> None:
             False,
             tmp_path / "out",
         )
+
+
+def test_frame_time_requires_arxml_and_networks_always_offer_payload(tmp_path: Path) -> None:
+    inspection = InputInspectionRequest(tmp_path / "a.dbc", tmp_path / "project.yaml")
+    with pytest.raises(ValueError, match="requires an ARXML"):
+        GuiOptimizationRequest(
+            inspection,
+            "PT",
+            WeightMode.FRAME_TIME_US,
+            OptimizationMode.PEAK,
+            0.05,
+            RestartSettings(),
+            4,
+            False,
+            tmp_path / "out",
+        )
+    with pytest.raises(ValueError, match="always support payload_bytes"):
+        NetworkSummary("PT", 1, (WeightMode.FRAME_TIME_US,))
     with pytest.raises(ValueError, match="optimization mode"):
         GuiOptimizationRequest(
             inspection,
