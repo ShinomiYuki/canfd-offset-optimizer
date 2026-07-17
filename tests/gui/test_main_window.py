@@ -142,6 +142,9 @@ def test_batch_locks_controls_then_shows_summary_and_selected_details(
     assert window.load_heatmap.network_combo.currentData() == su.network_id
     window.open_output_directory()
     assert opened == [window.result.output_directory]
+    heatmap_directory = window.result.output_directory / "plots"
+    window.load_heatmap.open_directory_requested.emit(heatmap_directory)
+    assert opened == [window.result.output_directory, heatmap_directory]
 
 
 def test_partial_failure_remains_browsable_and_does_not_hide_successes(

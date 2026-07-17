@@ -93,3 +93,39 @@ def test_heatmap_network_selector_emits_successful_network_identity(
         heatmap.network_combo.findData(successful[1].network_id)
     )
     assert selected == [successful[1].network_id]
+
+
+def test_long_steady_heatmap_uses_external_file_fallback(
+    qtbot, batch_result: BatchOptimizationResult, tmp_path: Path
+) -> None:
+    base = _result_with_known_loads(batch_result)
+    heatmap_path = tmp_path / "plots" / "DK_heatmap.png"
+    heatmap_path.parent.mkdir()
+    heatmap_path.write_bytes(b"generated heatmap")
+    result = replace(
+        base,
+        steady_loads_before=tuple(range(200)),
+        steady_loads_after=tuple(range(1_000, 1_200)),
+        steady_counts_before=(1,) * 200,
+        steady_counts_after=(2,) * 200,
+        exported_files=(heatmap_path,),
+    )
+    heatmap = LoadHeatmap()
+    qtbot.addWidget(heatmap)
+    opened: list[Path] = []
+    heatmap.open_directory_requested.connect(opened.append)
+
+    heatmap.set_result(result)
+
+    assert heatmap.canvas.before_series == ()
+    assert "图片过大，请使用外部工具查看" in heatmap.canvas._empty_message
+    assert not heatmap.open_directory_button.isHidden()
+    assert heatmap.open_directory_button.isEnabled()
+    assert not heatmap.export_button.isEnabled()
+    heatmap.open_directory_button.click()
+    assert opened == [heatmap_path.parent]
+
+    heatmap.window_combo.setCurrentIndex(1)
+    assert heatmap.canvas.before_series is result.original_startup_load
+    assert heatmap.open_directory_button.isHidden()
+    assert heatmap.export_button.isEnabled()

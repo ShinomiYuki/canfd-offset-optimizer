@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         self.load_chart.export_requested.connect(self._choose_chart_export)
         self.load_heatmap.export_requested.connect(self._choose_heatmap_export)
         self.load_heatmap.network_selected.connect(self._select_network_from_heatmap)
+        self.load_heatmap.open_directory_requested.connect(
+            self._open_heatmap_output_directory
+        )
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(100)
         self._elapsed_timer.timeout.connect(self._refresh_elapsed)
@@ -279,6 +282,13 @@ class MainWindow(QMainWindow):
                 raise OSError("系统未能打开输出目录")
         except Exception as exc:  # GUI slot must not leak exceptions to the event loop.
             self._report_action_failure("打开输出目录", exc)
+
+    def _open_heatmap_output_directory(self, path: Path) -> None:
+        try:
+            if not self._open_directory_handler(path):
+                raise OSError("系统未能打开热力图文件所在目录")
+        except Exception as exc:  # GUI slot must not leak exceptions to the event loop.
+            self._report_action_failure("打开热力图文件所在目录", exc)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.task_active:

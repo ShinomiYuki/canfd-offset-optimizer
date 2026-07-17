@@ -416,7 +416,8 @@ def test_real_backend_short_run_maps_only_core_data(
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
     )
-    batch = backend.optimize_all_networks(request, lambda update: None, token)
+    progress: list[Any] = []
+    batch = backend.optimize_all_networks(request, progress.append, token)
     item = batch.network_results[0]
     assert item.status is NetworkRunStatus.SUCCEEDED
     assert item.result is not None
@@ -445,6 +446,7 @@ def test_real_backend_short_run_maps_only_core_data(
     assert (batch.output_directory / "results" / "networks_summary.csv").is_file()
     assert (batch.output_directory / "logs" / "PT.log").is_file()
     assert (batch.output_directory / "logs" / "batch.log").is_file()
+    assert any("正在生成负载图、热力图和 DBC 副本" in update.message for update in progress)
     assert (source / "CAR_VCU_PT Message.dbc").read_text(encoding="utf-8") == dbc_text
     exported_text = output_dbc.read_text(encoding="utf-8")
     for row in item.result.assignments:

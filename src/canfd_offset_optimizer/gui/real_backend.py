@@ -416,6 +416,19 @@ class RealBackend(WorkspaceImporter):
             output_directory=network_output,
         )
         stem = self._safe_name(network.display_name)
+        progress_callback(
+            ProgressUpdate(
+                ProgressPhase.FINALIZING,
+                f"{network.display_name}：正在生成负载图、热力图和 DBC 副本",
+                elapsed_seconds=perf_counter() - started,
+                network_id=network.network_id,
+                network_name=network.network_name,
+                network_index=index,
+                network_total=total,
+                overall_completed=index - 1,
+                overall_total=total,
+            )
+        )
         assignment_path = export_assignments_csv(detail, network_output / "offsets.csv")
         load_plot_path = write_load_curve_png(detail, layout.plots / f"{stem}_load_curve.png")
         heatmap_path = write_load_heatmap_png(detail, layout.plots / f"{stem}_heatmap.png")

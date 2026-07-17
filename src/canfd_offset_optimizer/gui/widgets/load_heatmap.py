@@ -24,6 +24,11 @@ from ..load_presentation import (
 )
 
 
+# A fixed-width inline canvas stops being useful beyond one 500 ms/100-slot
+# window.  The backend still exports the complete heatmap PNG for external use.
+MAX_INLINE_HEATMAP_SLOTS = 100
+
+
 class _HeatmapCanvas(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -177,6 +182,7 @@ class _HeatmapCanvas(QWidget):
 class LoadHeatmap(QWidget):
     export_requested = Signal()
     network_selected = Signal(str)
+    open_directory_requested = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -187,6 +193,9 @@ class LoadHeatmap(QWidget):
         self.network_combo.setEnabled(False)
         self.window_combo = QComboBox()
         self.window_combo.addItems(("稳态窗口", "启动窗口"))
+        self.open_directory_button = QPushButton("打开热力图文件所在目录")
+        self.open_directory_button.setEnabled(False)
+        self.open_directory_button.setVisible(False)
         self.export_button = QPushButton("导出热力图 PNG")
         self.export_button.setEnabled(False)
         controls = QHBoxLayout()
@@ -194,6 +203,7 @@ class LoadHeatmap(QWidget):
         controls.addWidget(self.network_combo)
         controls.addWidget(self.window_combo)
         controls.addStretch(1)
+        controls.addWidget(self.open_directory_button)
         controls.addWidget(self.export_button)
         self.canvas = _HeatmapCanvas()
         layout = QVBoxLayout(self)
@@ -202,8 +212,10 @@ class LoadHeatmap(QWidget):
         layout.addLayout(controls)
         layout.addWidget(self.canvas, 1)
         self._result: GuiOptimizationResult | None = None
+        self._external_heatmap_path: Path | None = None
         self.network_combo.currentIndexChanged.connect(self._network_changed)
         self.window_combo.currentIndexChanged.connect(self._refresh)
+        self.open_directory_button.clicked.connect(self._open_external_directory)
         self.export_button.clicked.connect(self.export_requested.emit)
 
     def set_batch(self, batch: BatchOptimizationResult) -> None:
@@ -234,10 +246,17 @@ class LoadHeatmap(QWidget):
             f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
         )
         self._result = result
+        self._external_heatmap_path = next(
+            (
+                path
+                for path in result.exported_files
+                if path.name.casefold().endswith("_heatmap.png")
+            ),
+            None,
+        )
         self._sync_network_combo(result.network_id)
         self.canvas.set_empty_message("运行结果未提供拥挤快照")
         self._refresh()
-        self.export_button.setEnabled(True)
 
     def clear_result(
         self,
@@ -255,8 +274,11 @@ class LoadHeatmap(QWidget):
         self._sync_network_combo(network_id)
         self.title_label.setText("拥挤热力图：无成功结果")
         self._result = None
+        self._external_heatmap_path = None
         self.canvas.set_empty_message(message)
         self.canvas.set_series((), ())
+        self.open_directory_button.setEnabled(False)
+        self.open_directory_button.setVisible(False)
         self.export_button.setEnabled(False)
 
     def export_png(self, path: Path) -> Path:
@@ -271,24 +293,61 @@ class LoadHeatmap(QWidget):
                 f"{self._result.display_name} / 稳态窗口报文拥挤热力图，"
                 f"核心真实范围 {duration_ms} ms / {self._result.source_file}"
             )
-            self.canvas.set_series(
-                self._result.original_steady_load,
-                self._result.optimized_steady_load,
-                self._result.original_steady_count,
-                self._result.optimized_steady_count,
-            )
+            if len(self._result.original_steady_load) > MAX_INLINE_HEATMAP_SLOTS:
+                self._show_external_fallback(len(self._result.original_steady_load))
+            else:
+                self._show_inline(
+                    self._result.original_steady_load,
+                    self._result.optimized_steady_load,
+                    self._result.original_steady_count,
+                    self._result.optimized_steady_count,
+                )
         else:
             duration_ms = len(self._result.original_startup_load) * SLOT_WIDTH_MS
             self.title_label.setText(
                 f"{self._result.display_name} / 启动窗口报文拥挤热力图，"
                 f"核心真实范围 {duration_ms} ms / {self._result.source_file}"
             )
-            self.canvas.set_series(
+            self._show_inline(
                 self._result.original_startup_load,
                 self._result.optimized_startup_load,
                 self._result.original_startup_count,
                 self._result.optimized_startup_count,
             )
+
+    def _show_inline(
+        self,
+        before: tuple[int, ...],
+        after: tuple[int, ...],
+        counts_before: tuple[int, ...],
+        counts_after: tuple[int, ...],
+    ) -> None:
+        self.open_directory_button.setEnabled(False)
+        self.open_directory_button.setVisible(False)
+        self.export_button.setEnabled(True)
+        self.export_button.setToolTip("")
+        self.canvas.set_series(before, after, counts_before, counts_after)
+
+    def _show_external_fallback(self, slot_count: int) -> None:
+        self.canvas.set_empty_message(
+            "图片过大，请使用外部工具查看。\n"
+            f"当前稳态窗口包含 {slot_count} 个 5 ms 时隙。"
+        )
+        self.canvas.set_series((), ())
+        path = self._external_heatmap_path
+        available = path is not None and path.is_file()
+        self.open_directory_button.setVisible(True)
+        self.open_directory_button.setEnabled(available)
+        self.open_directory_button.setToolTip(
+            str(path) if available else "完整热力图文件尚未生成或不存在"
+        )
+        self.export_button.setEnabled(False)
+        self.export_button.setToolTip("请使用后端自动生成的完整热力图 PNG")
+
+    def _open_external_directory(self) -> None:
+        path = self._external_heatmap_path
+        if path is not None and path.is_file():
+            self.open_directory_requested.emit(path.parent)
 
     def _sync_network_combo(self, network_id: str | None) -> None:
         blocker = QSignalBlocker(self.network_combo)
