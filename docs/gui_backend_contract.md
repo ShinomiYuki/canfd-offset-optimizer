@@ -47,10 +47,12 @@ class OptimizationBackend(Protocol):
 backend 负责真实格式解析和语义校验。成功返回 `InputSummary`：
 
 - 一个或多个、名称唯一的 `NetworkSummary`；
-- 每个网段的名称、报文数量、weight mode 和简短说明；
+- 每个网段的原始名称、报文数量和可用权重集合；
 - 面向用户的 warnings。
 
-GUI 只展示网段摘要，不接触 parser 中间模型。
+可用权重集合只能包含 `payload_bytes` 和 `frame_time_us`。没有可用 ARXML 总线时序时，backend
+必须只返回 `payload_bytes`。GUI 直接显示原始网段名称（如 `DA`），不扩写缩写或附加解释，
+也不接触 parser 中间模型。
 
 ## 4. 优化请求
 
@@ -58,6 +60,7 @@ GUI 只展示网段摘要，不接触 parser 中间模型。
 
 - 已验证的输入检查请求；
 - 网段名称；
+- `payload_bytes/frame_time_us` 权重；
 - `peak/balanced/variance` 模式；
 - Balanced tolerance；
 - `adaptive/fixed` restart 设置及 attempts；
@@ -67,6 +70,9 @@ GUI 只展示网段摘要，不接触 parser 中间模型。
 
 adapter 只能把这些字段映射到稳定的公共 service。字段缺失、组合不合法或核心不支持时，应抛出
 带用户可读消息的 `BackendError`，不能静默改写请求语义。
+
+`payload_bytes` 只允许 `peak`。GUI 会在该权重下锁定 Peak，但 adapter 仍必须独立校验，不能
+接受由其他调用方构造的 Payload + Balanced/Variance 请求。
 
 ## 5. 进度与取消
 
@@ -88,7 +94,7 @@ backend 通过 `ProgressCallback(ProgressUpdate)` 发送粗粒度、稳定的展
 
 `GuiOptimizationResult` 必须一次性提供：
 
-- 网段和模式；
+- 网段、权重和模式；
 - 原始/优化后的完整 `ObjectiveMetrics`；
 - 不可变 `OffsetAssignmentRow` 序列；
 - 实际 attempts、停止原因和总耗时；
@@ -117,7 +123,7 @@ backend 通过 `ProgressCallback(ProgressUpdate)` 发送粗粒度、稳定的展
 2. 接受完整不可变请求并返回完整结果的同步优化 service；
 3. 阶段与 attempt 级结构化进度回调；
 4. 在安全检查点轮询的协作式取消；
-5. 对三种目标、restart、candidate pool 和 3-opt 的明确公共映射；
+5. 对两种权重、三种目标、restart、candidate pool 和 3-opt 的明确公共映射；
 6. 核心直接计算并返回四组负载数组和全部指标；
 7. 面向用户的 warning、停止原因、实际 attempts 和产物路径；
 8. 不暴露 `SearchState`、增量评价快照、局部移动缓存或 optimizer 私有函数的 service DTO。

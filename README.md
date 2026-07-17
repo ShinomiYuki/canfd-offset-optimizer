@@ -85,6 +85,10 @@ canfd-offset-gui
 稳定的公共 OptimizationService；在核心线程提供
 `docs/gui_backend_contract.md` 所列接口前，GUI 不会直接调用 optimizer 私有实现。
 
+GUI 支持选择 `payload_bytes` 和 `frame_time_us` 两种权重。未提供可用 ARXML 总线时序时，
+只能选择 `payload_bytes`，并按核心现有语义固定使用 `peak` 模式。网段下拉框直接显示后端返回
+的名称（如 `PT`、`DA`、`DK`），不扩写或解释网段缩写。
+
 使用说明见 `docs/gui_user_guide.md`，架构边界见 `docs/gui_architecture_plan.md`。
 
 对同一 DBC 比较原始 Offset、最小 Offset、Greedy、Greedy + 1-opt 和完整 GCLS：

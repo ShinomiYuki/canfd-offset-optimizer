@@ -31,7 +31,7 @@ canfd-offset-gui
 2. 如项目需要，选择 ARXML 目录。
 3. 显式选择用户输出目录。GUI 不会默认写入 `output/diagnostics/`。
 4. 点击“读取网段”。输入检查在后台线程执行，完成后网段列表可用。
-5. 选择网段、优化模式、Balanced tolerance 和 Restart 策略。
+5. 选择网段、权重、优化模式、Balanced tolerance 和 Restart 策略。
 6. 必要时展开“高级选项”设置 attempts、candidate pool 和 3-opt。
 7. 点击“开始优化”，在运行状态区查看阶段、attempt、耗时和日志摘要。
 8. 在“结果概览”“Offset 修改”“负载曲线”和“运行日志”标签页审阅结果。
@@ -41,6 +41,9 @@ canfd-offset-gui
 
 ## 4. 设置说明
 
+- 网段下拉框直接显示 backend 返回的名称（例如 `PT`、`DA`、`DK`），不会扩写缩写或附加报文数量。
+- **Payload 长度（payload_bytes）**：只依据 Payload 长度加权，不代表物理总线占用时间。
+- **帧时间（frame_time_us）**：依赖 ARXML 中可用的总线时序。没有可用 ARXML 时不提供此选项。
 - **Peak**：严格峰值模式。
 - **Balanced**：默认推荐模式；默认 tolerance 为 `0.05`。
 - **Variance**：实验模式。
@@ -48,6 +51,10 @@ canfd-offset-gui
 - **Restart 固定**：使用固定 attempts。
 - **Candidate pool**：可选 `1/4/8/16/32`。
 - **冲突导向 3-opt**：默认关闭。它是高质量离线搜索选项，真实接入后可能显著增加运行时间。
+
+只有 DBC/项目配置而没有可用 ARXML 总线时序时，权重下拉框只显示 `payload_bytes`。按照核心
+现有语义，Payload 权重同时固定使用 `peak`，Balanced tolerance 不可用。提供 ARXML 后可在
+两种权重之间选择；GUI 默认选择 `frame_time_us` 和 Balanced。
 
 GUI 只把这些选项写入不可变请求，不解释或重写核心算法语义。
 
