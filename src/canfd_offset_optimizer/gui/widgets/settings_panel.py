@@ -123,7 +123,9 @@ class SettingsPanel(QGroupBox):
         )
         self.details_button.setEnabled(True)
         available = set(WeightMode)
-        for network in inspection.networks:
+        # Skipped networks deliberately expose no weight modes.  They must not
+        # collapse the intersection used by the optimizable batch request.
+        for network in inspection.optimizable_networks:
             available.intersection_update(network.available_weight_modes)
         self._set_weight_options(tuple(mode for mode in WeightMode if mode in available))
 

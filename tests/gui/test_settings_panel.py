@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from canfd_offset_optimizer.gui.contracts import (
@@ -45,3 +46,28 @@ def test_dbc_only_project_forces_payload_and_peak(
     request = panel.build_request()
     assert request.weight_mode is WeightMode.PAYLOAD_BYTES
     assert request.mode is OptimizationMode.PEAK
+
+
+def test_skipped_networks_do_not_remove_weights_supported_by_optimizable_networks(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    skipped = replace(
+        inspection.networks[0],
+        is_optimizable=False,
+        available_weight_modes=(),
+        unoptimizable_reason="经典 CAN，不参与优化",
+    )
+    mixed_inspection = replace(
+        inspection,
+        networks=(skipped, *inspection.networks[1:]),
+    )
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+
+    panel.set_inspection(mixed_inspection)
+
+    assert panel.weight_combo.count() == 2
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
+    request = panel.build_request()
+    assert request.inspection is mixed_inspection
+    assert request.weight_mode is WeightMode.FRAME_TIME_US
