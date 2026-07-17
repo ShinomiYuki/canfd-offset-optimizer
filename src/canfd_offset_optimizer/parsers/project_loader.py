@@ -11,7 +11,14 @@ from pathlib import Path
 
 from ..config import ProjectConfig, load_project_config
 from ..exceptions import ConfigurationError, InputFileError, MissingFieldError
-from ..models import CanMessage, ChannelConfig, NetworkModel, ObjectiveMode, WeightMode
+from ..models import (
+    CanMessage,
+    ChannelConfig,
+    FrameProtocol,
+    NetworkModel,
+    ObjectiveMode,
+    WeightMode,
+)
 from ..timeline.slot_map import SlotMap, build_windows, precompute_slot_map
 from ..timing.frame_time import estimate_frame_weight
 from .arxml_parser import ArxmlChannelData, parse_arxml_directory
@@ -64,8 +71,19 @@ def load_project(
     @raises MissingFieldError 精确权重模式缺少 bitrate/BRS 且无 YAML 覆盖时抛出。
     """
     config = load_project_config(config_path)
-    dbc = parse_dbc(dbc_path)
+    dbc = parse_dbc(
+        dbc_path,
+        allowed_offsets_us=config.optimization.allowed_offsets_us,
+    )
     warnings = list(dbc.warnings)
+    frame_protocol = dbc.messages[0].frame_protocol
+    if frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if weight_mode_override not in (None, WeightMode.PAYLOAD_BYTES):
+            warnings.append(
+                "Classic CAN automatically overrides requested weight to payload_bytes"
+            )
+        weight_mode_override = WeightMode.PAYLOAD_BYTES
+        warnings.append('classic_weight_model = "payload_bytes_approximation"')
     sources: dict[str, str] = {}
     cli_overrides: dict[str, str] = {}
     restart_policy = config.optimization.restart_policy
@@ -243,7 +261,11 @@ def load_project(
     for raw in dbc.messages:
         try:
             estimate = estimate_frame_weight(
-                raw.payload_bytes, raw.is_extended, channel, config.model.weight_mode
+                raw.payload_bytes,
+                raw.is_extended,
+                channel,
+                config.model.weight_mode,
+                raw.frame_protocol,
             )
         except ValueError as exc:
             raise MissingFieldError(
@@ -262,6 +284,7 @@ def load_project(
                 sender_ecu=raw.sender_ecu,
                 definition_index=raw.definition_index,
                 payload_bytes=raw.payload_bytes,
+                frame_protocol=raw.frame_protocol,
             )
         )
         if raw.original_offset_us is None:

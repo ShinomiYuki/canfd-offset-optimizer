@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import importlib
 from pathlib import Path
+import re
 from typing import Any, cast
 
 from ..exceptions import InputFileError, MissingFieldError, UnsupportedMessageError
-from ..models import CAN_FD_PAYLOAD_LENGTHS
+from ..models import CAN_FD_PAYLOAD_LENGTHS, FrameProtocol
 
 
 DBC_ATTRIBUTES: dict[str, tuple[str, ...]] = {
@@ -37,6 +38,7 @@ class ParsedDbcMessage:
     original_offset_us: int | None
     definition_index: int
     field_sources: tuple[tuple[str, str], ...]
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +96,30 @@ def _is_declared_periodic(message: Any) -> bool:
     return any(token in normalized for token in ("cyclic", "periodic", "cycle"))
 
 
+def _is_explicitly_event_driven(message: Any) -> bool:
+    value, _ = _attribute_value(message, DBC_ATTRIBUTES["send_type"])
+    if value is None:
+        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # Vector GenMsgSendType commonly uses 0=cyclic and 1=event.
+        return int(value) != 0
+    normalized = str(value).lower().replace("-", "").replace("_", "")
+    return any(token in normalized for token in ("event", "spontaneous", "onchange"))
+
+
+def _is_excluded_traffic_class(message: Any) -> bool:
+    """Exclude diagnostic, NM and calibration traffic without network-name rules."""
+    name = str(getattr(message, "name", ""))
+    words = tuple(part for part in re.split(r"[^A-Za-z0-9]+", name.upper()) if part)
+    upper = name.upper()
+    return (
+        "DIAG" in upper
+        or "XCP" in upper
+        or "CALIBRATION" in upper
+        or any(word == "NM" or word.startswith("NM") for word in words)
+    )
+
+
 def _is_fd_message(message: Any) -> bool:
     """! @brief 优先使用集中映射的格式属性，回退到 cantools 帧标志。"""
     value, _ = _attribute_value(message, DBC_ATTRIBUTES["frame_format"])
@@ -120,7 +146,11 @@ def _tx_sender(message: Any) -> str | None:
     return concrete[0]
 
 
-def parse_dbc(path: Path) -> DbcParseResult:
+def parse_dbc(
+    path: Path,
+    *,
+    allowed_offsets_us: tuple[int, ...] | None = None,
+) -> DbcParseResult:
     """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
 
     @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
@@ -148,19 +178,25 @@ def parse_dbc(path: Path) -> DbcParseResult:
                     f"{path}: message {message.name} is cyclic but has no valid cycle time"
                 )
             continue
-        if not _is_fd_message(message):
-            raise UnsupportedMessageError(
-                f"{path}: message {message.name} is not a CAN FD data frame"
-            )
+        frame_protocol = (
+            FrameProtocol.CAN_FD
+            if _is_fd_message(message)
+            else FrameProtocol.CLASSIC_CAN
+        )
         length = getattr(message, "length", None)
+        valid_lengths = (
+            CAN_FD_PAYLOAD_LENGTHS
+            if frame_protocol is FrameProtocol.CAN_FD
+            else frozenset(range(9))
+        )
         if (
             isinstance(length, bool)
             or not isinstance(length, int)
-            or length not in CAN_FD_PAYLOAD_LENGTHS
+            or length not in valid_lengths
         ):
             raise MissingFieldError(
                 f"{path}: message {message.name} has payload length {length!r} "
-                "that is not representable by a CAN FD DLC"
+                f"that is invalid for {frame_protocol.value}"
             )
         is_extended = bool(getattr(message, "is_extended_frame", False))
         raw_id = int(message.frame_id)
@@ -183,6 +219,32 @@ def parse_dbc(path: Path) -> DbcParseResult:
                 raise MissingFieldError(
                     f"{path}: message {message.name} has invalid original Offset"
                 )
+        if frame_protocol is FrameProtocol.CLASSIC_CAN and (
+            original_offset_us is None
+            or (
+                allowed_offsets_us is not None
+                and original_offset_us not in allowed_offsets_us
+            )
+        ):
+            rendered = (
+                "missing"
+                if original_offset_us is None
+                else f"{original_offset_us / 1000:g} ms"
+            )
+            warnings.append(
+                f"Classic CAN message {message.name} was excluded: original Offset "
+                f"{rendered} is not in the allowed Offset domain"
+            )
+            continue
+        if frame_protocol is FrameProtocol.CLASSIC_CAN and (
+            _is_explicitly_event_driven(message)
+            or _is_excluded_traffic_class(message)
+        ):
+            warnings.append(
+                f"Classic CAN message {message.name} was excluded as "
+                "event/diagnostic/NM traffic"
+            )
+            continue
         source_prefix = f"{path}:{message.name}"
         field_sources = [
             ("can_id", f"{source_prefix}:BO_"),
@@ -206,8 +268,15 @@ def parse_dbc(path: Path) -> DbcParseResult:
                 original_offset_us=original_offset_us,
                 definition_index=definition_index,
                 field_sources=tuple(field_sources),
+                frame_protocol=frame_protocol,
             )
         )
     if not parsed:
-        raise InputFileError(f"{path}: no periodic CAN FD TX messages were found")
+        raise InputFileError(f"{path}: no eligible periodic TX messages were found")
+    protocols = {message.frame_protocol for message in parsed}
+    if len(protocols) != 1:
+        raise UnsupportedMessageError(
+            f"{path}: one physical network mixes eligible Classic CAN and CAN FD "
+            "periodic TX messages; Byte and microsecond weights cannot be mixed"
+        )
     return DbcParseResult(tuple(parsed), tuple(warnings))

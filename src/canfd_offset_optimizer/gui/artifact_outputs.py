@@ -204,6 +204,12 @@ def write_network_log(item: NetworkBatchResult, path: Path) -> Path:
         f"objective_mode={item.mode.value}",
     )
     content = list(lines)
+    if item.result and item.result.classic_weight_model:
+        content.append(
+            f'classic_weight_model = "{item.result.classic_weight_model}"'
+        )
+        content.append("load_unit=Byte/slot")
+        content.append("physical_bus_load_metrics=not_applicable")
     if item.error:
         content.append(f"error={item.error}")
     content.extend(f"warning={warning}" for warning in item.warnings)

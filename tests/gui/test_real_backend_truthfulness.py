@@ -14,6 +14,8 @@ from canfd_offset_optimizer.gui.contracts import (
     BackendError,
     BatchOptimizationResult,
     CancellationToken,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
     NetworkBatchResult,
@@ -93,6 +95,9 @@ def _write_current_project_regression_fixture(root: Path) -> None:
     classic = base.replace(
         'BA_ "VFrameFormat" BO_ 913 "StandardCAN_FD";',
         'BA_ "VFrameFormat" BO_ 913 "StandardCAN";',
+    ).replace(
+        "BO_ 2147484768 Msg460Ext: 16 VCU",
+        "BO_ 2147484768 Msg460Ext: 16 Vector__XXX",
     )
     (root / "CAR_VCU_BD Message.dbc").write_text(classic, encoding="utf-8")
     (root / "CAR_VCU_DM Message.dbc").write_text(classic, encoding="utf-8")
@@ -156,7 +161,7 @@ def test_all_regression_offset_columns_are_in_canonical_domain() -> None:
         assert all(int(row[column]) * 1_000 in REQUIRED_ALLOWED_OFFSETS_US for column in columns)
 
 
-def test_current_project_fixture_discovers_12_optimizes_9_and_skips_3(
+def test_current_project_fixture_adds_classic_bd_dm_and_skips_empty_dg(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "current_project"
@@ -168,14 +173,22 @@ def test_current_project_fixture_discovers_12_optimizes_9_and_skips_3(
 
     assert len(inspection.networks) == 12
     assert {item.network_name for item in inspection.optimizable_networks} == {
-        "CH", "DA", "DK", "EP", "GL", "IC", "LC", "PT", "SU"
+        "BD", "CH", "DA", "DK", "DM", "EP", "GL", "IC", "LC", "PT", "SU"
     }
-    assert sum(item.message_count for item in inspection.optimizable_networks) == 132
+    assert sum(item.message_count for item in inspection.optimizable_networks) == 134
+    classic = {
+        item.network_name: item
+        for item in inspection.optimizable_networks
+        if item.network_name in {"BD", "DM"}
+    }
+    assert all(item.frame_protocol.value == "classic_can" for item in classic.values())
+    assert all(
+        item.available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
+        for item in classic.values()
+    )
     skipped = {item.network_name: item for item in inspection.networks if not item.is_optimizable}
-    assert set(skipped) == {"BD", "DM", "DG"}
-    assert "经典 CAN" in skipped["BD"].unoptimizable_reason
-    assert "经典 CAN" in skipped["DM"].unoptimizable_reason
-    assert "无可优化的周期 CAN FD TX" in skipped["DG"].unoptimizable_reason
+    assert set(skipped) == {"DG"}
+    assert "没有符合资格的周期 TX" in skipped["DG"].unoptimizable_reason
 
 
 def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
@@ -231,6 +244,59 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
         if log.startswith("arxml_channel=")
     }
     assert selected_channels == set(channel_names)
+
+
+def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "classic_project"
+    source.mkdir()
+    classic = DBC_FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_ "VFrameFormat" BO_ 913 "StandardCAN_FD";',
+        'BA_ "VFrameFormat" BO_ 913 "StandardCAN";',
+    ).replace(
+        "BO_ 2147484768 Msg460Ext: 16 VCU",
+        "BO_ 2147484768 Msg460Ext: 16 Vector__XXX",
+    )
+    (source / "CAR_VCU_BD Message.dbc").write_text(classic, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+
+    assert len(inspection.optimizable_networks) == 1
+    network = inspection.optimizable_networks[0]
+    assert network.frame_protocol is FrameProtocol.CLASSIC_CAN
+    assert network.available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
+    assert network.classic_weight_model == CLASSIC_WEIGHT_MODEL
+
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        # This selector applies to FD only; Classic must stay on payload.
+        weight_mode=WeightMode.FRAME_TIME_US,
+        mode=OptimizationMode.PEAK,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
+        candidate_pool_size=1,
+        enable_triple_search=False,
+        output_root=tmp_path / "user_output",
+    )
+    batch = backend.optimize_all_networks(request, lambda update: None, token)
+    result = batch.network_results[0].result
+    assert result is not None
+    assert result.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert result.frame_protocol is FrameProtocol.CLASSIC_CAN
+    assert result.classic_weight_model == CLASSIC_WEIGHT_MODEL
+    assert result.original_metrics.nvio is None
+    assert result.original_metrics.vvio is None
+    assert all(value % 8 == 0 for value in result.original_steady_load)
+    log = (batch.output_directory / "logs" / "BD.log").read_text(encoding="utf-8")
+    assert 'classic_weight_model = "payload_bytes_approximation"' in log
+    assert "load_unit=Byte/slot" in log
+    assert "75%" not in log
 
 
 def test_arxml_channel_resolution_fails_closed_on_ambiguous_source_match() -> None:
@@ -316,8 +382,8 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     assert len(inspection.networks) == 3
     assert len(inspection.optimizable_networks) == 1
     skipped = {item.network_name: item for item in inspection.networks if not item.is_optimizable}
-    assert "经典 CAN" in skipped["CLASSIC"].unoptimizable_reason
-    assert "无可优化的周期 CAN FD TX" in skipped["EMPTY"].unoptimizable_reason
+    assert "混合了 Classic CAN 与 CAN FD" in skipped["CLASSIC"].unoptimizable_reason
+    assert "没有符合资格的周期 TX" in skipped["EMPTY"].unoptimizable_reason
     assert all(item.message_count == 0 for item in skipped.values())
 
     request = GuiBatchOptimizationRequest(

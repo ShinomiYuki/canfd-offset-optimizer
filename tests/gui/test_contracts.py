@@ -7,6 +7,8 @@ import pytest
 
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     ImportRecord,
     ImportRecordStatus,
@@ -40,7 +42,7 @@ def test_import_record_requires_absolute_origin_and_workspace_for_valid_record(
         ImportRecord(**(kwargs | {"workspace_relative_path": None}))
 
 
-def test_network_contract_always_supports_payload_weight() -> None:
+def test_network_contract_supports_selectable_fd_and_fixed_classic_weight() -> None:
     kwargs = dict(
         network_id="net-pt",
         network_name="PT",
@@ -50,16 +52,26 @@ def test_network_contract_always_supports_payload_weight() -> None:
         is_optimizable=True,
         message_count=1,
     )
-    with pytest.raises(ValueError, match="payload_bytes"):
-        NetworkSummary(
-            **kwargs,
-            available_weight_modes=(WeightMode.FRAME_TIME_US,),
-        )
-    network = NetworkSummary(
+    fd_network = NetworkSummary(
         **kwargs,
         available_weight_modes=(WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US),
     )
-    assert network.network_name == "PT"
+    assert fd_network.effective_weight_mode is WeightMode.FRAME_TIME_US
+    classic = NetworkSummary(
+        **(
+            kwargs
+            | {
+                "network_id": "net-bd",
+                "network_name": "BD",
+                "display_name": "BD",
+            }
+        ),
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    assert classic.effective_weight_mode is WeightMode.PAYLOAD_BYTES
 
 
 def test_batch_request_rejects_weight_not_common_to_all_networks(
@@ -72,7 +84,7 @@ def test_batch_request_rejects_weight_not_common_to_all_networks(
             for network in inspection.networks
         ),
     )
-    with pytest.raises(ValueError, match="every network"):
+    with pytest.raises(ValueError, match="every CAN FD network"):
         GuiBatchOptimizationRequest(
             inspection=payload_only,
             weight_mode=WeightMode.FRAME_TIME_US,

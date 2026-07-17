@@ -5,6 +5,8 @@ from pathlib import Path
 
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
     OptimizationMode,
     WeightMode,
     WorkspaceInspection,
@@ -70,4 +72,28 @@ def test_skipped_networks_do_not_remove_weights_supported_by_optimizable_network
     assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
     request = panel.build_request()
     assert request.inspection is mixed_inspection
+    assert request.weight_mode is WeightMode.FRAME_TIME_US
+
+
+def test_classic_weight_is_fixed_while_fd_weight_remains_selectable(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic = replace(
+        inspection.networks[0],
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+        automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    mixed = replace(inspection, networks=(classic, *inspection.networks[1:]))
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(mixed)
+
+    assert panel.weight_combo.count() == 2
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
+    assert "只应用于 CAN FD" in panel.weight_combo.toolTip()
+    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.PEAK
+    assert not panel.mode_combo.isEnabled()
+    request = panel.build_request()
     assert request.weight_mode is WeightMode.FRAME_TIME_US

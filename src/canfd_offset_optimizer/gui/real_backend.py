@@ -12,6 +12,7 @@ from time import perf_counter
 from ..config import PeakToleranceConfig, RestartPolicy, load_project_config
 from ..exceptions import CanfdOptimizerError
 from ..models import (
+    FrameProtocol as CoreFrameProtocol,
     ObjectiveMode as CoreObjectiveMode,
     ObjectiveValue,
     PeakToleranceType,
@@ -30,6 +31,8 @@ from .contracts import (
     BatchOptimizationCancelled,
     BatchOptimizationResult,
     CancellationToken,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
     ImportRecord,
@@ -109,6 +112,10 @@ class RealBackend(WorkspaceImporter):
             errors.append("发现多个项目配置，无法确定批量运行使用哪个配置。")
         arxml_channels: tuple[str, ...] = ()
         configured_channel: str | None = None
+        allowed_offsets_us = REQUIRED_ALLOWED_OFFSETS_US
+        if len(config_records) == 1:
+            config_path = self._single_workspace_path(session, InputKind.CONFIG)
+            allowed_offsets_us = load_project_config(config_path).optimization.allowed_offsets_us
         if arxml_records and len(config_records) == 1:
             try:
                 arxml_channels, configured_channel = self._arxml_channel_context(session)
@@ -132,33 +139,50 @@ class RealBackend(WorkspaceImporter):
             identity_material = f"{record.workspace_relative_path.as_posix()}|{record.sha256 or ''}"
             network_id = f"net-{hashlib.sha256(identity_material.encode()).hexdigest()[:16]}"
             try:
-                parsed = parse_dbc(path)
+                parsed = parse_dbc(path, allowed_offsets_us=allowed_offsets_us)
                 message_count = len(parsed.messages)
                 optimizable = True
                 reason = None
                 network_warnings = list(parsed.warnings)
+                frame_protocol = (
+                    FrameProtocol.CLASSIC_CAN
+                    if parsed.messages[0].frame_protocol is CoreFrameProtocol.CLASSIC_CAN
+                    else FrameProtocol.CAN_FD
+                )
             except CanfdOptimizerError as exc:
                 message_count = 0
                 optimizable = False
                 reason = self._eligibility_reason(exc)
                 network_warnings = []
+                frame_protocol = FrameProtocol.CAN_FD
             available_weight_modes: tuple[WeightMode, ...] = ()
+            automatic_weight_mode: WeightMode | None = None
+            classic_weight_model: str | None = None
             if optimizable:
-                modes = [WeightMode.PAYLOAD_BYTES]
-                frame_time_channel = self._resolve_frame_time_channel(
-                    path.name, configured_channel, arxml_channels
-                )
-                if frame_time_channel is not None:
-                    modes.append(WeightMode.FRAME_TIME_US)
+                if frame_protocol is FrameProtocol.CLASSIC_CAN:
+                    available_weight_modes = (WeightMode.PAYLOAD_BYTES,)
+                    automatic_weight_mode = WeightMode.PAYLOAD_BYTES
+                    classic_weight_model = CLASSIC_WEIGHT_MODEL
                     network_warnings.append(
-                        f"frame_time_us ARXML Controller：{frame_time_channel}"
+                        'classic_weight_model = "payload_bytes_approximation"'
                     )
-                elif arxml_records:
-                    network_warnings.append(
-                        "未找到与来源 DBC 唯一对应的 ARXML Controller；"
-                        "该网段仅支持 payload_bytes。"
+                else:
+                    frame_time_channel = self._resolve_frame_time_channel(
+                        path.name, configured_channel, arxml_channels
                     )
-                available_weight_modes = tuple(modes)
+                    modes = [WeightMode.PAYLOAD_BYTES]
+                    if frame_time_channel is not None:
+                        modes.append(WeightMode.FRAME_TIME_US)
+                        automatic_weight_mode = WeightMode.FRAME_TIME_US
+                        network_warnings.append(
+                            f"frame_time_us ARXML Controller：{frame_time_channel}"
+                        )
+                    else:
+                        automatic_weight_mode = WeightMode.PAYLOAD_BYTES
+                        network_warnings.append(
+                            "CAN FD 缺少唯一 ARXML Controller 映射，只能选择 payload_bytes。"
+                        )
+                    available_weight_modes = tuple(modes)
             networks.append(
                 NetworkSummary(
                     network_id=network_id,
@@ -169,6 +193,9 @@ class RealBackend(WorkspaceImporter):
                     is_optimizable=optimizable,
                     message_count=message_count,
                     available_weight_modes=available_weight_modes,
+                    frame_protocol=frame_protocol,
+                    automatic_weight_mode=automatic_weight_mode,
+                    classic_weight_model=classic_weight_model,
                     warnings=tuple(network_warnings),
                     unoptimizable_reason=reason,
                 )
@@ -218,13 +245,18 @@ class RealBackend(WorkspaceImporter):
         networks = request.inspection.networks
         arxml_channels, configured_channel = self._arxml_channel_context(session)
         channel_overrides = {
-            network.network_id: self._resolve_frame_time_channel(
-                network.source_file, configured_channel, arxml_channels
+            network.network_id: (
+                self._resolve_frame_time_channel(
+                    network.source_file, configured_channel, arxml_channels
+                )
+                if network.frame_protocol is FrameProtocol.CAN_FD
+                else None
             )
             for network in request.inspection.optimizable_networks
         }
         total = len(networks)
         for index, network in enumerate(networks, start=1):
+            actual_weight = self._network_weight(network, request)
             if cancellation_token.is_cancelled:
                 results.extend(
                     self._cancelled_rows(networks[index - 1 :], request)
@@ -238,7 +270,7 @@ class RealBackend(WorkspaceImporter):
                     NetworkBatchResult(
                         network.network_id, network.network_name, network.display_name,
                         network.source_file, NetworkRunStatus.SKIPPED,
-                        request.weight_mode, request.mode,
+                        actual_weight, request.mode,
                         error=network.unoptimizable_reason,
                         warnings=network.warnings,
                         logs=(f"核心资格判定跳过：{network.unoptimizable_reason}",),
@@ -257,7 +289,7 @@ class RealBackend(WorkspaceImporter):
                     NetworkBatchResult(
                         network.network_id, network.network_name, network.display_name,
                         network.source_file, NetworkRunStatus.SUCCEEDED,
-                        request.weight_mode, request.mode, result=detail,
+                        detail.weight_mode, request.mode, result=detail,
                         warnings=detail.warnings, logs=detail.logs,
                     )
                 )
@@ -267,7 +299,7 @@ class RealBackend(WorkspaceImporter):
                     NetworkBatchResult(
                         network.network_id, network.network_name, network.display_name,
                         network.source_file, NetworkRunStatus.CANCELLED,
-                        request.weight_mode, request.mode,
+                        actual_weight, request.mode,
                         logs=("用户取消；核心未产生成功结果。",),
                     )
                 )
@@ -282,7 +314,7 @@ class RealBackend(WorkspaceImporter):
                     NetworkBatchResult(
                         network.network_id, network.network_name, network.display_name,
                         network.source_file, NetworkRunStatus.FAILED,
-                        request.weight_mode, request.mode, error=message,
+                        actual_weight, request.mode, error=message,
                         logs=(f"真实后端失败：{message}",),
                     )
                 )
@@ -307,9 +339,10 @@ class RealBackend(WorkspaceImporter):
         dbc_path = session.session_directory / network.source_workspace_path
         arxml_records = self._records_of_kind(session, InputKind.ARXML)
         arxml_root = session.session_directory / "arxml" if arxml_records else session.session_directory
-        core_weight = CoreWeightMode(request.weight_mode.value)
+        actual_weight = self._network_weight(network, request)
+        core_weight = CoreWeightMode(actual_weight.value)
         core_mode = CoreObjectiveMode(request.mode.value)
-        if request.weight_mode is WeightMode.FRAME_TIME_US and channel_override is None:
+        if actual_weight is WeightMode.FRAME_TIME_US and channel_override is None:
             raise BackendError(
                 f"网段 {network.display_name} 没有唯一的 ARXML Controller 映射"
             )
@@ -391,10 +424,18 @@ class RealBackend(WorkspaceImporter):
             network.network_name,
             network.display_name,
             network.source_file,
-            request.weight_mode,
+            actual_weight,
             request.mode,
-            self._metrics(core_result.initial_objective, tuple(initial_state.steady_slot_loads)),
-            self._metrics(core_result.objective, core_result.steady_slot_loads),
+            self._metrics(
+                core_result.initial_objective,
+                tuple(initial_state.steady_slot_loads),
+                physical=actual_weight is WeightMode.FRAME_TIME_US,
+            ),
+            self._metrics(
+                core_result.objective,
+                core_result.steady_slot_loads,
+                physical=actual_weight is WeightMode.FRAME_TIME_US,
+            ),
             rows,
             core_result.restart_execution.actual_attempts,
             core_result.restart_execution.stop_reason,
@@ -411,9 +452,17 @@ class RealBackend(WorkspaceImporter):
             logs=(
                 "数据源：core load_project + run_gcls",
                 f"arxml_channel={channel_override or 'not_used'}",
+                f"weight_mode={actual_weight.value}",
+                *(
+                    ('classic_weight_model = "payload_bytes_approximation"',)
+                    if network.frame_protocol is FrameProtocol.CLASSIC_CAN
+                    else ()
+                ),
                 f"assignment_hash={core_result.assignment_hash}",
             ),
             output_directory=network_output,
+            frame_protocol=network.frame_protocol,
+            classic_weight_model=network.classic_weight_model,
         )
         stem = self._safe_name(network.display_name)
         progress_callback(
@@ -453,7 +502,7 @@ class RealBackend(WorkspaceImporter):
                 network.display_name,
                 network.source_file,
                 NetworkRunStatus.SUCCEEDED,
-                request.weight_mode,
+                actual_weight,
                 request.mode,
                 result=detail,
                 warnings=detail.warnings,
@@ -500,16 +549,29 @@ class RealBackend(WorkspaceImporter):
         return state
 
     @staticmethod
-    def _metrics(objective: ObjectiveValue, loads: tuple[int, ...]) -> ObjectiveMetrics:
+    def _metrics(
+        objective: ObjectiveValue,
+        loads: tuple[int, ...],
+        *,
+        physical: bool = True,
+    ) -> ObjectiveMetrics:
         return ObjectiveMetrics(
             zss=objective.steady_peak,
             qss=objective.sum_square_load,
             standard_deviation=load_statistics(loads)[2],
             zst=objective.startup_peak,
             qst=objective.startup_sum_square_load,
-            nvio=objective.violation_count,
-            vvio=objective.violation_excess,
+            nvio=objective.violation_count if physical else None,
+            vvio=objective.violation_excess if physical else None,
         )
+
+    @staticmethod
+    def _network_weight(
+        network: NetworkSummary, request: GuiBatchOptimizationRequest
+    ) -> WeightMode:
+        if network.frame_protocol is FrameProtocol.CLASSIC_CAN:
+            return WeightMode.PAYLOAD_BYTES
+        return request.weight_mode
 
     @staticmethod
     def _apply_request_settings(
@@ -606,7 +668,7 @@ class RealBackend(WorkspaceImporter):
                 network.source_file,
                 (NetworkRunStatus.SKIPPED if not network.is_optimizable
                  else NetworkRunStatus.CANCELLED),
-                request.weight_mode, request.mode,
+                RealBackend._network_weight(network, request), request.mode,
                 error=network.unoptimizable_reason if not network.is_optimizable else None,
             )
             for network in networks
@@ -686,6 +748,10 @@ class RealBackend(WorkspaceImporter):
     @staticmethod
     def _eligibility_reason(exc: CanfdOptimizerError) -> str:
         text = str(exc)
+        if "mixes eligible Classic CAN and CAN FD" in text:
+            return f"跳过：同一物理网段混合了 Classic CAN 与 CAN FD，禁止混合权重。详情：{text}"
+        if "no eligible periodic TX messages" in text:
+            return f"跳过：没有符合资格的周期 TX 报文。详情：{text}"
         if "not a CAN FD data frame" in text:
             return f"跳过：包含经典 CAN 报文；仅周期 CAN FD TX 可优化。详情：{text}"
         if "no periodic CAN FD TX messages" in text:

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..contracts import GuiOptimizationResult
+from ..formatting import format_load_unit, format_result_weight
 from ..load_presentation import (
     DEFAULT_DISPLAY_DURATION_MS,
     DISPLAY_DURATIONS_MS,
@@ -199,6 +200,7 @@ class LoadChart(QWidget):
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
         self.chart_title_label = QLabel("负载曲线：无结果")
+        self.weight_basis_label = QLabel("权重口径：—")
         self.current_network_id: str | None = None
         self.window_combo = QComboBox()
         self.window_combo.addItems(("稳态窗口", "启动窗口"))
@@ -222,6 +224,7 @@ class LoadChart(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.current_network_label)
         layout.addWidget(self.chart_title_label)
+        layout.addWidget(self.weight_basis_label)
         layout.addLayout(controls)
         layout.addWidget(self.canvas, 1)
         self._result: GuiOptimizationResult | None = None
@@ -240,6 +243,9 @@ class LoadChart(QWidget):
             f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
         )
         self._result = result
+        self.weight_basis_label.setText(
+            f"权重口径：{format_result_weight(result)}；负载单位：{format_load_unit(result)}"
+        )
         self.canvas.set_empty_message("运行结果未提供负载曲线")
         self._refresh()
         self.export_button.setEnabled(True)
@@ -258,6 +264,7 @@ class LoadChart(QWidget):
             self.current_network_label.setText(f"当前网段：{display_name}（{message}）")
         self.current_network_label.setToolTip("")
         self.chart_title_label.setText("负载曲线：无成功结果")
+        self.weight_basis_label.setText("权重口径：—")
         self._result = None
         self.canvas.set_empty_message(message)
         self.canvas.set_series((), ())

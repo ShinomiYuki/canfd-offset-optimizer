@@ -25,8 +25,8 @@ class QuickStartPage(QScrollArea):
         layout.addWidget(
             self._group(
                 "1. 工程输入",
-                "<b>DBC</b>：提供报文、周期和原始 Offset。只有 DBC 时只能使用 Payload 权重。<br>"
-                "<b>ARXML</b>：提供帧在总线上的时间信息；配合 DBC 才能选择 Frame Time 权重。<br>"
+                "<b>DBC</b>：提供报文、周期、帧格式和原始 Offset。<br>"
+                "<b>ARXML</b>：为 CAN FD 提供 Frame Time（帧时间）参数；Classic CAN 不需要它来计算临时 Payload 权重。<br>"
                 "<b>project.yaml</b>：提供超周期、时隙和优化器基础配置；可选。"
                 "未提供时自动使用程序内置默认配置。建议直接选择包含工程文件的总目录。",
             )
@@ -34,7 +34,8 @@ class QuickStartPage(QScrollArea):
         layout.addWidget(
             self._group(
                 "2. 参数怎么选",
-                "<b>权重</b>：Payload 只比较有效载荷字节；Frame Time 更接近真实总线占用。<br>"
+                "<b>权重</b>：此选项只作用于 CAN FD；Classic CAN 固定使用 Payload 长度近似权重。"
+                "Classic 的 Byte/slot 结果只用于相对均衡，不代表真实负载百分比。<br>"
                 "<b>目标模式</b>：Peak 优先压低最高峰；Variance 优先让各时隙更均匀；"
                 "Balanced 在控制峰值的同时兼顾整体均匀。<br>"
                 "<b>Balanced 容差</b>：允许峰值相对最优峰值略有增加，以换取更平滑的负载；"

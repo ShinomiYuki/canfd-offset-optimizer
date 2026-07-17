@@ -14,6 +14,7 @@ from .contracts import (
     NetworkBatchResult,
     ObjectiveMetrics,
     WeightMode,
+    FrameProtocol,
 )
 
 
@@ -36,7 +37,17 @@ def format_weight_mode(mode: WeightMode) -> str:
     return "Payload 长度（payload_bytes）"
 
 
-def metrics_dict(metrics: ObjectiveMetrics) -> dict[str, int | float]:
+def format_result_weight(result: GuiOptimizationResult) -> str:
+    if result.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        return "Payload 长度近似权重（payload_bytes）"
+    return "帧时间权重（frame_time_us）" if result.weight_mode is WeightMode.FRAME_TIME_US else "Payload 长度权重（payload_bytes）"
+
+
+def format_load_unit(result: GuiOptimizationResult) -> str:
+    return "Byte/slot" if result.frame_protocol is FrameProtocol.CLASSIC_CAN else "μs/slot"
+
+
+def metrics_dict(metrics: ObjectiveMetrics) -> dict[str, int | float | None]:
     return {
         "Zss": metrics.zss,
         "Qss": metrics.qss,
@@ -76,6 +87,9 @@ def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
         "source_file": item.source_file,
         "status": item.status.value,
         "weight_mode": item.weight_mode.value,
+        "weight_basis": (
+            format_result_weight(result) if result else format_weight_mode(item.weight_mode)
+        ),
         "mode": item.mode.value,
         "original_metrics": metrics_dict(result.original_metrics) if result else None,
         "optimized_metrics": metrics_dict(result.optimized_metrics) if result else None,
@@ -99,6 +113,10 @@ def export_network_summary_json(result: GuiOptimizationResult, path: Path) -> Pa
         "display_name": result.display_name,
         "source_file": result.source_file,
         "weight_mode": result.weight_mode.value,
+        "weight_basis": format_result_weight(result),
+        "frame_protocol": result.frame_protocol.value,
+        "load_unit": format_load_unit(result),
+        "classic_weight_model": result.classic_weight_model,
         "mode": result.mode.value,
         "original_metrics": metrics_dict(result.original_metrics),
         "optimized_metrics": metrics_dict(result.optimized_metrics),
@@ -134,6 +152,9 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                 "来源DBC",
                 "状态",
                 "权重",
+                "权重口径",
+                "负载单位",
+                "classic_weight_model",
                 "模式",
                 "原始Zss",
                 "优化后Zss",
@@ -158,6 +179,9 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                     item.source_file,
                     item.status.value,
                     item.weight_mode.value,
+                    format_result_weight(result) if result else format_weight_mode(item.weight_mode),
+                    format_load_unit(result) if result else "",
+                    result.classic_weight_model if result else "",
                     item.mode.value,
                     result.original_metrics.zss if result else "",
                     result.optimized_metrics.zss if result else "",

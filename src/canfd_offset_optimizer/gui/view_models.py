@@ -21,7 +21,13 @@ from .contracts import (
     OffsetAssignmentRow,
     WorkspaceInspection,
 )
-from .formatting import format_can_id, format_integer, format_milliseconds
+from .formatting import (
+    format_can_id,
+    format_integer,
+    format_milliseconds,
+    format_result_weight,
+    format_weight_mode,
+)
 
 
 class BatchSummaryTableModel(QAbstractTableModel):
@@ -34,6 +40,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
         "来源 DBC",
         "状态",
         "模式",
+        "权重口径",
         "原始 Zss",
         "优化后 Zss",
         "原始 Qss",
@@ -70,6 +77,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
             item.source_file,
             item.status.value,
             item.mode.value,
+            item.weight_mode.value,
             result.original_metrics.zss if result else None,
             result.optimized_metrics.zss if result else None,
             result.original_metrics.qss if result else None,
@@ -90,7 +98,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
                 f"显示名称：{item.display_name}\n"
                 f"network_id：{item.network_id}\n来源 DBC：{item.source_file}"
             )
-        if role == int(Qt.ItemDataRole.TextAlignmentRole) and index.column() >= 4:
+        if role == int(Qt.ItemDataRole.TextAlignmentRole) and index.column() >= 5:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if role != int(Qt.ItemDataRole.DisplayRole):
             return None
@@ -105,6 +113,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
             item.source_file,
             status_labels[item.status],
             item.mode.value,
+            format_result_weight(result) if result else format_weight_mode(item.weight_mode),
             format_integer(result.original_metrics.zss) if result else "—",
             format_integer(result.optimized_metrics.zss) if result else "—",
             format_integer(result.original_metrics.qss) if result else "—",

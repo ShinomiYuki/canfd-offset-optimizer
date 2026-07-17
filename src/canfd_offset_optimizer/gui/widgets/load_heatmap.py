@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..contracts import BatchOptimizationResult, GuiOptimizationResult
+from ..formatting import format_load_unit, format_result_weight
 from ..load_presentation import (
     CONGESTION_COLORS,
     CONGESTION_LABELS,
@@ -188,6 +189,7 @@ class LoadHeatmap(QWidget):
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
         self.title_label = QLabel("拥挤热力图：无结果")
+        self.weight_basis_label = QLabel("权重口径：—")
         self.current_network_id: str | None = None
         self.network_combo = QComboBox()
         self.network_combo.setEnabled(False)
@@ -209,6 +211,7 @@ class LoadHeatmap(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.current_network_label)
         layout.addWidget(self.title_label)
+        layout.addWidget(self.weight_basis_label)
         layout.addLayout(controls)
         layout.addWidget(self.canvas, 1)
         self._result: GuiOptimizationResult | None = None
@@ -246,6 +249,9 @@ class LoadHeatmap(QWidget):
             f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
         )
         self._result = result
+        self.weight_basis_label.setText(
+            f"权重口径：{format_result_weight(result)}；数值单位：{format_load_unit(result)}"
+        )
         self._external_heatmap_path = next(
             (
                 path
@@ -273,6 +279,7 @@ class LoadHeatmap(QWidget):
         self.current_network_label.setToolTip("")
         self._sync_network_combo(network_id)
         self.title_label.setText("拥挤热力图：无成功结果")
+        self.weight_basis_label.setText("权重口径：—")
         self._result = None
         self._external_heatmap_path = None
         self.canvas.set_empty_message(message)

@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from canfd_offset_optimizer.gui.contracts import BatchOptimizationResult
+from canfd_offset_optimizer.gui.contracts import (
+    BatchOptimizationResult,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
+    WeightMode,
+)
+from canfd_offset_optimizer.gui.widgets.load_heatmap import LoadHeatmap
 from canfd_offset_optimizer.gui.widgets.load_chart import LoadChart
 
 
@@ -94,3 +100,25 @@ def test_png_exports_the_current_complete_display_range(
     assert len(chart.canvas.before_series) == 1_000
     assert chart.canvas.time_coordinates_ms[-1] == 4_995
     assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_classic_chart_and_heatmap_show_byte_units_without_microseconds(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    classic = replace(
+        _result_with_100_steady_slots(batch_result),
+        weight_mode=WeightMode.PAYLOAD_BYTES,
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    chart = LoadChart()
+    heatmap = LoadHeatmap()
+    qtbot.addWidget(chart)
+    qtbot.addWidget(heatmap)
+    chart.set_result(classic)
+    heatmap.set_result(classic)
+
+    for label in (chart.weight_basis_label.text(), heatmap.weight_basis_label.text()):
+        assert "Payload 长度近似权重（payload_bytes）" in label
+        assert "Byte/slot" in label
+        assert "μs" not in label

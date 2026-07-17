@@ -42,11 +42,20 @@ user_input/<timestamp>_<project>/
 - 因此只导入一个 DBC 也可以开始；前提是该 DBC 至少包含一条核心支持的周期 CAN FD TX 报文。
   如果 DBC 只有经典 CAN、RX 或非周期报文，界面会明确显示“没有可优化网段”，而不是误报输入不完整；
 
-- 仅 DBC + 配置：只能选择 `payload_bytes + Peak`；
-- 提供 ARXML：核心先发现 Controller `SHORT-NAME`，再按 DBC 来源签名做唯一对应；
-  全部可优化网段均有唯一、可解析的 Controller 时，可选择 `payload_bytes` 或
-  `frame_time_us`；无法唯一对应的网段只开放 `payload_bytes`，不会猜测通道；
-- `payload_bytes` 始终只支持 Peak。
+- 批量设置中的权重选项只作用于 CAN FD 网段：存在唯一可解析的 ARXML Controller 时，
+  可选择“帧时间权重（`frame_time_us`）”或 Payload 权重；无法唯一对应时只开放
+  `payload_bytes`，不会猜测通道；
+- Classic CAN 网段固定使用“Payload 长度近似权重（`payload_bytes`）”，不可手动切换，
+  并在技术详情和输出中标记
+  `classic_weight_model = "payload_bytes_approximation"`；
+- Classic CAN 的负载单位为 `Byte/slot`，Zss 是加权峰值，Qss 是加权平方和；该近似仅用于
+  相对均衡，不代表实际占用时间、真实总线负载百分比或 75% 物理阈值判断，Nvio/Vvio
+  显示为“不适用”；
+- 同一物理网段若同时包含 eligible Classic CAN 与 CAN FD 周期 TX，本版本明确拒绝，
+  不混合 Byte 与 μs；`payload_bytes` 仍只支持 Peak。
+
+后续改进项：实现包含标准/扩展帧、协议开销、位填充和 nominal bitrate 的完整 Classic CAN
+`frame_time_us` 模型；本版本不实现该精确模型。
 
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。
 

@@ -26,6 +26,13 @@ class FrameFormat(str, Enum):
     EXTENDED = "extended"
 
 
+class FrameProtocol(str, Enum):
+    """Protocol carried by a physical CAN network."""
+
+    CLASSIC_CAN = "classic_can"
+    CAN_FD = "can_fd"
+
+
 class WeightMode(str, Enum):
     """! @brief 报文权重的计算来源。"""
 
@@ -85,6 +92,7 @@ class CanMessage:
     sender_ecu: str
     definition_index: int
     payload_bytes: int = 8
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -96,9 +104,17 @@ class CanMessage:
             raise ValueError("cycle_time_us must be positive")
         if self.frame_time_us <= 0:
             raise ValueError("frame_time_us must be positive")
-        if self.payload_bytes not in CAN_FD_PAYLOAD_LENGTHS:
+        if not isinstance(self.frame_protocol, FrameProtocol):
+            raise ValueError("frame_protocol is unsupported")
+        valid_lengths = (
+            frozenset(range(9))
+            if self.frame_protocol is FrameProtocol.CLASSIC_CAN
+            else CAN_FD_PAYLOAD_LENGTHS
+        )
+        if self.payload_bytes not in valid_lengths:
             raise ValueError(
-                f"payload_bytes={self.payload_bytes} is not representable by a CAN FD DLC"
+                f"payload_bytes={self.payload_bytes} is invalid for "
+                f"{self.frame_protocol.value}"
             )
         if self.definition_index < 0:
             raise ValueError("definition_index must be non-negative")
@@ -205,6 +221,20 @@ class NetworkModel:
         names = [message.name for message in self.messages]
         if len(names) != len(set(names)):
             raise ValueError("message names must be unique")
+        protocols = {message.frame_protocol for message in self.messages}
+        if len(protocols) != 1:
+            raise ValueError(
+                "one physical network must not mix eligible Classic CAN and CAN FD frames"
+            )
+        if (
+            next(iter(protocols)) is FrameProtocol.CLASSIC_CAN
+            and self.weight_mode is not WeightMode.PAYLOAD_BYTES
+        ):
+            raise ValueError("Classic CAN currently requires payload_bytes weight")
+
+    @property
+    def frame_protocol(self) -> FrameProtocol:
+        return self.messages[0].frame_protocol
 
     @property
     def average_load(self) -> float:

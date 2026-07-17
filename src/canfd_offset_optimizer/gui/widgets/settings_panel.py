@@ -25,6 +25,7 @@ from ..contracts import (
     OptimizationMode,
     RestartMode,
     RestartSettings,
+    FrameProtocol,
     WeightMode,
     WorkspaceInspection,
 )
@@ -122,12 +123,23 @@ class SettingsPanel(QGroupBox):
             f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
         )
         self.details_button.setEnabled(True)
-        available = set(WeightMode)
-        # Skipped networks deliberately expose no weight modes.  They must not
-        # collapse the intersection used by the optimizable batch request.
-        for network in inspection.optimizable_networks:
-            available.intersection_update(network.available_weight_modes)
-        self._set_weight_options(tuple(mode for mode in WeightMode if mode in available))
+        fd_networks = tuple(
+            network
+            for network in inspection.optimizable_networks
+            if network.frame_protocol is FrameProtocol.CAN_FD
+        )
+        if fd_networks:
+            available = {WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US}
+            for network in fd_networks:
+                available.intersection_update(network.available_weight_modes)
+            modes = tuple(
+                mode
+                for mode in (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
+                if mode in available
+            )
+        else:
+            modes = (WeightMode.PAYLOAD_BYTES,)
+        self._set_weight_options(modes)
 
     def clear_inspection(self) -> None:
         self._inspection = None
@@ -159,7 +171,7 @@ class SettingsPanel(QGroupBox):
     def _set_weight_options(self, modes: tuple[WeightMode, ...]) -> None:
         previous = self._selected_weight_mode()
         labels = {
-            WeightMode.PAYLOAD_BYTES: "Payload 长度（payload_bytes）",
+            WeightMode.PAYLOAD_BYTES: "Payload 长度近似权重（payload_bytes）",
             WeightMode.FRAME_TIME_US: "帧时间（frame_time_us）",
         }
         self.weight_combo.blockSignals(True)
@@ -175,9 +187,7 @@ class SettingsPanel(QGroupBox):
             self._select_combo_value(self.weight_combo, preferred)
         self.weight_combo.setEnabled(len(modes) > 1)
         self.weight_combo.setToolTip(
-            "未发现可用 ARXML 总线时序，只能使用 Payload 权重。"
-            if modes == (WeightMode.PAYLOAD_BYTES,)
-            else "该权重将应用到全部已发现网段。"
+            "该选项只应用于 CAN FD 网段；Classic CAN 固定使用 Payload 长度近似权重。"
         )
         self.weight_combo.blockSignals(False)
         self._update_weight_controls()
@@ -220,7 +230,13 @@ class SettingsPanel(QGroupBox):
 
     def _update_weight_controls(self) -> None:
         weight_mode = self._selected_weight_mode()
-        payload_selected = weight_mode is WeightMode.PAYLOAD_BYTES
+        payload_selected = weight_mode is WeightMode.PAYLOAD_BYTES or (
+            self._inspection is not None
+            and any(
+                network.frame_protocol is FrameProtocol.CLASSIC_CAN
+                for network in self._inspection.optimizable_networks
+            )
+        )
         if payload_selected and not self._weight_forced_peak:
             self._last_physical_mode = self._selected_mode()
             self._weight_forced_peak = True
@@ -238,6 +254,6 @@ class SettingsPanel(QGroupBox):
 
     def _update_mode_controls(self) -> None:
         self.tolerance_spin.setEnabled(
-            self._selected_weight_mode() is not WeightMode.PAYLOAD_BYTES
+            not self._weight_forced_peak
             and self._selected_mode() is OptimizationMode.BALANCED
         )

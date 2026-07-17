@@ -42,6 +42,14 @@ class WeightMode(str, Enum):
     FRAME_TIME_US = "frame_time_us"
 
 
+class FrameProtocol(str, Enum):
+    CLASSIC_CAN = "classic_can"
+    CAN_FD = "can_fd"
+
+
+CLASSIC_WEIGHT_MODEL = "payload_bytes_approximation"
+
+
 class RestartMode(str, Enum):
     ADAPTIVE = "adaptive"
     FIXED = "fixed"
@@ -150,6 +158,9 @@ class NetworkSummary:
     is_optimizable: bool
     message_count: int
     available_weight_modes: tuple[WeightMode, ...]
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    automatic_weight_mode: WeightMode | None = None
+    classic_weight_model: str | None = None
     warnings: tuple[str, ...] = ()
     unoptimizable_reason: str | None = None
 
@@ -171,8 +182,27 @@ class NetworkSummary:
             raise ValueError("network weight mode is unsupported")
         if len(set(self.available_weight_modes)) != len(self.available_weight_modes):
             raise ValueError("network weight modes must be unique")
-        if self.is_optimizable and WeightMode.PAYLOAD_BYTES not in self.available_weight_modes:
-            raise ValueError("network must always support payload_bytes weight")
+        if not isinstance(self.frame_protocol, FrameProtocol):
+            raise ValueError("network frame protocol is unsupported")
+        if self.automatic_weight_mode is not None and (
+            self.automatic_weight_mode not in self.available_weight_modes
+        ):
+            raise ValueError("automatic weight must be a concrete available mode")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
+            if self.is_optimizable and self.effective_weight_mode is not WeightMode.PAYLOAD_BYTES:
+                raise ValueError("Classic CAN must use payload_bytes")
+            if self.classic_weight_model != CLASSIC_WEIGHT_MODEL:
+                raise ValueError("Classic CAN must declare its approximation model")
+
+    @property
+    def effective_weight_mode(self) -> WeightMode:
+        if self.automatic_weight_mode is not None:
+            return self.automatic_weight_mode
+        if WeightMode.FRAME_TIME_US in self.available_weight_modes:
+            return WeightMode.FRAME_TIME_US
+        if self.available_weight_modes:
+            return self.available_weight_modes[0]
+        raise ValueError("non-optimizable network has no effective weight")
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,9 +279,17 @@ class GuiBatchOptimizationRequest:
         if any(
             self.weight_mode not in network.available_weight_modes
             for network in self.inspection.optimizable_networks
+            if network.frame_protocol is FrameProtocol.CAN_FD
         ):
-            raise ValueError("selected weight mode is not available for every network")
-        if self.weight_mode is WeightMode.PAYLOAD_BYTES and self.mode is not OptimizationMode.PEAK:
+            raise ValueError("selected weight mode is not available for every CAN FD network")
+        uses_payload = (
+            self.weight_mode is WeightMode.PAYLOAD_BYTES
+            or any(
+                network.frame_protocol is FrameProtocol.CLASSIC_CAN
+                for network in self.inspection.optimizable_networks
+            )
+        )
+        if uses_payload and self.mode is not OptimizationMode.PEAK:
             raise ValueError("payload_bytes weight only supports peak mode")
         if self.output_root.exists() and not self.output_root.is_dir():
             raise ValueError("output_root must be a directory")
@@ -312,13 +350,15 @@ class ObjectiveMetrics:
     standard_deviation: float
     zst: int
     qst: int
-    nvio: int
-    vvio: int
+    nvio: int | None
+    vvio: int | None
 
     def __post_init__(self) -> None:
-        integer_values = (self.zss, self.qss, self.zst, self.qst, self.nvio, self.vvio)
+        integer_values = (self.zss, self.qss, self.zst, self.qst)
         if any(value < 0 for value in integer_values):
             raise ValueError("objective metrics must be non-negative")
+        if any(value is not None and value < 0 for value in (self.nvio, self.vvio)):
+            raise ValueError("physical violation metrics must be non-negative or N/A")
         if not isfinite(self.standard_deviation) or self.standard_deviation < 0:
             raise ValueError("standard_deviation must be finite and non-negative")
 
@@ -374,12 +414,21 @@ class GuiOptimizationResult:
     logs: tuple[str, ...] = ()
     output_directory: Path | None = None
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    classic_weight_model: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
             raise ValueError("result weight mode is unsupported")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("result optimization mode is unsupported")
+        if not isinstance(self.frame_protocol, FrameProtocol):
+            raise ValueError("result frame protocol is unsupported")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
+            if self.weight_mode is not WeightMode.PAYLOAD_BYTES:
+                raise ValueError("Classic CAN result must use payload_bytes")
+            if self.classic_weight_model != CLASSIC_WEIGHT_MODEL:
+                raise ValueError("Classic CAN result must declare its approximation model")
         identity = (self.network_id, self.network_name, self.display_name, self.source_file)
         if any(not value.strip() for value in identity) or not self.stop_reason.strip():
             raise ValueError("result network identity, source and stop reason must not be empty")

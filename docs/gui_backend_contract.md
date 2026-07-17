@@ -48,22 +48,24 @@ Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `
 - 全部名称唯一的 `NetworkSummary`；
 - 缺失的必需输入；
 - 阻塞错误和非阻塞 warnings；
-- 每个网段共同可用的权重能力。
+- 每个网段的帧协议、具体可用权重和自动/固定权重能力。
 
 每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
 `network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
 
 DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导入器必须把随程序发布、内容与仓库
 `input/config/project.yaml` 一致的默认配置复制到会话 `config/project.yaml`，并在 manifest 与警告中
-标明来源；一个用户配置优先于默认配置，多个用户配置仍阻塞。没有可用 ARXML 时只提供
+标明来源；一个用户配置优先于默认配置，多个用户配置仍阻塞。CAN FD 没有可用 ARXML 时只提供
 `payload_bytes`。生产适配器通过
 核心 parser 发现 Controller `SHORT-NAME`，再以 DBC 来源签名进行唯一关联；匹配歧义时不得猜测，
-对应网段只开放 `payload_bytes`。GUI 原样显示 `DA` 等网段名，不扩写。
+对应 CAN FD 网段只开放 `payload_bytes`。Classic CAN 固定使用
+`payload_bytes_approximation`，不参与 CAN FD 权重选择。GUI 原样显示 `DA` 等网段名，不扩写。
 
 ## 5. 批量请求与结果
 
-`GuiBatchOptimizationRequest` 对全部网段共享权重、模式、tolerance、restart、candidate pool、
-3-opt 和输出根目录。Backend 不得静默为不同网段改写设置。
+`GuiBatchOptimizationRequest.weight_mode` 是 CAN FD 网段共享的权重选择；Classic CAN 始终固定为
+`payload_bytes`。模式、tolerance、restart、candidate pool、3-opt 和输出根目录仍由批次共享。
+Backend 必须在结果中写入每个网段实际使用的权重，不得把 Classic Byte 权重标成 μs。
 
 `BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
 `results_by_network_id` 映射。最终状态是
@@ -89,7 +91,8 @@ DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导
 
 ## 7. 真实 Adapter 当前实现
 
-1. `parse_dbc` 是网段和周期 CAN FD TX 报文资格的唯一来源。
+1. `parse_dbc` 是网段和周期 CAN TX 报文资格及 Classic/FD 协议分类的唯一来源；同一物理网段
+   混合 eligible Classic/FD 时必须拒绝。
 2. `load_project` 提供报文、原始 Offset、候选集合、权重和时间窗。
 3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。

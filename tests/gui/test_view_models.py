@@ -42,7 +42,7 @@ def test_batch_summary_filter_and_sort_use_raw_values(
     model = BatchSummaryTableModel()
     proxy = BatchSummaryFilterProxy(model)
     model.set_batch(batch)
-    assert model.columnCount() == 14
+    assert model.columnCount() == 15
     assert proxy.rowCount() == 3
 
     proxy.set_query(batch.network_results[0].network_name)
@@ -53,10 +53,10 @@ def test_batch_summary_filter_and_sort_use_raw_values(
     proxy.set_status(None)
     proxy.set_minimum_improvement(1)
     assert proxy.rowCount() == 2  # failed rows have no improvement and are excluded
-    proxy.sort(4, Qt.SortOrder.DescendingOrder)
+    proxy.sort(5, Qt.SortOrder.DescendingOrder)
     qapp.processEvents()
     values = [
-        proxy.index(row, 4).data(Qt.ItemDataRole.UserRole)
+        proxy.index(row, 5).data(Qt.ItemDataRole.UserRole)
         for row in range(proxy.rowCount())
     ]
     assert values == sorted(values, reverse=True)
@@ -78,18 +78,18 @@ def test_each_summary_row_reads_its_own_network_result(
         )
         assert raw[0] == item.network_name
         assert raw[1] == item.source_file
-        assert raw[4] == result.original_metrics.zss
-        assert raw[5] == result.optimized_metrics.zss
-        assert raw[8] == result.optimized_metrics.standard_deviation
-        assert raw[9] == result.original_metrics.zss - result.optimized_metrics.zss
-        assert raw[10] == result.actual_attempts
-        assert raw[11] == result.stop_reason
-        assert raw[12] == result.elapsed_seconds
+        assert raw[5] == result.original_metrics.zss
+        assert raw[6] == result.optimized_metrics.zss
+        assert raw[9] == result.optimized_metrics.standard_deviation
+        assert raw[10] == result.original_metrics.zss - result.optimized_metrics.zss
+        assert raw[11] == result.actual_attempts
+        assert raw[12] == result.stop_reason
+        assert raw[13] == result.elapsed_seconds
         assert (
             model.index(row, 0).data(BatchSummaryTableModel.NETWORK_ID_ROLE)
             == item.network_id
         )
-        seen_metrics.add(raw[4:13])
+        seen_metrics.add(raw[5:14])
     assert len(seen_metrics) == len(batch_result.network_results)
 
 
