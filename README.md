@@ -64,7 +64,7 @@ python -m pip install -e ".[dev]"
 python -m canfd_offset_optimizer optimize --dbc input/dbc/network.dbc --arxml input/arxml --config input/config/project.yaml --output output --seed 0 --restart-mode adaptive --log-level INFO
 ```
 
-### PySide6 GUI MVP（MockBackend）
+### PySide6 GUI（RealBackend）
 
 GUI 依赖为可选 extra；未安装 `gui` extra 时，原 CLI 的导入和运行路径不会导入
 PySide6。开发和 GUI 测试环境可使用：
@@ -82,11 +82,10 @@ canfd-offset-gui
 
 Windows 可直接双击 `scripts\start_gui.cmd` 一键启动。
 
-当前 GUI 明确使用 **MockBackend**：可一次拖入多个文件、目录或两者混合，递归复制到版本化
-`user_input` 工作区，自动发现全部 DBC 网段，并按顺序执行工程级批量优化。结果页提供全网段
-状态/指标汇总、筛选排序、单网段 Offset/曲线/日志详情，以及版本化 `user_output` 工程摘要和
-每网段产物。单网段失败不会阻断后续网段；取消会保留已完成结果。Mock 结果仅用于界面联调，
-**不能用于工程交付**。真实核心接入边界见 `docs/gui_backend_contract.md`。
+正常 GUI 固定使用 **RealBackend**：工作区 DBC 资格、报文字段、原始/优化 Offset、指标和
+负载数组均来自核心 parser/project loader/GCLS。真实 adapter 初始化失败时界面明确显示
+“仅预览 / 优化不可用”并禁用运行，不会静默回退 Mock，也不会生成伪造的 `user_output`。
+`FixtureBackend` 只供自动化 GUI 测试显式注入；`MockBackend` 默认失败关闭。
 
 GUI 支持选择 `payload_bytes` 和 `frame_time_us` 两种权重。未提供可用 ARXML 总线时序时，
 只能选择 `payload_bytes`，并按核心现有语义固定使用 `peak` 模式。界面直接显示发现的名称

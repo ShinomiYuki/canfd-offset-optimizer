@@ -20,11 +20,11 @@ from canfd_offset_optimizer.gui.contracts import (
     WeightMode,
     WorkspaceInspection,
 )
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 
 
 def test_inspection_discovers_every_dbc_network_from_workspace(
-    backend: MockBackend, inspection: WorkspaceInspection
+    backend: FixtureBackend, inspection: WorkspaceInspection
 ) -> None:
     assert [network.network_name for network in inspection.networks] == ["BD", "GL", "SU"]
     assert all(network.message_count > 0 for network in inspection.networks)
@@ -48,14 +48,14 @@ def test_dbc_without_arxml_only_offers_payload_weight(
     root.mkdir()
     (root / "PT.dbc").write_text("PT", encoding="utf-8")
     (root / "project.yaml").write_text("project: payload", encoding="utf-8")
-    backend = MockBackend(workspace_root=workspace_root, delay_seconds=0)
+    backend = FixtureBackend(workspace_root=workspace_root, delay_seconds=0)
     session = backend.import_inputs((root,), lambda _u: None, CancellationToken())
     inspection = backend.inspect_workspace(session, lambda _u: None, CancellationToken())
     assert inspection.networks[0].available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
 
 
 def test_multiple_project_configs_are_an_explicit_blocking_conflict(
-    backend: MockBackend, tmp_path: Path
+    backend: FixtureBackend, tmp_path: Path
 ) -> None:
     dbc = tmp_path / "PT.dbc"
     first = tmp_path / "a.yaml"
@@ -72,7 +72,7 @@ def test_multiple_project_configs_are_an_explicit_blocking_conflict(
 
 
 def test_batch_runs_sequentially_and_writes_project_and_network_outputs(
-    backend: MockBackend, batch_request: GuiBatchOptimizationRequest
+    backend: FixtureBackend, batch_request: GuiBatchOptimizationRequest
 ) -> None:
     progress = []
     result = backend.optimize_all_networks(
@@ -106,7 +106,7 @@ def test_one_network_failure_and_skip_do_not_abort_remaining_networks(
     inspection: WorkspaceInspection,
     batch_request: GuiBatchOptimizationRequest,
 ) -> None:
-    backend = MockBackend(
+    backend = FixtureBackend(
         workspace_root=workspace_root,
         delay_seconds=0,
         fail_networks={"GL"},
@@ -134,7 +134,7 @@ def test_one_network_failure_and_skip_do_not_abort_remaining_networks(
 def test_project_level_failure_is_not_silently_converted_to_results(
     workspace_root: Path, batch_request: GuiBatchOptimizationRequest
 ) -> None:
-    backend = MockBackend(
+    backend = FixtureBackend(
         workspace_root=workspace_root, delay_seconds=0, fail_all_optimization=True
     )
     with pytest.raises(BackendError, match="工程级"):
@@ -155,7 +155,7 @@ def test_cancellation_retains_completed_network_and_marks_remaining(
             max_attempts=8,
         ),
     )
-    backend = MockBackend(workspace_root=workspace_root, delay_seconds=0.005)
+    backend = FixtureBackend(workspace_root=workspace_root, delay_seconds=0.005)
     token = CancellationToken()
     second_started = Event()
     failures: list[BaseException] = []

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from canfd_offset_optimizer.gui.main_window import MainWindow
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.state import WorkflowState
 
 from test_main_window import import_until_ready
@@ -13,7 +13,7 @@ def test_import_can_be_cancelled_cooperatively(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0.02),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0.02),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)
@@ -33,7 +33,7 @@ def test_batch_cancellation_retains_completed_rows_and_restores_controls(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0.005),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0.005),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)
@@ -70,7 +70,7 @@ def test_close_while_running_can_decline_then_confirm_safe_stop(
         return result
 
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0.01),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0.01),
         dialog_handler=lambda *_args: None,
         close_confirmation=confirm,
     )

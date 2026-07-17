@@ -11,12 +11,12 @@ from canfd_offset_optimizer.gui.contracts import (
     WorkspaceInspection,
 )
 from canfd_offset_optimizer.gui.main_window import MainWindow
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.state import WorkflowState
 
 
 class CountingBackend:
-    def __init__(self, backend: MockBackend) -> None:
+    def __init__(self, backend: FixtureBackend) -> None:
         self.backend = backend
         self.import_calls = 0
         self.inspect_calls = 0
@@ -64,7 +64,7 @@ def test_unified_import_automatically_inspects_and_enables_batch(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     backend = CountingBackend(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0)
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0)
     )
     window = MainWindow(backend, dialog_handler=lambda *_args: None)
     qtbot.addWidget(window)
@@ -75,8 +75,8 @@ def test_unified_import_automatically_inspects_and_enables_batch(
     assert window.import_session is not None
     assert window.inspection is not None
     assert [network.network_name for network in window.inspection.networks] == ["BD", "GL", "SU"]
-    assert window.input_panel.networks_label.text() == "已发现网段：3 个"
-    assert window.settings_panel.networks_label.text() == "已发现网段：3 个"
+    assert window.input_panel.networks_label.text() == "发现网段：3 / 可优化：3 / 已跳过：0"
+    assert window.settings_panel.networks_label.text() == "发现网段：3 / 可优化：3 / 已跳过：0"
     assert window.settings_panel.weight_combo.count() == 2
     assert window.progress_panel.run_button.isEnabled()
 
@@ -85,7 +85,7 @@ def test_batch_locks_controls_then_shows_summary_and_selected_details(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     backend = CountingBackend(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0.002)
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0.002)
     )
     opened: list[Path] = []
     window = MainWindow(
@@ -130,7 +130,7 @@ def test_partial_failure_remains_browsable_and_does_not_hide_successes(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(
+        FixtureBackend(
             workspace_root=workspace_root,
             delay_seconds=0,
             fail_networks={"GL"},
@@ -163,7 +163,7 @@ def test_missing_required_input_is_explicit_and_batch_stays_disabled(
     project.mkdir()
     (project / "DA.dbc").write_text("DA", encoding="utf-8")
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)
@@ -182,7 +182,7 @@ def test_clear_only_resets_current_gui_session_and_keeps_import_history(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)

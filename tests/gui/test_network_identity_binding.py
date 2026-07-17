@@ -14,7 +14,7 @@ from canfd_offset_optimizer.gui.contracts import (
     RestartSettings,
 )
 from canfd_offset_optimizer.gui.main_window import MainWindow
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.state import WorkflowState
 from canfd_offset_optimizer.gui.view_models import BatchSummaryTableModel
 
@@ -51,14 +51,14 @@ def test_main_window_uses_count_summary_and_shared_live_details_models(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)
     import_until_ready(qtbot, window, (source_project,))
 
-    assert window.settings_panel.networks_label.text() == "已发现网段：3 个"
-    assert window.input_panel.networks_label.text() == "已发现网段：3 个"
+    assert window.settings_panel.networks_label.text() == "发现网段：3 / 可优化：3 / 已跳过：0"
+    assert window.input_panel.networks_label.text() == "发现网段：3 / 可优化：3 / 已跳过：0"
     assert not hasattr(window.input_panel, "tree")
     assert all(
         name not in window.settings_panel.networks_label.text()
@@ -99,8 +99,8 @@ def test_network_identity_separates_short_name_from_long_source(
         assert not network.source_workspace_path.is_absolute()
 
 
-def test_mock_results_are_independent_deterministic_and_mathematically_consistent(
-    backend: MockBackend, batch_request: GuiBatchOptimizationRequest
+def test_fixture_results_are_independent_deterministic_and_mathematically_consistent(
+    backend: FixtureBackend, batch_request: GuiBatchOptimizationRequest
 ) -> None:
     adaptive = RestartSettings(
         mode=RestartMode.ADAPTIVE,
@@ -128,6 +128,10 @@ def test_mock_results_are_independent_deterministic_and_mathematically_consisten
     assert len({id(result.original_metrics) for result in concrete}) == 3
     assert len({id(result.optimized_metrics) for result in concrete}) == 3
     assert len({id(result.assignments) for result in concrete}) == 3
+    assert len({id(result.original_steady_load) for result in concrete}) == 3
+    assert len({id(result.optimized_steady_load) for result in concrete}) == 3
+    assert len({id(result.original_startup_load) for result in concrete}) == 3
+    assert len({id(result.optimized_startup_load) for result in concrete}) == 3
     assert len({result.optimized_metrics.standard_deviation for result in concrete}) == 3
     assert len({item.zss_improvement for item in first.network_results}) == 3
     assert len({result.actual_attempts for result in concrete}) >= 2
@@ -171,7 +175,7 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(workspace_root=workspace_root, delay_seconds=0),
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
         dialog_handler=lambda *_args: None,
     )
     qtbot.addWidget(window)
@@ -193,6 +197,7 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     assert window.load_chart.current_network_id == gl.network_id
     assert window.load_chart.canvas.before_series == gl.result.original_steady_load
     assert window.load_chart.canvas.after_series == gl.result.optimized_steady_load
+    assert "GL / 稳态负载" in window.load_chart.chart_title_label.text()
     assert gl.network_id in window.log_view.toPlainText()
 
     window.summary_panel.network_filter.setText("SU")
@@ -200,6 +205,12 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     _select_visible_id(qtbot, window, su.network_id)
     assert window.assignment_table.current_network_id == su.network_id
     assert window.load_chart.current_network_id == su.network_id
+    assert su.result is not None
+    assert window.load_chart.canvas.before_series == su.result.original_steady_load
+    assert window.load_chart.canvas.after_series == su.result.optimized_steady_load
+    assert window.load_chart.canvas.before_series is su.result.original_steady_load
+    assert window.load_chart.canvas.before_series is not gl.result.original_steady_load
+    assert "SU / 稳态负载" in window.load_chart.chart_title_label.text()
     assert su.network_id in window.log_view.toPlainText()
     assert window.summary_panel.proxy.index(0, 0).data() == "SU"
     assert "Message list" in window.summary_panel.proxy.index(0, 1).data()
@@ -209,7 +220,7 @@ def test_failed_selection_clears_success_data_and_no_selection_has_placeholder(
     qtbot, source_project: Path, workspace_root: Path
 ) -> None:
     window = MainWindow(
-        MockBackend(
+        FixtureBackend(
             workspace_root=workspace_root,
             delay_seconds=0,
             fail_networks={"BD", "SU"},
@@ -233,6 +244,7 @@ def test_failed_selection_clears_success_data_and_no_selection_has_placeholder(
     assert window.assignment_table.model.rowCount() == 0
     assert window.load_chart.canvas.before_series == ()
     assert window.load_chart.canvas.after_series == ()
+    assert window.load_chart.chart_title_label.text() == "负载曲线：无成功结果"
     assert window.assignment_table.current_network_id == su.network_id
     assert window.load_chart.current_network_id == su.network_id
     assert "模拟网段 SU 优化失败" in window.log_view.toPlainText()

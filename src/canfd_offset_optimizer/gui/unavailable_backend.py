@@ -1,4 +1,4 @@
-"""Fail-closed mock boundary; it never fabricates business results."""
+"""Fail-closed backend used when the production adapter cannot initialize."""
 
 from __future__ import annotations
 
@@ -17,19 +17,16 @@ from .contracts import (
 from .workspace_io import WorkspaceImporter
 
 
-class MockBackend(WorkspaceImporter):
-    """Retain import/preview identity while prohibiting simulated optimization."""
+class UnavailableBackend(WorkspaceImporter):
+    """Keep import/preview available but prohibit optimization."""
 
-    def __init__(self, *, workspace_root: Path | None = None) -> None:
+    def __init__(self, message: str, workspace_root: Path | None = None) -> None:
         super().__init__(workspace_root)
+        self._message = message
 
     @property
     def availability(self) -> BackendAvailability:
-        return BackendAvailability(
-            False,
-            "MockBackend",
-            "当前为界面模拟模式，不能执行真实优化。",
-        )
+        return BackendAvailability(False, "RealBackend", self._message)
 
     def inspect_workspace(
         self,
@@ -37,8 +34,8 @@ class MockBackend(WorkspaceImporter):
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
     ) -> WorkspaceInspection:
-        del session, progress_callback, cancellation_token
-        raise BackendError("MockBackend 不提供业务解析；请使用 RealBackend。")
+        del progress_callback, cancellation_token
+        return WorkspaceInspection(session, (), errors=(self._message,))
 
     def optimize_all_networks(
         self,
@@ -47,4 +44,4 @@ class MockBackend(WorkspaceImporter):
         cancellation_token: CancellationToken,
     ) -> BatchOptimizationResult:
         del request, progress_callback, cancellation_token
-        raise BackendError("MockBackend 不生成业务结果，也不会写入 user_output。")
+        raise BackendError(self._message)

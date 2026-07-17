@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .contracts import (
+    BackendAvailability,
     BatchOptimizationResult,
     BatchRunStatus,
     CancellationToken,
@@ -60,6 +61,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._backend = backend
+        self._backend_availability = getattr(
+            backend,
+            "availability",
+            BackendAvailability(True, type(backend).__name__),
+        )
         self._dialog_handler = dialog_handler or self._default_dialog
         self._close_confirmation = close_confirmation or self._default_close_confirmation
         self._open_directory_handler = open_directory_handler or self._default_open_directory
@@ -77,7 +83,7 @@ class MainWindow(QMainWindow):
         self._close_pending = False
         self._global_logs: list[str] = []
 
-        self.setWindowTitle("CAN FD Offset Optimizer — 工程批量工作区（Mock 后端）")
+        self.setWindowTitle("CAN FD Offset Optimizer — 工程批量工作区")
         self.resize(1280, 800)
         self.input_panel = InputPanel()
         self.settings_panel = SettingsPanel()
@@ -97,6 +103,18 @@ class MainWindow(QMainWindow):
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
+        self.backend_status_label = QLabel()
+        if self._backend_availability.can_optimize:
+            self.backend_status_label.setText(
+                f"后端：{self._backend_availability.backend_name}（真实核心）"
+            )
+        else:
+            self.backend_status_label.setText(
+                f"仅预览 / 优化不可用：{self._backend_availability.message}"
+            )
+            self.backend_status_label.setStyleSheet("color: #b00020; font-weight: bold;")
+        self.backend_status_label.setWordWrap(True)
+        left_layout.addWidget(self.backend_status_label)
         left_layout.addWidget(self.input_panel)
         left_layout.addWidget(self.settings_panel)
         left_layout.addWidget(self.progress_panel)
@@ -176,6 +194,11 @@ class MainWindow(QMainWindow):
         self._start_task("import", operation)
 
     def start_optimization(self) -> None:
+        if not self._backend_availability.can_optimize:
+            self._append_log(
+                f"优化不可用：{self._backend_availability.message}"
+            )
+            return
         if self.task_active or self._inspection is None or not self._inspection.can_optimize:
             return
         try:
@@ -451,7 +474,11 @@ class MainWindow(QMainWindow):
             WorkflowState.CANCELLING,
         }
         self.input_panel.set_task_locked(active)
-        ready = self._inspection is not None and self._inspection.can_optimize
+        ready = (
+            self._backend_availability.can_optimize
+            and self._inspection is not None
+            and self._inspection.can_optimize
+        )
         self.settings_panel.setEnabled(not active and ready)
         self.progress_panel.set_state(self._state.state, ready_to_run=ready and not active)
 

@@ -162,7 +162,11 @@ class InputPanel(QGroupBox):
             self.required_label.setText("必需输入齐全")
         has_arxml = bool(inspection.session.records_of_kind(InputKind.ARXML))
         self.optional_label.setText("可选输入：已发现 ARXML" if has_arxml else "可选输入：未发现 ARXML")
-        self.networks_label.setText(f"已发现网段：{len(inspection.networks)} 个")
+        discovered = len(inspection.networks)
+        optimizable = len(inspection.optimizable_networks)
+        self.networks_label.setText(
+            f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
+        )
 
     def clear_display(self) -> None:
         self._has_session = False

@@ -116,7 +116,11 @@ class SettingsPanel(QGroupBox):
 
     def set_inspection(self, inspection: WorkspaceInspection) -> None:
         self._inspection = inspection
-        self.networks_label.setText(f"已发现网段：{len(inspection.networks)} 个")
+        discovered = len(inspection.networks)
+        optimizable = len(inspection.optimizable_networks)
+        self.networks_label.setText(
+            f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
+        )
         self.details_button.setEnabled(True)
         available = set(WeightMode)
         for network in inspection.networks:

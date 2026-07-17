@@ -18,7 +18,7 @@ from canfd_offset_optimizer.gui.contracts import (
     WeightMode,
     WorkspaceInspection,
 )
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -49,19 +49,19 @@ def workspace_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def backend(workspace_root: Path) -> MockBackend:
-    return MockBackend(workspace_root=workspace_root, delay_seconds=0)
+def backend(workspace_root: Path) -> FixtureBackend:
+    return FixtureBackend(workspace_root=workspace_root, delay_seconds=0)
 
 
 @pytest.fixture
-def import_session(backend: MockBackend, source_project: Path) -> ImportSession:
+def import_session(backend: FixtureBackend, source_project: Path) -> ImportSession:
     return backend.import_inputs(
         (source_project,), lambda _update: None, CancellationToken()
     )
 
 
 @pytest.fixture
-def inspection(backend: MockBackend, import_session: ImportSession) -> WorkspaceInspection:
+def inspection(backend: FixtureBackend, import_session: ImportSession) -> WorkspaceInspection:
     return backend.inspect_workspace(
         import_session, lambda _update: None, CancellationToken()
     )
@@ -88,7 +88,7 @@ def batch_request(inspection: WorkspaceInspection) -> GuiBatchOptimizationReques
 
 @pytest.fixture
 def batch_result(
-    backend: MockBackend, batch_request: GuiBatchOptimizationRequest
+    backend: FixtureBackend, batch_request: GuiBatchOptimizationRequest
 ) -> BatchOptimizationResult:
     return backend.optimize_all_networks(
         batch_request, lambda _update: None, CancellationToken()

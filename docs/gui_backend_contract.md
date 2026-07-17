@@ -2,8 +2,9 @@
 
 ## 1. 接入状态
 
-当前 `app.py` 注入 `MockBackend`，真实优化器尚未接入。真实 adapter 必须实现
-`canfd_offset_optimizer.gui.contracts.OptimizationBackend`，不得让 GUI 导入核心私有类型。
+当前 `app.py` 默认注入 `RealBackend`。真实 adapter 实现
+`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 允许接触核心
+parser/loader/optimizer 类型，并立即转换为 GUI 不可变 DTO；窗口、worker 和 widgets 不得导入核心类型。
 
 ## 2. 调用协议
 
@@ -63,8 +64,8 @@ DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提
 `BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
 `results_by_network_id` 映射。最终状态是
 `succeeded/failed/skipped/cancelled`。成功项包含完整 `GuiOptimizationResult`；失败项包含用户可读
-错误；部分失败不能丢失成功结果。批量根目录提供 CSV/JSON 汇总，每网段目录提供成功产物或
-`status.json`。
+错误；部分失败不能丢失成功结果。批量根目录提供 CSV/JSON 汇总；只有成功网段创建产物目录，
+跳过网段仅在工程 summary 中记录原因。
 
 指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
 批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
@@ -81,10 +82,12 @@ DBC 和唯一配置是必需输入，ARXML 可选。没有可用 ARXML 时只提
 可预期错误抛 `BackendError`；意外异常由 worker 转换为安全主消息和独立技术详情。禁止吞异常、
 返回空半成品或把工程失败伪装成全部网段失败。
 
-## 7. 真实 Adapter 接入清单
+## 7. 真实 Adapter 当前实现
 
-1. 核心先提供与 CLI 参数解析解耦的稳定工程导入/检查/批量 service。
-2. 提供阶段和 attempt 进度、线程安全取消检查点与部分结果语义。
-3. Adapter 只依赖核心公共 service 和 GUI contracts。
-4. 覆盖全部字段、错误、取消和产物映射，并验证 CLI/service 核心结果等价。
-5. 仅在 `app.py` 替换注入对象，再移除 Mock 标识；窗口和 widgets 不变。
+1. `parse_dbc` 是网段和周期 CAN FD TX 报文资格的唯一来源。
+2. `load_project` 提供报文、原始 Offset、候选集合、权重和时间窗。
+3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
+4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
+5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
+6. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
+   后续公共 service 就绪后应替换此处导入，不影响 GUI contracts/widgets。

@@ -1,6 +1,7 @@
 """Public GUI backend boundary; no optimizer implementation is imported here."""
 
 from .contracts import (
+    BackendAvailability,
     BackendError,
     BatchOptimizationCancelled,
     BatchOptimizationResult,
@@ -18,6 +19,7 @@ from .contracts import (
 )
 
 __all__ = [
+    "BackendAvailability",
     "BackendError",
     "BatchOptimizationCancelled",
     "BatchOptimizationResult",

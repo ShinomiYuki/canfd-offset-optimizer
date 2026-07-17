@@ -19,6 +19,9 @@ def test_gui_sources_do_not_import_core_private_implementation() -> None:
     }
     violations: list[str] = []
     for path in gui_root.rglob("*.py"):
+        # real_backend.py is the single audited core-to-GUI adapter.
+        if path.name == "real_backend.py":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             module = ""

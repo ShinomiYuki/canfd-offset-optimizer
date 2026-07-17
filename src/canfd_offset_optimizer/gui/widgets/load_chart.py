@@ -111,6 +111,7 @@ class LoadChart(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
+        self.chart_title_label = QLabel("负载曲线：无结果")
         self.current_network_id: str | None = None
         self.window_combo = QComboBox()
         self.window_combo.addItems(("稳态窗口", "启动窗口"))
@@ -123,6 +124,7 @@ class LoadChart(QWidget):
         self.canvas = _CurveCanvas()
         layout = QVBoxLayout(self)
         layout.addWidget(self.current_network_label)
+        layout.addWidget(self.chart_title_label)
         layout.addLayout(controls)
         layout.addWidget(self.canvas, 1)
         self._result: GuiOptimizationResult | None = None
@@ -130,6 +132,10 @@ class LoadChart(QWidget):
         self.export_button.clicked.connect(self.export_requested.emit)
 
     def set_result(self, result: GuiOptimizationResult) -> None:
+        # Clear the previous network before binding the new immutable DTO.  This
+        # prevents a repaint between selection signals from showing stale data.
+        self._result = None
+        self.canvas.set_series((), ())
         self.current_network_id = result.network_id
         self.current_network_label.setText(f"当前网段：{result.display_name}")
         self.current_network_label.setToolTip(
@@ -153,6 +159,7 @@ class LoadChart(QWidget):
         if display_name:
             self.current_network_label.setText(f"当前网段：{display_name}（{message}）")
         self.current_network_label.setToolTip("")
+        self.chart_title_label.setText("负载曲线：无成功结果")
         self._result = None
         self.canvas.set_empty_message(message)
         self.canvas.set_series((), ())
@@ -165,10 +172,16 @@ class LoadChart(QWidget):
         if self._result is None:
             return
         if self.window_combo.currentIndex() == 0:
+            self.chart_title_label.setText(
+                f"{self._result.display_name} / 稳态负载 / {self._result.source_file}"
+            )
             self.canvas.set_series(
                 self._result.original_steady_load, self._result.optimized_steady_load
             )
         else:
+            self.chart_title_label.setText(
+                f"{self._result.display_name} / 启动负载 / {self._result.source_file}"
+            )
             self.canvas.set_series(
                 self._result.original_startup_load, self._result.optimized_startup_load
             )

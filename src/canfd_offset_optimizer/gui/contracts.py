@@ -70,6 +70,21 @@ class BatchRunStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class BackendAvailability:
+    """Whether a backend can create real engineering optimization results."""
+
+    can_optimize: bool
+    backend_name: str
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.backend_name.strip():
+            raise ValueError("backend_name must not be empty")
+        if not self.can_optimize and not self.message.strip():
+            raise ValueError("unavailable backend requires an explanatory message")
+
+
+@dataclass(frozen=True, slots=True)
 class ImportRecord:
     """Manifest record for one discovered source file or invalid source path."""
 
@@ -545,6 +560,10 @@ ProgressCallback = Callable[[ProgressUpdate], None]
 @runtime_checkable
 class OptimizationBackend(Protocol):
     """Only interface the GUI may use for a workspace batch."""
+
+    @property
+    def availability(self) -> BackendAvailability:
+        """Describe whether real optimization is available."""
 
     def import_inputs(
         self,

@@ -8,7 +8,7 @@ from canfd_offset_optimizer.gui.contracts import (
     WeightMode,
     WorkspaceInspection,
 )
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.widgets.settings_panel import SettingsPanel
 
 
@@ -31,7 +31,7 @@ def test_dbc_only_project_forces_payload_and_peak(
     source.mkdir()
     (source / "PT.dbc").write_text("PT", encoding="utf-8")
     (source / "project.yaml").write_text("project: demo", encoding="utf-8")
-    backend = MockBackend(workspace_root=workspace_root, delay_seconds=0)
+    backend = FixtureBackend(workspace_root=workspace_root, delay_seconds=0)
     session = backend.import_inputs((source,), lambda _u: None, CancellationToken())
     inspection = backend.inspect_workspace(session, lambda _u: None, CancellationToken())
     panel = SettingsPanel()

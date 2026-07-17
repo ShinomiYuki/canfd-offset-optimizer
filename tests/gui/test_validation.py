@@ -8,11 +8,11 @@ from canfd_offset_optimizer.gui.contracts import (
     ImportRecordStatus,
     InputKind,
 )
-from canfd_offset_optimizer.gui.mock_backend import MockBackend
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 
 
 def test_recursive_import_classifies_copies_and_preserves_originals(
-    backend: MockBackend, source_project: Path
+    backend: FixtureBackend, source_project: Path
 ) -> None:
     before = {
         path.relative_to(source_project): path.read_bytes()
@@ -50,7 +50,7 @@ def test_recursive_import_classifies_copies_and_preserves_originals(
 
 
 def test_one_import_accepts_multiple_directories_and_files(
-    backend: MockBackend, tmp_path: Path
+    backend: FixtureBackend, tmp_path: Path
 ) -> None:
     first = tmp_path / "first"
     second = tmp_path / "second"
@@ -71,7 +71,7 @@ def test_one_import_accepts_multiple_directories_and_files(
 
 
 def test_invalid_and_unrecognized_inputs_are_retained_and_reported(
-    backend: MockBackend, tmp_path: Path
+    backend: FixtureBackend, tmp_path: Path
 ) -> None:
     unknown = tmp_path / "input.bin"
     unknown.write_bytes(b"data")
@@ -92,7 +92,7 @@ def test_invalid_and_unrecognized_inputs_are_retained_and_reported(
 
 
 def test_same_content_is_deduplicated_and_name_conflict_is_stably_renamed(
-    backend: MockBackend, tmp_path: Path
+    backend: FixtureBackend, tmp_path: Path
 ) -> None:
     first = tmp_path / "a" / "same.dbc"
     duplicate = tmp_path / "b" / "same.dbc"
@@ -119,7 +119,7 @@ def test_same_content_is_deduplicated_and_name_conflict_is_stably_renamed(
 
 
 def test_reimport_creates_independent_history_session(
-    backend: MockBackend, source_project: Path
+    backend: FixtureBackend, source_project: Path
 ) -> None:
     first = backend.import_inputs(
         (source_project,), lambda _update: None, CancellationToken()

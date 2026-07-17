@@ -2,9 +2,9 @@
 
 ## 1. 当前决策
 
-仓库仍没有可直接满足 GUI 的稳定公共 OptimizationService。GUI 保持 Mock-first，不导入 parser
-中间 DTO、搜索状态、增量快照或 optimizer 私有函数。真实 service 就绪后只替换组合根注入的
-backend adapter，窗口、worker、DTO 和 view model 不应因核心内部结构变化而改变。
+仓库仍没有可直接满足 GUI 的稳定公共 OptimizationService。当前采用单一、受审计的
+`RealBackend` 适配边界调用 parser/project loader/GCLS；窗口、worker、DTO、view model 和 widgets
+仍不导入核心类型。未来公共 service 就绪后只替换该 adapter 内部，不改变 GUI contracts。
 
 ## 2. 三段式 Backend Protocol
 
@@ -30,10 +30,14 @@ network_id，再由主窗口统一驱动 Offset、曲线和日志三个详情页
 
 ```text
 src/canfd_offset_optimizer/gui/
-├── app.py                 # composition root，当前注入 MockBackend
+├── app.py                 # composition root，默认注入 RealBackend，失败时显式不可用
 ├── contracts.py           # 稳定 GUI DTO、Protocol、取消令牌
 ├── backend.py             # backend 公共重导出
-├── mock_backend.py        # 工作区导入和确定性批量模拟
+├── real_backend.py        # 核心 parser/loader/GCLS 到 GUI DTO 的唯一真实 adapter
+├── fixture_backend.py     # 仅测试显式注入的确定性夹具
+├── mock_backend.py        # 失败关闭；不生成业务结果或 user_output
+├── unavailable_backend.py # RealBackend 初始化失败时保留导入、禁用优化
+├── workspace_io.py        # 不含业务判断的工作区复制与 manifest
 ├── workers.py             # QObject worker / QThread signal boundary
 ├── state.py               # 纯工作流状态机
 ├── main_window.py         # 编排，不解析输入、不计算指标
@@ -42,7 +46,7 @@ src/canfd_offset_optimizer/gui/
 └── widgets/               # 导入、设置、进度、汇总、详情和曲线
 ```
 
-主窗口只保留导入计数和“已发现网段：N 个”。`ProjectDetailsDialog` 直接复用 InputPanel 持有的
+主窗口显示“发现网段 / 可优化 / 已跳过”计数。`ProjectDetailsDialog` 直接复用 InputPanel 持有的
 `NetworkDetailsTableModel` 与 `ImportDetailsTableModel`，避免复制会话数据。
 
 PySide6 只存在于 GUI 包和 `gui` optional extra。CLI 导入路径不依赖 Qt。
@@ -59,9 +63,9 @@ PySide6 只存在于 GUI 包和 `gui` optional extra。CLI 导入路径不依赖
 ## 5. 与增量快照核心线程的关系
 
 本次重构只涉及 `src/.../gui/`、`tests/gui/`、GUI 文档和 README，不修改 optimizer、parser、
-reporting、models、CLI 或增量快照文件，因此没有直接代码冲突。真实 backend 接入仍应等待核心
-线程提供稳定批量 service、进度和取消检查点；adapter 不得把 `SearchState`、`SlotMap`、
-`TripleContributionCache`、parser 中间对象等泄露给 GUI。
+reporting、models、CLI 或增量快照文件，因此与增量快照线程没有直接代码冲突。RealBackend 在
+单个后台线程内顺序调用核心，并在 DTO 边界复制不可变快照；`SearchState`、`SlotMap`、
+`TripleContributionCache` 和 parser 中间对象不会泄露给窗口或 widgets。
 
 ## 6. 验收重点
 
