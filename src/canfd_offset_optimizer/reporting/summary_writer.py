@@ -37,6 +37,33 @@ def triple_search_audit_dict(audit: TripleSearchAudit | None) -> dict[str, objec
         "accepted_moves": audit.accepted_moves,
         "runtime_seconds": audit.elapsed_seconds,
         "stop_reason": audit.stop_reason,
+        "timing_semantics": (
+            "enumeration_seconds is inclusive; contribution precompute, candidate "
+            "selection, cleanup, and total are wall-clock stages; state mutation and "
+            "objective evaluation are measured sub-stages and must not be summed with "
+            "enumeration_seconds"
+        ),
+        "timings": (
+            {
+                "contribution_precompute_seconds": (
+                    audit.timings.contribution_precompute_seconds
+                ),
+                "candidate_selection_seconds": (
+                    audit.timings.candidate_selection_seconds
+                ),
+                "enumeration_seconds": audit.timings.enumeration_seconds,
+                "state_mutation_rollback_seconds": (
+                    audit.timings.state_mutation_rollback_seconds
+                ),
+                "objective_evaluation_seconds": (
+                    audit.timings.objective_evaluation_seconds
+                ),
+                "cleanup_seconds": audit.timings.cleanup_seconds,
+                "total_seconds": audit.timings.total_seconds,
+            }
+            if audit.timings is not None
+            else None
+        ),
         "rounds": [
             {
                 "round_index": item.round_index,

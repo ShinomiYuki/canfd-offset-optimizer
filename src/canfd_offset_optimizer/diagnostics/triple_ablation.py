@@ -87,6 +87,9 @@ def run_triple_ablation(
             for record in result.balanced_candidate_searches
             if record.triple_search_audit is not None
         ]
+        timing_rows = [
+            audit.timings for audit in triple_audits if audit.timings is not None
+        ]
         rows.append(
             {
                 "消融组": label,
@@ -111,6 +114,24 @@ def run_triple_ablation(
                     item.checked_offset_combinations for item in triple_audits
                 ),
                 "接受3-opt次数": sum(item.accepted_moves for item in triple_audits),
+                "贡献预计算耗时(s)": sum(
+                    item.contribution_precompute_seconds for item in timing_rows
+                ),
+                "候选集构造耗时(s)": sum(
+                    item.candidate_selection_seconds for item in timing_rows
+                ),
+                "三元组与Offset枚举耗时(s)": sum(
+                    item.enumeration_seconds for item in timing_rows
+                ),
+                "状态修改与回滚耗时(s)": sum(
+                    item.state_mutation_rollback_seconds for item in timing_rows
+                ),
+                "目标评价耗时(s)": sum(
+                    item.objective_evaluation_seconds for item in timing_rows
+                ),
+                "1-opt与Pair Search耗时(s)": sum(
+                    item.cleanup_seconds for item in timing_rows
+                ),
                 "3-opt耗时(s)": sum(item.elapsed_seconds for item in triple_audits),
                 "Balanced总耗时(s)": (
                     result.elapsed_seconds - result.peak_reference_elapsed_seconds

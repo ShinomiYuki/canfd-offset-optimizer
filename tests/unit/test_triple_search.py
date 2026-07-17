@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from random import Random
+
+import pytest
+
 from canfd_offset_optimizer.models import (
     CanMessage,
     ObjectiveMode,
@@ -20,6 +24,10 @@ from canfd_offset_optimizer.optimization.triple_search import (
     triple_conflict_candidates,
     triple_conflict_neighborhood,
     triple_hot_slots,
+)
+from canfd_offset_optimizer.optimization.triple_incremental import (
+    ReadOnlyTripleObjectiveEvaluator,
+    TripleContributionCache,
 )
 from canfd_offset_optimizer.timeline.slot_map import (
     SlotMap,
@@ -118,6 +126,8 @@ def test_conflict_directed_triple_escapes_pair_local_optimum_deterministically()
     assert first_audit.accepted_moves == 1
     assert first_audit.checked_triplets == 2 * 20
     assert first_audit.checked_offset_combinations == 2 * 20 * 64
+    assert first_audit.timings is not None
+    assert first_audit.timings.total_seconds == first_audit.elapsed_seconds
     move = first_audit.rounds[0]
     assert len(set(move.message_names)) == 3
     assert all(
@@ -134,17 +144,36 @@ def test_conflict_directed_triple_escapes_pair_local_optimum_deterministically()
     )
 
 
-def test_triple_trials_rollback_exactly_when_budget_rejects_every_move() -> None:
+def test_triple_trials_are_read_only_when_budget_rejects_every_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     messages, slot_map, assignment = _fixture()
     state = SearchState(messages, slot_map)
     state.apply_assignments(assignment)
     before = state.clone()
+    state_mutations = 0
+    original_apply = state.apply
+    original_remove = state.remove
+
+    def counted_apply(message: CanMessage, offset: int) -> None:
+        nonlocal state_mutations
+        state_mutations += 1
+        original_apply(message, offset)
+
+    def counted_remove(message: CanMessage, offset: int | None = None) -> int:
+        nonlocal state_mutations
+        state_mutations += 1
+        return original_remove(message, offset)
+
+    monkeypatch.setattr(state, "apply", counted_apply)
+    monkeypatch.setattr(state, "remove", counted_remove)
     policy = ObjectivePolicy(ObjectiveMode.BALANCED, None, 1)
     statistics, audit = _run(state, policy)
     assert audit.accepted_moves == 0
     assert audit.checked_triplets > 0
     assert audit.checked_offset_combinations > 0
     assert statistics.accepted_moves == 0
+    assert state_mutations == 0
     assert state.current_offsets == before.current_offsets
     assert state.steady_slot_loads == before.steady_slot_loads
     assert state.startup_slot_loads == before.startup_slot_loads
@@ -210,3 +239,77 @@ def test_triple_search_never_enumerates_all_network_triplets() -> None:
     )
     assert audit.checked_triplets == 20  # C(6, 3), not C(9, 3) = 84.
     assert audit.checked_offset_combinations == 20 * 64
+
+
+def test_incremental_objective_matches_rebuilt_state_for_random_moves() -> None:
+    offsets = (5_000, 20_000, 55_000, 100_000)
+    cycles = (2_500, 5_000, 10_000, 20_000, 40_000)
+    for seed in range(40):
+        random = Random(seed)
+        messages = tuple(
+            CanMessage(
+                f"M{index}",
+                0x300 + index,
+                False,
+                random.choice(cycles),
+                random.randint(40, 700),
+                offsets,
+                random.choice(offsets),
+                "ECU",
+                index,
+            )
+            for index in range(8)
+        )
+        startup, steady, _ = build_windows(messages, 5_000, 400_000)
+        slot_map = precompute_slot_map(messages, startup, steady)
+        state = SearchState(messages, slot_map)
+        state.apply_assignments(
+            {message.name: random.choice(offsets) for message in messages}
+        )
+        before = (
+            state.current_offsets.copy(),
+            state.steady_slot_loads.copy(),
+            state.startup_slot_loads.copy(),
+            state.steady_slot_counts.copy(),
+            state.startup_slot_counts.copy(),
+        )
+        policy = ObjectivePolicy(
+            ObjectiveMode.BALANCED,
+            random.randint(100, 800),
+            2_500,
+        )
+        evaluator = ReadOnlyTripleObjectiveEvaluator(
+            state,
+            policy,
+            TripleContributionCache(messages, slot_map),
+        )
+        assert evaluator.baseline == score_state(state, policy)
+        for _ in range(25):
+            selected = random.sample(messages, 3)
+            triplet = (selected[0], selected[1], selected[2])
+            new_offsets = (
+                random.choice(offsets),
+                random.choice(offsets),
+                random.choice(offsets),
+            )
+            direct = evaluator.evaluate(triplet, new_offsets)
+            first = evaluator.relocations_for(triplet[0])[new_offsets[0]]
+            second = evaluator.relocations_for(triplet[1])[new_offsets[1]]
+            third = evaluator.relocations_for(triplet[2])[new_offsets[2]]
+            pair_based = evaluator.evaluate_pair_with_relocation(
+                evaluator.prepare_pair(first, second), third
+            )
+            rebuilt = state.clone()
+            for message in triplet:
+                rebuilt.remove(message)
+            for message, offset in zip(triplet, new_offsets, strict=True):
+                rebuilt.apply(message, offset)
+            expected = score_state(rebuilt, policy)
+            assert direct == expected
+            assert pair_based == expected
+            assert direct.metrics_tuple() == expected.metrics_tuple()
+        assert state.current_offsets == before[0]
+        assert state.steady_slot_loads == before[1]
+        assert state.startup_slot_loads == before[2]
+        assert state.steady_slot_counts == before[3]
+        assert state.startup_slot_counts == before[4]

@@ -499,6 +499,32 @@ class TripleMoveAudit:
 
 
 @dataclass(frozen=True, slots=True)
+class TripleSearchTimings:
+    """! @brief 三报文搜索各阶段的重叠与非重叠墙钟时间。"""
+
+    contribution_precompute_seconds: float
+    candidate_selection_seconds: float
+    enumeration_seconds: float
+    state_mutation_rollback_seconds: float
+    objective_evaluation_seconds: float
+    cleanup_seconds: float
+    total_seconds: float
+
+    def __post_init__(self) -> None:
+        values = (
+            self.contribution_precompute_seconds,
+            self.candidate_selection_seconds,
+            self.enumeration_seconds,
+            self.state_mutation_rollback_seconds,
+            self.objective_evaluation_seconds,
+            self.cleanup_seconds,
+            self.total_seconds,
+        )
+        if any(not isfinite(value) or value < 0 for value in values):
+            raise ValueError("triple search phase timings must be finite and non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class TripleSearchAudit:
     """! @brief 一次三报文搜索的终止原因、工作量与已接受移动。"""
 
@@ -511,6 +537,7 @@ class TripleSearchAudit:
     elapsed_seconds: float = field(compare=False)
     stop_reason: str
     rounds: tuple[TripleMoveAudit, ...] = ()
+    timings: TripleSearchTimings | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not 6 <= self.candidate_cap <= 8:
@@ -532,6 +559,10 @@ class TripleSearchAudit:
             item.checked_offset_combinations for item in self.rounds
         ):
             raise ValueError("triple search Offset total is inconsistent")
+        if self.timings is not None and abs(
+            self.timings.total_seconds - self.elapsed_seconds
+        ) > max(0.001, self.elapsed_seconds * 0.01):
+            raise ValueError("triple search total timing is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)

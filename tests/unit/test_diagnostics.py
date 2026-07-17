@@ -122,9 +122,12 @@ def test_triple_ablation_writes_four_groups_and_audit(tmp_path: Path) -> None:
     assert audit
     assert all(row["triple_search"] is None for row in audit if not row["triple_enabled"])
     assert all(row["triple_search"] is not None for row in audit if row["triple_enabled"])
-    assert (tmp_path / "results" / "triple_ablation.csv").read_bytes().startswith(
-        b"\xef\xbb\xbf"
-    )
+    enabled_audits = [row["triple_search"] for row in audit if row["triple_enabled"]]
+    assert all(item["timings"] is not None for item in enabled_audits)
+    assert all("must not be summed" in item["timing_semantics"] for item in enabled_audits)
+    csv_path = tmp_path / "results" / "triple_ablation.csv"
+    assert csv_path.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert "贡献预计算耗时(s)" in csv_path.read_text(encoding="utf-8-sig").splitlines()[0]
     assert (tmp_path / "results" / "triple_ablation_summary.json").is_file()
 
 

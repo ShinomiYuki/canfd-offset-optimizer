@@ -12,6 +12,7 @@ from ..models import (
     ObjectiveValue,
     TripleMoveAudit,
     TripleSearchAudit,
+    TripleSearchTimings,
 )
 from ..timeline.state import SearchState
 from .local_search import (
@@ -20,6 +21,11 @@ from .local_search import (
     relocate_single_messages,
 )
 from .objective import ObjectivePolicy, score_state
+from .triple_incremental import (
+    PairObjectiveSnapshot,
+    ReadOnlyTripleObjectiveEvaluator,
+    TripleContributionCache,
+)
 
 
 def triple_hot_slots(state: SearchState, count: int) -> tuple[int, ...]:
@@ -116,9 +122,8 @@ def conflict_triple_search(
 ) -> tuple[SearchStatistics, TripleSearchAudit]:
     """Apply deterministic best-improvement three-message moves.
 
-    The caller must provide a complete Balanced local optimum. Every accepted move
-    satisfies the strict Peak guardrail and budget before the unchanged 1-opt/Pair
-    cleanup is run.
+    Candidate objectives are evaluated from immutable snapshots and sparse contribution
+    deltas. The formal state is modified exactly once for each accepted round-best move.
     """
     if policy.mode is not ObjectiveMode.BALANCED or policy.peak_budget_us is None:
         raise ValueError("conflict-directed 3-opt requires a Balanced policy")
@@ -128,18 +133,35 @@ def conflict_triple_search(
         raise ValueError("triple hot-slot and round limits must be positive")
     state.validate_invariants(require_complete=True)
     started = perf_counter()
+    precompute_started = perf_counter()
+    contributions = TripleContributionCache(state.messages, state.slot_map)
+    contribution_precompute_seconds = perf_counter() - precompute_started
     total = SearchStatistics()
     checked_triplets_total = 0
     checked_offsets_total = 0
     audits: list[TripleMoveAudit] = []
     stop_reason = "local_optimum"
+    candidate_selection_seconds = 0.0
+    enumeration_seconds = 0.0
+    state_mutation_rollback_seconds = 0.0
+    objective_evaluation_seconds = 0.0
+    cleanup_seconds = 0.0
 
     for round_index in range(max_rounds):
         round_started = perf_counter()
+        objective_started = perf_counter()
         baseline = score_state(state, policy)
+        objective_evaluation_seconds += perf_counter() - objective_started
+        evaluator = ReadOnlyTripleObjectiveEvaluator(state, policy, contributions)
+        if evaluator.baseline != baseline:
+            raise RuntimeError("incremental 3-opt baseline does not match SearchState")
+        complete_signature = _signature(state, policy)
+
+        candidate_started = perf_counter()
         _, candidates = triple_conflict_neighborhood(
             state, hot_slot_count, candidate_cap
         )
+        candidate_selection_seconds += perf_counter() - candidate_started
         best: tuple[
             ObjectiveValue,
             tuple[tuple[int, int, str], ...],
@@ -149,6 +171,11 @@ def conflict_triple_search(
         round_triplets = 0
         round_offsets = 0
 
+        enumeration_started = perf_counter()
+        prepared = {
+            message.name: evaluator.relocations_for(message)
+            for message in candidates
+        }
         for raw_triplet in combinations(candidates, 3):
             ordered_triplet = sorted(raw_triplet, key=_message_key)
             triplet = (
@@ -157,67 +184,62 @@ def conflict_triple_search(
                 ordered_triplet[2],
             )
             first, second, third = triplet
-            round_triplets += 1
-            complete_signature = _signature(state, policy)
             old_offsets = (
                 state.current_offsets[first.name],
                 state.current_offsets[second.name],
                 state.current_offsets[third.name],
             )
-            state.remove(first)
-            state.remove(second)
-            state.remove(third)
-            try:
-                removed_signature = _signature(state, policy)
-                for new_offsets in product(
-                    first.allowed_offsets_us,
-                    second.allowed_offsets_us,
-                    third.allowed_offsets_us,
+            first_relocations = prepared[first.name]
+            second_relocations = prepared[second.name]
+            third_relocations = prepared[third.name]
+            pair_snapshots: dict[tuple[int, int], PairObjectiveSnapshot] = {}
+            round_triplets += 1
+            for new_offsets in product(
+                first.allowed_offsets_us,
+                second.allowed_offsets_us,
+                third.allowed_offsets_us,
+            ):
+                objective_started = perf_counter()
+                pair_key = (new_offsets[0], new_offsets[1])
+                pair_snapshot = pair_snapshots.get(pair_key)
+                if pair_snapshot is None:
+                    pair_snapshot = evaluator.prepare_pair(
+                        first_relocations[new_offsets[0]],
+                        second_relocations[new_offsets[1]],
+                    )
+                    pair_snapshots[pair_key] = pair_snapshot
+                score = evaluator.evaluate_pair_with_relocation(
+                    pair_snapshot,
+                    third_relocations[new_offsets[2]],
+                )
+                objective_evaluation_seconds += perf_counter() - objective_started
+                round_offsets += 1
+                if (
+                    all(
+                        new != old
+                        for new, old in zip(
+                            new_offsets, old_offsets, strict=True
+                        )
+                    )
+                    and (score.violation_count, score.violation_excess) <= guardrail
+                    and score.steady_peak <= policy.peak_budget_us
+                    and score < baseline
                 ):
-                    applied: list[tuple[CanMessage, int]] = []
-                    try:
-                        for message, offset in zip(
-                            triplet, new_offsets, strict=True
-                        ):
-                            state.apply(message, offset)
-                            applied.append((message, offset))
-                        score = score_state(state, policy)
-                        round_offsets += 1
-                    finally:
-                        for message, offset in reversed(applied):
-                            state.rollback(message, offset)
-                    if _signature(state, policy) != removed_signature:
-                        raise RuntimeError("3-opt trial rollback was not exact")
-                    if (
-                        all(
-                            new != old
-                            for new, old in zip(
-                                new_offsets, old_offsets, strict=True
-                            )
-                        )
-                        and
-                        (score.violation_count, score.violation_excess) <= guardrail
-                        and score.steady_peak <= policy.peak_budget_us
-                        and score < baseline
-                    ):
-                        key = (
-                            score,
-                            (
-                                _message_key(first),
-                                _message_key(second),
-                                _message_key(third),
-                            ),
-                            new_offsets,
-                            triplet,
-                        )
-                        if best is None or key[:3] < best[:3]:
-                            best = key
-            finally:
-                for message, offset in zip(triplet, old_offsets, strict=True):
-                    if message.name not in state.current_offsets:
-                        state.apply(message, offset)
-            if _signature(state, policy) != complete_signature:
-                raise RuntimeError("3-opt triplet rollback was not exact")
+                    key = (
+                        score,
+                        (
+                            _message_key(first),
+                            _message_key(second),
+                            _message_key(third),
+                        ),
+                        new_offsets,
+                        triplet,
+                    )
+                    if best is None or key[:3] < best[:3]:
+                        best = key
+        enumeration_seconds += perf_counter() - enumeration_started
+        if _signature(state, policy) != complete_signature:
+            raise RuntimeError("read-only 3-opt evaluation modified SearchState")
 
         checked_triplets_total += round_triplets
         checked_offsets_total += round_offsets
@@ -232,11 +254,20 @@ def conflict_triple_search(
             state.current_offsets[triplet[1].name],
             state.current_offsets[triplet[2].name],
         )
+        mutation_started = perf_counter()
         for message in triplet:
             state.remove(message)
         for message, offset in zip(triplet, new_offsets, strict=True):
             state.apply(message, offset)
+        state_mutation_rollback_seconds += perf_counter() - mutation_started
+        objective_started = perf_counter()
+        official_score = score_state(state, policy)
+        objective_evaluation_seconds += perf_counter() - objective_started
+        if official_score != score_after_move:
+            raise RuntimeError("incremental 3-opt objective differs from applied state")
         total += SearchStatistics(0, 1)
+
+        cleanup_started = perf_counter()
         cleanup = relocate_single_messages(state, policy)
         cleanup += conflict_pair_search(
             state,
@@ -247,8 +278,11 @@ def conflict_triple_search(
             offset_step_us,
             variance_offset_cap,
         )
+        cleanup_seconds += perf_counter() - cleanup_started
         total += cleanup
+        objective_started = perf_counter()
         after_cleanup = score_state(state, policy)
+        objective_evaluation_seconds += perf_counter() - objective_started
         audits.append(
             TripleMoveAudit(
                 round_index=round_index,
@@ -270,6 +304,7 @@ def conflict_triple_search(
         stop_reason = "max_rounds_reached"
 
     state.validate_invariants(require_complete=True)
+    elapsed_seconds = perf_counter() - started
     audit = TripleSearchAudit(
         candidate_cap=candidate_cap,
         max_rounds=max_rounds,
@@ -277,8 +312,17 @@ def conflict_triple_search(
         checked_triplets=checked_triplets_total,
         checked_offset_combinations=checked_offsets_total,
         accepted_moves=len(audits),
-        elapsed_seconds=perf_counter() - started,
+        elapsed_seconds=elapsed_seconds,
         stop_reason=stop_reason,
         rounds=tuple(audits),
+        timings=TripleSearchTimings(
+            contribution_precompute_seconds=contribution_precompute_seconds,
+            candidate_selection_seconds=candidate_selection_seconds,
+            enumeration_seconds=enumeration_seconds,
+            state_mutation_rollback_seconds=state_mutation_rollback_seconds,
+            objective_evaluation_seconds=objective_evaluation_seconds,
+            cleanup_seconds=cleanup_seconds,
+            total_seconds=elapsed_seconds,
+        ),
     )
     return total, audit
