@@ -51,9 +51,7 @@ class MockBackend:
         errors = request.validation_errors()
         if errors:
             raise BackendError("\n".join(errors))
-        for step, message in enumerate(
-            ("检查输入路径", "读取项目元数据", "整理可用网段"), start=1
-        ):
+        for step, message in enumerate(("检查输入路径", "读取项目元数据", "整理可用网段"), start=1):
             self._tick(cancellation_token)
             progress_callback(
                 ProgressUpdate(
@@ -90,9 +88,7 @@ class MockBackend:
         if self._fail_optimization:
             raise BackendError("MockBackend 模拟优化失败")
         started = perf_counter()
-        progress_callback(
-            ProgressUpdate(ProgressPhase.PREPARING, "准备不可变请求快照")
-        )
+        progress_callback(ProgressUpdate(ProgressPhase.PREPARING, "准备不可变请求快照"))
         self._tick(cancellation_token)
         attempts = (
             request.restart.fixed_attempts
@@ -150,9 +146,7 @@ class MockBackend:
             assignments=assignments,
             actual_attempts=attempts,
             stop_reason=(
-                "fixed_limit"
-                if request.restart.mode is RestartMode.FIXED
-                else "patience_exhausted"
+                "fixed_limit" if request.restart.mode is RestartMode.FIXED else "patience_exhausted"
             ),
             elapsed_seconds=perf_counter() - started,
             warnings=tuple(warnings),

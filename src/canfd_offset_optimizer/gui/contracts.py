@@ -97,6 +97,8 @@ class RestartSettings:
     max_attempts: int = 80
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, RestartMode):
+            raise ValueError("restart mode is unsupported")
         values = (self.fixed_attempts, self.min_attempts, self.max_attempts)
         if any(isinstance(value, bool) or value <= 0 for value in values):
             raise ValueError("restart attempts must be positive integers")
@@ -118,6 +120,10 @@ class GuiOptimizationRequest:
     output_directory: Path
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, OptimizationMode):
+            raise ValueError("optimization mode is unsupported")
+        if not isinstance(self.restart, RestartSettings):
+            raise ValueError("restart settings are invalid")
         if not self.network_name.strip():
             raise ValueError("network_name must not be empty")
         if not isfinite(self.balanced_tolerance) or not 0 <= self.balanced_tolerance <= 1:
@@ -227,6 +233,8 @@ class GuiOptimizationResult:
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, OptimizationMode):
+            raise ValueError("result optimization mode is unsupported")
         if not self.network_name.strip() or not self.stop_reason.strip():
             raise ValueError("result network and stop reason must not be empty")
         if not self.assignments:

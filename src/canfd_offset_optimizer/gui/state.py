@@ -19,7 +19,12 @@ class WorkflowState(str, Enum):
 _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.IDLE: frozenset({WorkflowState.INSPECTING}),
     WorkflowState.INSPECTING: frozenset(
-        {WorkflowState.READY, WorkflowState.FAILED, WorkflowState.CANCELLED}
+        {
+            WorkflowState.READY,
+            WorkflowState.CANCELLING,
+            WorkflowState.FAILED,
+            WorkflowState.CANCELLED,
+        }
     ),
     WorkflowState.READY: frozenset({WorkflowState.INSPECTING, WorkflowState.RUNNING}),
     WorkflowState.RUNNING: frozenset(
@@ -60,5 +65,7 @@ class WorkflowStateMachine:
 
     def transition(self, target: WorkflowState) -> None:
         if not self.can_transition(target):
-            raise RuntimeError(f"invalid GUI state transition: {self._state.value} -> {target.value}")
+            raise RuntimeError(
+                f"invalid GUI state transition: {self._state.value} -> {target.value}"
+            )
         self._state = target
