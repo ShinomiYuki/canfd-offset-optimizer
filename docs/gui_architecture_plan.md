@@ -4,7 +4,7 @@
 
 GUI 分支基线为 `0e3e6d6`。当前包根只公开领域模型；`load_project()`、`run_gcls()`、报告 writer 和 `cli.main()` 都不是面向桌面应用的稳定 service。仓库没有 `OptimizationService`、公共 request/result DTO、结构化阶段进度或协作式取消接口。
 
-因此本分支**不接入真实优化器**。按照 GUI 与核心线程的边界，本分支提供隔离的 `OptimizationBackend` Protocol 和 MockBackend。后续核心线程提供稳定 service 后，只替换 `backend.py` 中的 adapter；窗口、worker、view model 和 widgets 不得改变。
+因此本分支**不接入真实优化器**。按照 GUI 与核心线程的边界，本分支提供隔离的 `OptimizationBackend` Protocol 和 MockBackend。后续核心线程提供稳定 service 后，新增一个实现该 Protocol 的 adapter，并在 `app.py` 组合根替换注入对象；窗口、worker、view model 和 widgets 不得改变。
 
 ## 2. GUI 与核心的数据边界
 

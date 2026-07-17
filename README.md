@@ -64,6 +64,29 @@ python -m pip install -e ".[dev]"
 python -m canfd_offset_optimizer optimize --dbc input/dbc/network.dbc --arxml input/arxml --config input/config/project.yaml --output output --seed 0 --restart-mode adaptive --log-level INFO
 ```
 
+### PySide6 GUI MVP（MockBackend）
+
+GUI 依赖为可选 extra；未安装 `gui` extra 时，原 CLI 的导入和运行路径不会导入
+PySide6。开发和 GUI 测试环境可使用：
+
+```bash
+python -m pip install -e ".[gui,dev]"
+```
+
+支持两种启动方式：
+
+```bash
+python -m canfd_offset_optimizer.gui
+canfd-offset-gui
+```
+
+当前 GUI 明确使用 **MockBackend**：可以完成输入检查、网段选择、后台运行、协作式取消、
+结果查看以及 CSV/JSON/PNG 导出，但结果仅用于界面联调，**不能用于工程交付**。仓库当前尚无
+稳定的公共 OptimizationService；在核心线程提供
+`docs/gui_backend_contract.md` 所列接口前，GUI 不会直接调用 optimizer 私有实现。
+
+使用说明见 `docs/gui_user_guide.md`，架构边界见 `docs/gui_architecture_plan.md`。
+
 对同一 DBC 比较原始 Offset、最小 Offset、Greedy、Greedy + 1-opt 和完整 GCLS：
 
 ```bash
