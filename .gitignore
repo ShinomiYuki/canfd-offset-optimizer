@@ -16,6 +16,8 @@ input/dbc/*
 !input/dbc/.gitkeep
 input/arxml/*
 !input/arxml/.gitkeep
+/docs/Communication Routing Table V4.8_202606121848_ZCU.xlsx
+/docs/网关路由配置表V02_V4.7_to_V4.8.xlsx
 
 output/results/*
 !output/results/.gitkeep

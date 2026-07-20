@@ -153,6 +153,139 @@ def _company_routing_sheet(*data_rows: list[object]) -> list[list[object]]:
     ]
 
 
+def _direct_routing_sheet(*data_rows: list[object]) -> list[list[object]]:
+    return [
+        [
+            "源网段报文名称",
+            "源网段报文CANID",
+            "源网段报文Length",
+            "源网段报文类型",
+            "源网段CAN通道",
+            "源网段RxIndicationUL",
+            "源网段报文Checksum使能",
+            "源网段报文Dlc Check使能",
+            "目标网段报文名称",
+            "目标网段报文CANID",
+            "目标网段报文Length",
+            "目标网段报文类型",
+            "目标网段CAN通道",
+            "目标网段报文Checksum使能",
+            "目标网段报文PnFilter使能",
+            "目标网段报文Truncation使能",
+            "路由Length Strategy功能选择",
+        ],
+        *data_rows,
+    ]
+
+
+def _direct_route_row(
+    source_name: str,
+    source_id: str,
+    source_channel: str,
+    target_name: str,
+    target_id: str,
+    target_channel: str,
+) -> list[object]:
+    return [
+        source_name,
+        source_id,
+        8,
+        "STANDARD_CAN",
+        source_channel,
+        "PDUR",
+        "",
+        "Enable",
+        target_name,
+        target_id,
+        8,
+        "STANDARD_FD_CAN",
+        target_channel,
+        "",
+        "",
+        "Disable",
+        "IGNORE",
+    ]
+
+
+def test_standard_gateway_table_uses_target_side_and_has_highest_priority(
+    tmp_path: Path,
+) -> None:
+    direct_rows = (
+        _direct_route_row("SourceA", "0x111", "BDCAN", "TargetIC", "0x460", "ICCAN"),
+        _direct_route_row("SourceB", "0x222", "CHCAN", "TargetBD", "0x320", "BDCAN"),
+        _direct_route_row("SourceC", "0x333", "DACAN", "TargetDK", "0x563", "DKCAN"),
+        _direct_route_row("SourceOnly", "0x444", "PTCAN", "", "", ""),
+    )
+    old_row = [
+        "SignalA",
+        "Signal",
+        "FL_CANFD_CH",
+        "ACU_3",
+        "0x021",
+        "OldTarget",
+        "StandardCAN_FD",
+        "0x777",
+        "√",
+    ]
+    path = _xlsx(
+        tmp_path / "standard-gateway.xlsx",
+        {
+            "封面": [["网关路由配置表"]],
+            "Routing(FLZCU)": _company_routing_sheet(old_row),
+            "Fallback": [["目标网段", "CAN ID"], ["PT", "0x555"]],
+            "直接报文路由 ": _direct_routing_sheet(*direct_rows),
+            "诊断报文路由": [["目标网段报文名称", "目标网段报文CANID"]],
+        },
+    )
+
+    records = RouteMessageTableParser().parse(path)
+
+    assert [record.target_network_raw for record in records] == ["IC", "BD", "DK"]
+    assert [record.can_id for record in records] == [0x460, 0x320, 0x563]
+    assert [record.message_name for record in records] == [
+        "TargetIC",
+        "TargetBD",
+        "TargetDK",
+    ]
+    assert all(record.sheet_name == "直接报文路由 " for record in records)
+    assert [record.row_number for record in records] == [2, 3, 4]
+
+
+def test_standard_gateway_partial_target_row_is_retained_for_audit(
+    tmp_path: Path,
+) -> None:
+    partial = _direct_route_row(
+        "SourceA", "0x111", "BDCAN", "TargetDA", "bad-id", "DACAN"
+    )
+    records = RouteMessageTableParser().parse(
+        _xlsx(
+            tmp_path / "partial-standard-gateway.xlsx",
+            {"直接报文路由": _direct_routing_sheet(partial)},
+        )
+    )
+
+    assert len(records) == 1
+    assert records[0].target_network_raw == "DA"
+    assert records[0].can_id_raw == "bad-id"
+    assert records[0].can_id is None
+
+
+def test_malformed_standard_gateway_sheet_does_not_fall_back(
+    tmp_path: Path,
+) -> None:
+    path = _xlsx(
+        tmp_path / "malformed-standard-gateway.xlsx",
+        {
+            "直接报文路由": [["目标网段报文名称", "目标网段报文CANID"]],
+            "Routing(FLZCU)": _company_routing_sheet(),
+            "Fallback": [["目标网段", "CAN ID"], ["IC", "0x460"]],
+        },
+    )
+
+    with pytest.raises(RouteTableParseError, match="目标网段CAN通道"):
+        RouteMessageTableParser().parse(path)
+
+
 def test_company_workbook_reads_only_flzcu_and_expands_can_target_matrix(
     tmp_path: Path,
 ) -> None:
@@ -308,6 +441,37 @@ def _request(inspection, output_root: Path) -> GuiBatchOptimizationRequest:
         enable_triple_search=False,
         output_root=output_root,
     )
+
+
+def test_real_backend_accepts_standard_gateway_table(tmp_path: Path) -> None:
+    source = _project_with_offsets(tmp_path / "source", ("IC", "PT"))
+    _xlsx(
+        source / "gateway-routing.xlsx",
+        {
+            "直接报文路由": _direct_routing_sheet(
+                _direct_route_row(
+                    "SourceMessage",
+                    "0x111",
+                    "BDCAN",
+                    "Msg460Ext",
+                    "0x460",
+                    "ICCAN",
+                )
+            )
+        },
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda _update: None, token)
+    inspection = backend.inspect_workspace(session, lambda _update: None, token)
+
+    by_name = {network.network_name: network for network in inspection.networks}
+    assert inspection.can_optimize
+    assert not inspection.errors
+    assert inspection.routing_exclusion.record_count == 1
+    assert inspection.routing_exclusion.excluded_message_count == 1
+    assert by_name["IC"].routing_excluded_count == 1
+    assert by_name["PT"].routing_excluded_count == 0
 
 
 def test_real_backend_excludes_routes_before_gcls_and_keeps_same_id_other_network(

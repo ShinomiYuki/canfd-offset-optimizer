@@ -31,6 +31,14 @@ class _Sheet:
 
 
 @dataclass(frozen=True, slots=True)
+class _DirectRoutingLayout:
+    header_row: int
+    message_name_column: int
+    can_id_column: int
+    target_channel_column: int
+
+
+@dataclass(frozen=True, slots=True)
 class _FlzcuRoutingLayout:
     header_row: int
     message_name_column: int
@@ -42,6 +50,7 @@ class RouteMessageTableParser:
     """Dependency-free reader for the subset of OOXML needed by routing tables."""
 
     SUPPORTED_SUFFIXES = frozenset({".xlsx"})
+    DIRECT_ROUTING_SHEET = "直接报文路由"
     FLZCU_ROUTING_SHEET = "routing(flzcu)"
     COLUMN_ALIASES: Mapping[str, frozenset[str]] = {
         "target_network": frozenset(
@@ -85,6 +94,18 @@ class RouteMessageTableParser:
             sheets = self._read_xlsx(source)
         except (BadZipFile, ElementTree.ParseError, KeyError, OSError, ValueError) as exc:
             raise RouteTableParseError(f"无法打开或解析 XLSX：{exc}") from exc
+
+        direct_sheets = tuple(
+            sheet
+            for sheet in sheets
+            if normalize_sheet_name(sheet.name) == self.DIRECT_ROUTING_SHEET
+        )
+        if direct_sheets:
+            return tuple(
+                record
+                for sheet in direct_sheets
+                for record in self._parse_direct_routing_sheet(sheet, source)
+            )
 
         flzcu_sheets = tuple(
             sheet
@@ -144,6 +165,60 @@ class RouteMessageTableParser:
         if parsed_sheet_count == 0:
             raise RouteTableParseError("路由报文表缺少目标网段或 CAN ID 列")
         return tuple(records)
+
+    def _parse_direct_routing_sheet(
+        self, sheet: _Sheet, source: Path
+    ) -> tuple[RouteMessageRecord, ...]:
+        layout = self._find_direct_routing_layout(sheet)
+        if layout is None:
+            raise RouteTableParseError(
+                f"Sheet {sheet.name!r} 缺少目标网段报文名称、目标网段报文CANID或"
+                "目标网段CAN通道表头"
+            )
+
+        records: list[RouteMessageRecord] = []
+        for row_number, values in sheet.rows:
+            if row_number <= layout.header_row:
+                continue
+            target_channel = values.get(layout.target_channel_column, "").strip()
+            can_raw = values.get(layout.can_id_column, "").strip()
+            message_name = values.get(layout.message_name_column, "").strip()
+            if not any((target_channel, can_raw, message_name)):
+                continue
+            target_network = direct_can_network_name(target_channel)
+            records.append(
+                RouteMessageRecord(
+                    target_network_raw=target_network or target_channel,
+                    can_id_raw=can_raw,
+                    can_id=parse_can_id(can_raw),
+                    message_name=message_name or None,
+                    source_file=source.name,
+                    sheet_name=sheet.name,
+                    row_number=row_number,
+                )
+            )
+        return tuple(records)
+
+    def _find_direct_routing_layout(
+        self, sheet: _Sheet
+    ) -> _DirectRoutingLayout | None:
+        for header_row, values in sheet.rows[:20]:
+            message_name_column = _unique_column(values, "目标网段报文名称")
+            can_id_column = _unique_column(values, "目标网段报文canid")
+            target_channel_column = _unique_column(values, "目标网段can通道")
+            if (
+                message_name_column is None
+                or can_id_column is None
+                or target_channel_column is None
+            ):
+                continue
+            return _DirectRoutingLayout(
+                header_row=header_row,
+                message_name_column=message_name_column,
+                can_id_column=can_id_column,
+                target_channel_column=target_channel_column,
+            )
+        return None
 
     def _parse_flzcu_routing_sheet(
         self, sheet: _Sheet, source: Path
@@ -320,6 +395,15 @@ def flzcu_can_network_name(value: str) -> str | None:
     """Map a left-domain routing matrix header to the imported DBC network name."""
 
     match = re.fullmatch(r"FL_(?:CANFD|CAN)_([A-Z0-9_]+)", value.strip(), re.IGNORECASE)
+    if match is None:
+        return None
+    return match.group(1).upper()
+
+
+def direct_can_network_name(value: str) -> str | None:
+    """Map a standard gateway target channel such as ``DACAN`` to ``DA``."""
+
+    match = re.fullmatch(r"([A-Z0-9_]+)CAN", value.strip(), re.IGNORECASE)
     if match is None:
         return None
     return match.group(1).upper()

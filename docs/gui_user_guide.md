@@ -36,20 +36,24 @@ user_input/<timestamp>_<project>/
 至少需要一个 DBC。YAML/YML 项目配置、ARXML 和路由报文排除表均可选：
 
 - `.xlsx` 路由报文排除表与其他文件一起拖入统一导入区，不提供独立路径输入框；
-- 完整通信路由表以 `Routing(FLZCU)` Sheet 为左域权威数据源（Sheet 名末尾空格也兼容），
+- 标准网关路由配置表以 `直接报文路由` Sheet 为权威数据源（Sheet 名末尾空格也兼容）。
+  解析器只读取目标侧的 `目标网段报文名称`、`目标网段报文CANID` 和
+  `目标网段CAN通道`，并将 `DACAN`、`DMCAN`、`ICCAN` 等通道映射为 `DA`、`DM`、`IC`；
+- 旧版完整通信路由表继续以 `Routing(FLZCU)` Sheet 为左域数据源，
   自动忽略 `Cover`、`History`、`Routing(FRZCU)` 和 `信号转义`。解析器读取
   `Service Subscriber Data` 下的目标 `Msg Name`、`Msg ID`，再把
   `Service Subscriber Subnet` 横向矩阵中非空的 CAN/CAN FD 订阅网段逐项展开；例如
   `FL_CANFD_IC`、`FL_CAN_BD` 分别映射为 `IC`、`BD`。LIN 目标不属于当前 DBC Offset
   优化范围，不生成排除记录；
-- 不含 `Routing(FLZCU)` 的简化表仍使用明确别名映射而不是模糊猜测：目标网段支持
+- 不含 `直接报文路由` 和 `Routing(FLZCU)` 的简化表仍使用明确别名映射而不是模糊猜测：目标网段支持
   `目标网段`、`目标网络`、`目标总线`、`target_network`、`destination_network`、`target bus`；
   CAN ID 支持 `CAN ID`、`报文ID`、`消息ID`、`帧ID`、`message_id`、`identifier`；可选报文名
   支持 `报文名`、`报文名称`、`消息名`、`消息名称`、`message_name`；
 - 路由表按“目标网段 + CAN ID”匹配。目标网段通过当前工程的 `network_name` 精确映射为稳定
   `network_id`，CAN ID 支持十六进制 `0x123`、`123h` 和十进制 `291`；报文名只用于审计；
-- 未提供路由表时排除数为 0，流程与原来相同；提供的 `.xlsx` 损坏、简化表缺少目标网段/CAN ID
-  列或 `Routing(FLZCU)` 模板结构不完整时会明确阻止运行，不会改读右域或假装成 0 条；
+- 解析优先级固定为 `直接报文路由`、`Routing(FLZCU)`、简化平铺表。未提供路由表时排除数为 0；
+  提供的 `.xlsx` 损坏、简化表缺少目标网段/CAN ID 列或任一权威 Sheet 模板结构不完整时会明确
+  阻止运行，不会回退到低优先级 Sheet 或假装成 0 条；
   单条未找到、歧义或无效 CAN ID 会记录诊断并继续；
 
 - 用户没有提供 YAML/YML 时，导入器自动把程序内置的 `default_project.yaml` 复制为本次
