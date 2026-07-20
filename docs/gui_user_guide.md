@@ -133,11 +133,14 @@ user_output/<timestamp>_<project>_real/
 未找到、歧义、重复、实际排除和最终参与优化数量。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
 0～2000 ms 的重复稳态负载曲线，以及不重复的单个稳态窗口拥挤热力图。
 
-`dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。写入器只在已有
-`GenMsgStartDelayTime`、`GenMsgDelayTime` 或 `MsgStartDelayTime` 报文属性行中替换 Offset 数字；
-编码、换行、空格、注释、顺序及所有其它字节保持不变。属性选择顺序与核心 parser 一致；例如
-同时存在 `GenMsgStartDelayTime` 和 `GenMsgDelayTime` 时只覆盖前者，后者保持不变。参与优化的报文
-缺少原 Offset、同一优先属性重复或无法精确定位时会失败关闭，不插入字段、不猜测、不整文件重排。
+`dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。核心 parser 会把 CAN FD DBC 的
+`BA_DEF_DEF_` 消息属性默认值解析为未显式赋值报文的真实原 Offset。写入器在已有
+`GenMsgStartDelayTime`、`GenMsgDelayTime` 或 `MsgStartDelayTime` 属性行中只替换数字；对于继承
+默认值的参与优化报文，则在输出副本末尾补充显式 `BA_` 赋值。新增属性按 DBC 已声明且实际使用
+最多的 Offset 属性选择，不会发明未声明属性。原有编码、换行、空格、注释、顺序及其它字节保持
+不变；同一优先属性重复、缺少有效默认值、未声明可写属性或写后校验不一致时仍会失败关闭。Classic
+CAN 临时方案仍要求显式原 Offset。网段日志会记录所用
+属性以及替换、补充条数。
 
 Offset 表默认只包含真正进入 GCLS 的报文。路由排除报文没有 `optimized_offset`，不会进入
 assignment、“只看已修改报文”或 DBC Offset replacement；其原始 DBC 内容在输出副本中保持不变。

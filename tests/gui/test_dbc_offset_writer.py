@@ -6,6 +6,7 @@ import pytest
 
 from canfd_offset_optimizer.gui.dbc_offset_writer import (
     DbcOffsetReplacement,
+    inspect_dbc_offset_write,
     write_dbc_with_offsets,
 )
 
@@ -47,12 +48,12 @@ def test_writer_changes_only_existing_offset_numeric_tokens_in_a_copy(
     assert output.read_bytes() == expected
 
 
-def test_writer_fails_closed_when_original_offset_is_missing(tmp_path: Path) -> None:
+def test_writer_fails_closed_when_offset_schema_is_undeclared(tmp_path: Path) -> None:
     source = tmp_path / "source.dbc"
     source.write_bytes(b'BO_ 100 MsgA: 8 VCU\n')
     output = tmp_path / "dbc" / "copy.dbc"
 
-    with pytest.raises(ValueError, match="各有且仅有一个原 Offset"):
+    with pytest.raises(ValueError, match="缺少显式原 Offset"):
         write_dbc_with_offsets(
             source,
             output,
@@ -61,6 +62,36 @@ def test_writer_fails_closed_when_original_offset_is_missing(tmp_path: Path) -> 
 
     assert not output.exists()
     assert source.read_bytes() == b'BO_ 100 MsgA: 8 VCU\n'
+
+
+def test_writer_materializes_inherited_default_in_output_copy(tmp_path: Path) -> None:
+    source = tmp_path / "source.dbc"
+    original = (
+        b'VERSION "keep"\r\n'
+        b'BO_ 100 MsgA: 8 VCU\r\n'
+        b'BO_ 101 MsgB: 8 VCU\r\n'
+        b'BA_DEF_ BO_ "GenMsgDelayTime" INT 0 10000;\r\n'
+        b'BA_DEF_DEF_ "GenMsgDelayTime" 0;\r\n'
+        b'BA_ "GenMsgDelayTime" BO_ 100 15; // replace only number\r\n'
+    )
+    source.write_bytes(original)
+    output = tmp_path / "dbc" / "copy.dbc"
+    replacements = (
+        DbcOffsetReplacement("MsgA", 100, False, 35_000),
+        DbcOffsetReplacement("MsgB", 101, False, 40_000),
+    )
+
+    plan = inspect_dbc_offset_write(source, replacements)
+    written = write_dbc_with_offsets(source, output, replacements)
+
+    assert plan.attribute_name == "GenMsgDelayTime"
+    assert plan.replaced_count == 1
+    assert plan.inserted_count == 1
+    assert source.read_bytes() == original
+    assert written.read_bytes() == original.replace(
+        b'"GenMsgDelayTime" BO_ 100 15;',
+        b'"GenMsgDelayTime" BO_ 100 35;',
+    ) + b'BA_ "GenMsgDelayTime" BO_ 101 40;\r\n'
 
 
 def test_writer_refuses_to_overwrite_the_source_file(tmp_path: Path) -> None:

@@ -34,6 +34,7 @@ from canfd_offset_optimizer.gui.mock_backend import MockBackend
 from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.main_window import MainWindow
 from canfd_offset_optimizer.gui.real_backend import REQUIRED_ALLOWED_OFFSETS_US, RealBackend
+from canfd_offset_optimizer.parsers.dbc_parser import parse_dbc
 from canfd_offset_optimizer.parsers.project_loader import load_project
 
 
@@ -200,11 +201,10 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
 ) -> None:
     source = tmp_path / "multi_channel_project"
     source.mkdir()
-    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8").replace(
-        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;',
-        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;\n'
-        'BA_ "GenMsgStartDelayTime" BO_ 2147484768 20;',
-    )
+    # Msg460Ext intentionally inherits BA_DEF_DEF_ Offset=0. The backend must
+    # accept that effective baseline and materialize an explicit value only in
+    # the generated DBC copy.
+    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8")
     (source / "CAR_VCU_DA Message list.dbc").write_text(dbc_text, encoding="utf-8")
     (source / "CAR_VCU_SU Message list.dbc").write_text(dbc_text, encoding="utf-8")
     (source / "project.yaml").write_bytes(
@@ -248,6 +248,25 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
         if log.startswith("arxml_channel=")
     }
     assert selected_channels == set(channel_names)
+    for item in batch.network_results:
+        assert item.result is not None
+        assert "dbc_offset_replaced_count=1" in item.result.logs
+        assert "dbc_offset_inserted_count=1" in item.result.logs
+        output_dbc = next(
+            path for path in item.result.exported_files if path.suffix.lower() == ".dbc"
+        )
+        assert (
+            'BA_ "GenMsgStartDelayTime" BO_ 2147484768 '
+            in output_dbc.read_text(encoding="utf-8")
+        )
+        assert parse_dbc(output_dbc).messages[1].original_offset_us in {
+            row.optimized_offset_us for row in item.result.assignments
+            if row.message_name == "Msg460Ext"
+        }
+    assert all(
+        path.read_text(encoding="utf-8") == dbc_text
+        for path in source.glob("*.dbc")
+    )
 
 
 def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(

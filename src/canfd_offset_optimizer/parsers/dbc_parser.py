@@ -61,6 +61,22 @@ def _attribute_value(
     return None, None
 
 
+def _attribute_default(
+    database: Any, names: tuple[str, ...]
+) -> tuple[object | None, str | None]:
+    """Return the first message-attribute default after explicit lookup failed."""
+    dbc_specifics = getattr(database, "dbc", None)
+    definitions = getattr(dbc_specifics, "attribute_definitions", {})
+    for name in names:
+        definition = definitions.get(name)
+        if definition is None or getattr(definition, "kind", None) != "BO_":
+            continue
+        value = getattr(definition, "default_value", None)
+        if value is not None:
+            return cast(object, value), f"{name}:BA_DEF_DEF_"
+    return None, None
+
+
 def _milliseconds_to_us(value: object) -> int | None:
     """! @brief 无损地把 DBC 毫秒数转换为整数微秒。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -212,6 +228,13 @@ def parse_dbc(
         original, original_source = _attribute_value(
             message, DBC_ATTRIBUTES["start_delay"]
         )
+        # A DBC BA_DEF_DEF_ value is the effective value for every BO_ without
+        # an explicit BA_ assignment.  Check every explicit alias first so a
+        # lower-priority explicit attribute always beats a higher-priority default.
+        if original is None and frame_protocol is FrameProtocol.CAN_FD:
+            original, original_source = _attribute_default(
+                database, DBC_ATTRIBUTES["start_delay"]
+            )
         original_offset_us = None
         if original is not None:
             original_offset_us = _milliseconds_to_us(original)

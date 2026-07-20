@@ -28,6 +28,33 @@ def test_parse_minimal_dbc_normalizes_and_filters() -> None:
     assert extended.can_id == 0x460
     assert extended.is_extended
     assert extended.definition_index == 1
+    assert extended.original_offset_us == 0
+    assert dict(extended.field_sources)["original_offset_us"].endswith(
+        "GenMsgStartDelayTime:BA_DEF_DEF_"
+    )
+
+
+def test_explicit_offset_alias_beats_higher_priority_attribute_default(
+    tmp_path: Path,
+) -> None:
+    text = FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;',
+        'BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;\n'
+        'BA_DEF_ BO_ "GenMsgDelayTime" INT 0 10000;',
+    ).replace(
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;',
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;\n'
+        'BA_ "GenMsgDelayTime" BO_ 2147484768 20;',
+    )
+    path = tmp_path / "explicit_alias.dbc"
+    path.write_text(text, encoding="utf-8")
+
+    extended = parse_dbc(path).messages[1]
+
+    assert extended.original_offset_us == 20_000
+    assert dict(extended.field_sources)["original_offset_us"].endswith(
+        "GenMsgDelayTime"
+    )
 
 
 def test_tx_cyclic_message_without_cycle_has_locatable_error(tmp_path: Path) -> None:

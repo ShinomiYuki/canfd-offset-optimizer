@@ -70,7 +70,11 @@ from .artifact_outputs import (
     write_routing_exclusion_csv,
     write_run_config_json,
 )
-from .dbc_offset_writer import DbcOffsetReplacement, write_dbc_with_offsets
+from .dbc_offset_writer import (
+    DbcOffsetReplacement,
+    inspect_dbc_offset_write,
+    write_dbc_with_offsets,
+)
 from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
@@ -459,6 +463,25 @@ class RealBackend(WorkspaceImporter):
         )
         loaded = self._apply_routing_exclusions(loaded, request, network)
         loaded = self._apply_request_settings(loaded, request)
+        # Fail before the potentially expensive search if the output DBC cannot
+        # safely represent every optimized assignment. Inherited BA_DEF_DEF_
+        # values are materialized as explicit BA_ assignments in the copy.
+        offset_write_plan = inspect_dbc_offset_write(
+            dbc_path,
+            tuple(
+                DbcOffsetReplacement(
+                    message.name,
+                    message.can_id,
+                    message.is_extended,
+                    (
+                        message.original_offset_us
+                        if message.original_offset_us is not None
+                        else min(message.allowed_offsets_us)
+                    ),
+                )
+                for message in loaded.network.messages
+            ),
+        )
         initial_state = self._baseline_state(loaded)
         attempt_limit = loaded.config.optimization.restart_policy.attempt_limit
 
@@ -557,6 +580,9 @@ class RealBackend(WorkspaceImporter):
                 f"offset_step_ms={request.offset_search.offset_step_ms}",
                 f"offset_effective_max_ms={request.offset_search.effective_max_offset_ms}",
                 f"offset_candidate_count={request.offset_search.candidate_count}",
+                f"dbc_offset_attribute={offset_write_plan.attribute_name or 'existing'}",
+                f"dbc_offset_replaced_count={offset_write_plan.replaced_count}",
+                f"dbc_offset_inserted_count={offset_write_plan.inserted_count}",
                 *(
                     ('classic_weight_model = "payload_bytes_approximation"',)
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
