@@ -22,20 +22,19 @@ from PySide6.QtWidgets import (
 
 from ...config import OffsetSearchConfig
 from ...exceptions import ConfigurationError
-
 from ..contracts import (
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     OptimizationMode,
     RestartMode,
     RestartSettings,
-    FrameProtocol,
     WeightMode,
     WorkspaceInspection,
 )
 
 
 class SettingsPanel(QGroupBox):
-    """Expose one configuration snapshot for the full network batch."""
+    """Expose a compact basic form and opt-in expert search settings."""
 
     details_requested = Signal()
 
@@ -44,6 +43,7 @@ class SettingsPanel(QGroupBox):
         self._inspection: WorkspaceInspection | None = None
         self._last_physical_mode = OptimizationMode.BALANCED
         self._weight_forced_peak = False
+
         self.networks_label = QLabel("已发现网段：0 个")
         self.networks_label.setWordWrap(True)
         self.details_button = QPushButton("查看详情")
@@ -53,35 +53,70 @@ class SettingsPanel(QGroupBox):
         network_summary_layout.setContentsMargins(0, 0, 0, 0)
         network_summary_layout.addWidget(self.networks_label, 1)
         network_summary_layout.addWidget(self.details_button)
-        self.weight_combo = QComboBox()
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Peak（严格峰值）", OptimizationMode.PEAK)
         self.mode_combo.addItem("Balanced（推荐）", OptimizationMode.BALANCED)
         self.mode_combo.addItem("Variance（实验）", OptimizationMode.VARIANCE)
         self.mode_combo.setCurrentIndex(1)
+
+        self.offset_min_spin = self._offset_spin(minimum=0, value=15)
+        self.offset_max_spin = self._offset_spin(minimum=0, value=100)
+        self.offset_step_spin = self._offset_spin(minimum=1, value=5)
+        offset_range = QWidget()
+        offset_range_layout = QHBoxLayout(offset_range)
+        offset_range_layout.setContentsMargins(0, 0, 0, 0)
+        offset_range_layout.setSpacing(6)
+        offset_range_layout.addWidget(self.offset_min_spin)
+        offset_range_layout.addWidget(QLabel("～"))
+        offset_range_layout.addWidget(self.offset_max_spin)
+        offset_range_layout.addWidget(QLabel("ms"))
+        offset_range_layout.addStretch(1)
+
+        offset_step = QWidget()
+        offset_step_layout = QHBoxLayout(offset_step)
+        offset_step_layout.setContentsMargins(0, 0, 0, 0)
+        offset_step_layout.setSpacing(6)
+        offset_step_layout.addWidget(self.offset_step_spin)
+        offset_step_layout.addWidget(QLabel("ms"))
+        offset_step_layout.addStretch(1)
+
+        self.offset_summary_label = QLabel()
+        self.offset_summary_label.setWordWrap(True)
+
+        basic = QFormLayout()
+        basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        basic.addRow(network_summary)
+        basic.addRow("模式：", self.mode_combo)
+        basic.addRow("Offset 范围：", offset_range)
+        basic.addRow("Offset 步长：", offset_step)
+        basic.addRow("", self.offset_summary_label)
+
+        self.advanced_button = QToolButton()
+        self.advanced_button.setText("高级搜索设置")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.setChecked(False)
+        self.advanced_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+
+        self.advanced_content = QWidget()
+        self.advanced_layout = QFormLayout(self.advanced_content)
+        self.advanced_layout.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setRange(0.0, 1.0)
         self.tolerance_spin.setDecimals(3)
         self.tolerance_spin.setSingleStep(0.01)
         self.tolerance_spin.setValue(0.05)
         self.tolerance_spin.setToolTip("Balanced 模式允许的峰值相对宽容量")
+
         self.restart_combo = QComboBox()
         self.restart_combo.addItem("自动（自适应）", RestartMode.ADAPTIVE)
-        self.restart_combo.addItem("固定 attempts", RestartMode.FIXED)
-
-        basic = QFormLayout()
-        basic.addRow(network_summary)
-        basic.addRow("权重：", self.weight_combo)
-        basic.addRow("模式：", self.mode_combo)
-        basic.addRow("Balanced tolerance：", self.tolerance_spin)
-        basic.addRow("Restart：", self.restart_combo)
-
-        self.advanced_button = QToolButton()
-        self.advanced_button.setText("高级选项")
-        self.advanced_button.setCheckable(True)
-        self.advanced_button.setArrowType(Qt.ArrowType.RightArrow)
-        self.advanced_content = QWidget()
-        advanced = QFormLayout(self.advanced_content)
+        self.restart_combo.addItem("固定次数", RestartMode.FIXED)
         self.fixed_attempts_spin = QSpinBox()
         self.fixed_attempts_spin.setRange(1, 10_000)
         self.fixed_attempts_spin.setValue(21)
@@ -91,42 +126,38 @@ class SettingsPanel(QGroupBox):
         self.adaptive_max_spin = QSpinBox()
         self.adaptive_max_spin.setRange(1, 10_000)
         self.adaptive_max_spin.setValue(80)
+
         self.candidate_pool_combo = QComboBox()
         for size in (1, 4, 8, 16, 32):
             self.candidate_pool_combo.addItem(str(size), size)
         self.triple_search_check = QCheckBox("启用冲突导向 3-opt")
         self.triple_search_check.setChecked(False)
-        self.offset_min_spin = QSpinBox()
-        self.offset_max_spin = QSpinBox()
-        self.offset_step_spin = QSpinBox()
-        for spin in (self.offset_min_spin, self.offset_max_spin):
-            spin.setRange(0, 2_147_483_647)
-            spin.setSuffix(" ms")
-        self.offset_step_spin.setRange(1, 2_147_483_647)
-        self.offset_step_spin.setSuffix(" ms")
-        self.offset_min_spin.setValue(15)
-        self.offset_max_spin.setValue(100)
-        self.offset_step_spin.setValue(5)
-        self.offset_summary_label = QLabel()
-        self.offset_summary_label.setWordWrap(True)
-        triple_warning = QLabel("高质量离线搜索，可能显著增加全部网段总运行时间")
-        triple_warning.setWordWrap(True)
-        advanced.addRow("固定 attempts：", self.fixed_attempts_spin)
-        advanced.addRow("自适应最少 attempts：", self.adaptive_min_spin)
-        advanced.addRow("自适应最多 attempts：", self.adaptive_max_spin)
-        advanced.addRow("Candidate pool：", self.candidate_pool_combo)
-        advanced.addRow("Offset 最小值：", self.offset_min_spin)
-        advanced.addRow("Offset 最大值：", self.offset_max_spin)
-        advanced.addRow("Offset 步长：", self.offset_step_spin)
-        advanced.addRow("", self.offset_summary_label)
-        advanced.addRow("", self.triple_search_check)
-        advanced.addRow("", triple_warning)
+        self.triple_warning_label = QLabel(
+            "高质量离线搜索，可能显著增加全部网段运行时间"
+        )
+        self.triple_warning_label.setWordWrap(True)
+
+        self.advanced_layout.addRow("Balanced tolerance：", self.tolerance_spin)
+        self.advanced_layout.addRow("Restart：", self.restart_combo)
+        self.advanced_layout.addRow("固定 attempts：", self.fixed_attempts_spin)
+        self.advanced_layout.addRow("自动最少 attempts：", self.adaptive_min_spin)
+        self.advanced_layout.addRow("自动最多 attempts：", self.adaptive_max_spin)
+        self.advanced_layout.addRow("Candidate pool：", self.candidate_pool_combo)
+        self.advanced_layout.addRow("", self.triple_search_check)
+        self.advanced_layout.addRow("", self.triple_warning_label)
         self.advanced_content.setVisible(False)
 
+        # Kept as a non-visual compatibility adapter for older callers/tests. The
+        # production UI always selects the automatic per-protocol strategy.
+        self.weight_combo = QComboBox(self)
+        self.weight_combo.setVisible(False)
+
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addLayout(basic)
         layout.addWidget(self.advanced_button)
         layout.addWidget(self.advanced_content)
+
         self.advanced_button.toggled.connect(self._toggle_advanced)
         self.weight_combo.currentIndexChanged.connect(self._update_weight_controls)
         self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
@@ -138,6 +169,13 @@ class SettingsPanel(QGroupBox):
         self._update_restart_controls()
         self._update_mode_controls()
 
+    @staticmethod
+    def _offset_spin(*, minimum: int, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, 2_147_483_647)
+        spin.setValue(value)
+        return spin
+
     def set_inspection(self, inspection: WorkspaceInspection) -> None:
         self._inspection = inspection
         discovered = len(inspection.networks)
@@ -146,23 +184,27 @@ class SettingsPanel(QGroupBox):
             f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
         )
         self.details_button.setEnabled(True)
+        self._set_weight_options(self._automatic_fd_weight_options(inspection))
+
+    @staticmethod
+    def _automatic_fd_weight_options(
+        inspection: WorkspaceInspection,
+    ) -> tuple[WeightMode, ...]:
         fd_networks = tuple(
             network
             for network in inspection.optimizable_networks
             if network.frame_protocol is FrameProtocol.CAN_FD
         )
-        if fd_networks:
-            available = {WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US}
-            for network in fd_networks:
-                available.intersection_update(network.available_weight_modes)
-            modes = tuple(
-                mode
-                for mode in (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
-                if mode in available
-            )
-        else:
-            modes = (WeightMode.PAYLOAD_BYTES,)
-        self._set_weight_options(modes)
+        if not fd_networks:
+            return (WeightMode.PAYLOAD_BYTES,)
+        common = {WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US}
+        for network in fd_networks:
+            common.intersection_update(network.available_weight_modes)
+        return tuple(
+            mode
+            for mode in (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
+            if mode in common
+        )
 
     def clear_inspection(self) -> None:
         self._inspection = None
@@ -210,33 +252,36 @@ class SettingsPanel(QGroupBox):
         except ConfigurationError as exc:
             self.offset_summary_label.setText(f"Offset 搜索范围无效：{exc}")
             return
-        warning = "；候选较多，运行时间可能显著增加" if config.candidate_count > 1_000 else ""
+        warning = (
+            "；候选较多，运行时间可能显著增加"
+            if config.candidate_count > 1_000
+            else ""
+        )
         self.offset_summary_label.setText(
-            f"范围 {config.min_offset_ms}～{config.max_offset_ms} ms，"
-            f"步长 {config.offset_step_ms} ms，候选 {config.candidate_count} 个，"
+            f"候选 {config.candidate_count} 个，"
             f"实际最大值 {config.effective_max_offset_ms} ms{warning}"
         )
 
     def _set_weight_options(self, modes: tuple[WeightMode, ...]) -> None:
-        previous = self._selected_weight_mode()
+        self.weight_combo.blockSignals(True)
+        self.weight_combo.clear()
         labels = {
             WeightMode.PAYLOAD_BYTES: "Payload 长度近似权重（payload_bytes）",
             WeightMode.FRAME_TIME_US: "帧时间（frame_time_us）",
         }
-        self.weight_combo.blockSignals(True)
-        self.weight_combo.clear()
         for mode in modes:
             self.weight_combo.addItem(labels[mode], mode)
         preferred = (
-            previous
-            if previous in modes
-            else (WeightMode.FRAME_TIME_US if WeightMode.FRAME_TIME_US in modes else None)
+            WeightMode.FRAME_TIME_US
+            if WeightMode.FRAME_TIME_US in modes
+            else (modes[0] if modes else None)
         )
         if preferred is not None:
             self._select_combo_value(self.weight_combo, preferred)
         self.weight_combo.setEnabled(len(modes) > 1)
         self.weight_combo.setToolTip(
-            "该选项只应用于 CAN FD 网段；Classic CAN 固定使用 Payload 长度近似权重。"
+            "兼容接口；正式 GUI 自动选择。CAN FD 使用帧时间，"
+            "Classic CAN 固定使用 Payload 长度近似。手动值只应用于 CAN FD。"
         )
         self.weight_combo.blockSignals(False)
         self._update_weight_controls()
@@ -249,7 +294,7 @@ class SettingsPanel(QGroupBox):
         value = self.weight_combo.currentData()
         if value is None:
             if required:
-                raise ValueError("当前工程没有全部网段共同支持的权重")
+                raise ValueError("当前工程没有全部 CAN FD 网段共同支持的自动权重")
             return None
         return value if isinstance(value, WeightMode) else WeightMode(value)
 
@@ -273,9 +318,9 @@ class SettingsPanel(QGroupBox):
 
     def _update_restart_controls(self) -> None:
         fixed = self._selected_restart_mode() is RestartMode.FIXED
-        self.fixed_attempts_spin.setEnabled(fixed)
-        self.adaptive_min_spin.setEnabled(not fixed)
-        self.adaptive_max_spin.setEnabled(not fixed)
+        self.advanced_layout.setRowVisible(self.fixed_attempts_spin, fixed)
+        self.advanced_layout.setRowVisible(self.adaptive_min_spin, not fixed)
+        self.advanced_layout.setRowVisible(self.adaptive_max_spin, not fixed)
 
     def _update_weight_controls(self) -> None:
         weight_mode = self._selected_weight_mode()
@@ -302,7 +347,8 @@ class SettingsPanel(QGroupBox):
         self._update_mode_controls()
 
     def _update_mode_controls(self) -> None:
-        self.tolerance_spin.setEnabled(
+        show_tolerance = (
             not self._weight_forced_peak
             and self._selected_mode() is OptimizationMode.BALANCED
         )
+        self.advanced_layout.setRowVisible(self.tolerance_spin, show_tolerance)

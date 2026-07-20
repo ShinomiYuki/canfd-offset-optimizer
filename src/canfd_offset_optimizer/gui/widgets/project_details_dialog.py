@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
+    QLabel,
     QTabWidget,
     QTableView,
     QVBoxLayout,
@@ -33,9 +34,16 @@ class ProjectDetailsDialog(QDialog):
         self.import_table = self._table(import_model)
         self.tabs.addTab(self.network_table, "网段详情")
         self.tabs.addTab(self.import_table, "导入文件详情")
+        self.weight_strategy_label = QLabel(
+            "权重策略：自动\n"
+            "CAN FD：帧时间（frame_time_us）\n"
+            "Classic CAN：Payload 长度近似（payload_bytes）"
+        )
+        self.weight_strategy_label.setWordWrap(True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.hide)
         layout = QVBoxLayout(self)
+        layout.addWidget(self.weight_strategy_label)
         layout.addWidget(self.tabs)
         layout.addWidget(buttons)
 

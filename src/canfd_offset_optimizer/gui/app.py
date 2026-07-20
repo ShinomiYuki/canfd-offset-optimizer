@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply_application_theme(application)
     backend = create_backend()
     window = MainWindow(backend)
-    window.show()
+    window.showMaximized()
     if owns_application:
         return application.exec()
     return 0

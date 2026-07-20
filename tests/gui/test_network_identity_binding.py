@@ -67,6 +67,11 @@ def test_main_window_uses_count_summary_and_shared_live_details_models(
     window.settings_panel.details_button.click()
     dialog = window.input_panel.details_dialog
     qtbot.waitUntil(dialog.isVisible)
+    assert dialog.weight_strategy_label.text() == (
+        "权重策略：自动\n"
+        "CAN FD：帧时间（frame_time_us）\n"
+        "Classic CAN：Payload 长度近似（payload_bytes）"
+    )
     assert dialog.tabs.count() == 2
     assert [dialog.tabs.tabText(index) for index in range(2)] == [
         "网段详情",
