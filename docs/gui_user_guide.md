@@ -22,6 +22,18 @@ Windows 也可双击：
 scripts\start_gui.cmd
 ```
 
+免安装版请完整解压 `CANFDOffsetOptimizer-<version>-win-x64.zip`，然后双击
+`CANFDOffsetOptimizer.exe`。便携包已经包含 Python、PySide6 和全部运行依赖。程序固定在
+EXE 同级目录创建并使用：
+
+```text
+user_input/
+user_output/
+```
+
+整个程序文件夹必须位于当前用户有写权限的位置，不能放在 `Program Files`，也不能直接在
+ZIP 内运行。升级时先退出程序，再保留或复制旧版本的 `user_input` 和 `user_output`。
+
 ## 统一工程导入
 
 可以一次拖入多个文件、目录或两者混合。每次导入创建独立工作区：

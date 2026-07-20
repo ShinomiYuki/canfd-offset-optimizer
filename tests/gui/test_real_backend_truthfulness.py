@@ -575,7 +575,7 @@ def test_real_backend_short_run_maps_only_core_data(
 
 def test_app_composition_mentions_real_backend_and_no_mock_fallback() -> None:
     source = Path("src/canfd_offset_optimizer/gui/app.py").read_text(encoding="utf-8")
-    assert "RealBackend()" in source
+    assert "RealBackend(workspace_root=root)" in source
     assert "MockBackend" not in source
     assert "UnavailableBackend" in source
     backend = create_backend()

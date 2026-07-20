@@ -82,6 +82,20 @@ canfd-offset-gui
 
 Windows 可直接双击 `scripts\start_gui.cmd` 一键启动。
 
+### Windows 免安装 GUI 发布包
+
+构建机安装 GUI 与打包依赖后，可生成 Windows 10/11 x64 便携文件夹和 ZIP：
+
+```powershell
+python -m pip install -e ".[gui,packaging]"
+scripts\build_gui_exe.cmd
+```
+
+产物位于 `release/CANFDOffsetOptimizer-<version>-win-x64/` 及同名 ZIP。终端用户只需
+完整解压后双击 `CANFDOffsetOptimizer.exe`，不需要安装 Python 或项目依赖。程序固定在
+EXE 同级目录创建并使用 `user_input`、`user_output`；因此应解压到桌面、工作目录等
+当前用户可写位置，不能放入 `Program Files`。升级时应保留这两个数据目录。
+
 正常 GUI 固定使用 **RealBackend**：工作区 DBC 资格、报文字段、原始/优化 Offset、指标和
 负载数组均来自核心 parser/project loader/GCLS。真实 adapter 初始化失败时界面明确显示
 “仅预览 / 优化不可用”并禁用运行，不会静默回退 Mock，也不会生成伪造的 `user_output`。
