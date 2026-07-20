@@ -63,9 +63,15 @@ DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导
 
 ## 5. 批量请求与结果
 
-`GuiBatchOptimizationRequest.weight_mode` 是 CAN FD 网段共享的权重选择；Classic CAN 始终固定为
-`payload_bytes`。模式、tolerance、restart、candidate pool、3-opt 和输出根目录仍由批次共享。
-Backend 必须在结果中写入每个网段实际使用的权重，不得把 Classic Byte 权重标成 μs。
+`GuiBatchOptimizationRequest.can_fd_weight` 是 CAN FD 网段共享的权重选择；
+`classic_can_weight` 显式记录且当前固定为 `payload_bytes`。模式、tolerance、restart、
+candidate pool、3-opt 和输出根目录仍由批次共享。Backend 必须按每个网段真实的
+`frame_protocol` 选择对应权重，并在结果中写入实际的 `bus_type`、`weight_mode` 和 `mode`；
+不得用项目级单一权重覆盖全部网段，也不得把 Classic Byte 权重标成 μs。
+
+同一工程包含多个独立的 Classic CAN 与 CAN FD 物理网段属于正常情况，不得因此禁用
+mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligible Classic CAN 与 CAN FD
+时仍应只跳过该网段，并保留清晰的单位不一致诊断。
 
 `BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
 `results_by_network_id` 映射。最终状态是

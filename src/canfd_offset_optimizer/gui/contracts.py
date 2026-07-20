@@ -255,20 +255,23 @@ class GuiBatchOptimizationRequest:
     """One immutable request applied to every discovered network."""
 
     inspection: WorkspaceInspection
-    weight_mode: WeightMode
+    can_fd_weight: WeightMode
     mode: OptimizationMode
     balanced_tolerance: float
     restart: RestartSettings
     candidate_pool_size: int
     enable_triple_search: bool
     output_root: Path
+    classic_can_weight: WeightMode = WeightMode.PAYLOAD_BYTES
     offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
 
     def __post_init__(self) -> None:
         if not self.inspection.can_optimize:
             raise ValueError("workspace inspection is not ready for optimization")
-        if not isinstance(self.weight_mode, WeightMode):
-            raise ValueError("weight mode is unsupported")
+        if not isinstance(self.can_fd_weight, WeightMode):
+            raise ValueError("CAN FD weight mode is unsupported")
+        if self.classic_can_weight is not WeightMode.PAYLOAD_BYTES:
+            raise ValueError("Classic CAN weight must be payload_bytes")
         if not isinstance(self.mode, OptimizationMode):
             raise ValueError("optimization mode is unsupported")
         if not isinstance(self.restart, RestartSettings):
@@ -282,22 +285,18 @@ class GuiBatchOptimizationRequest:
         if not isinstance(self.offset_search, OffsetSearchConfig):
             raise ValueError("offset_search must be an OffsetSearchConfig")
         if any(
-            self.weight_mode not in network.available_weight_modes
+            self.can_fd_weight not in network.available_weight_modes
             for network in self.inspection.optimizable_networks
             if network.frame_protocol is FrameProtocol.CAN_FD
         ):
             raise ValueError("selected weight mode is not available for every CAN FD network")
-        uses_payload = (
-            self.weight_mode is WeightMode.PAYLOAD_BYTES
-            or any(
-                network.frame_protocol is FrameProtocol.CLASSIC_CAN
-                for network in self.inspection.optimizable_networks
-            )
-        )
-        if uses_payload and self.mode is not OptimizationMode.PEAK:
-            raise ValueError("payload_bytes weight only supports peak mode")
         if self.output_root.exists() and not self.output_root.is_dir():
             raise ValueError("output_root must be a directory")
+
+    @property
+    def weight_mode(self) -> WeightMode:
+        """Backward-compatible alias for the CAN FD selection."""
+        return self.can_fd_weight
 
 
 @dataclass(frozen=True, slots=True)

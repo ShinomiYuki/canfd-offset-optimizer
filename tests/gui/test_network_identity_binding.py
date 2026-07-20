@@ -68,9 +68,9 @@ def test_main_window_uses_count_summary_and_shared_live_details_models(
     dialog = window.input_panel.details_dialog
     qtbot.waitUntil(dialog.isVisible)
     assert dialog.weight_strategy_label.text() == (
-        "权重策略：自动\n"
-        "CAN FD：帧时间（frame_time_us）\n"
-        "Classic CAN：Payload 长度近似（payload_bytes）"
+        "权重策略：按物理网段独立应用\n"
+        "Classic CAN：固定为 Payload 长度近似（payload_bytes）\n"
+        "CAN FD：使用批量优化设置中的 CAN FD 权重"
     )
     assert dialog.tabs.count() == 2
     assert [dialog.tabs.tabText(index) for index in range(2)] == [
@@ -115,7 +115,8 @@ def test_fixture_results_are_independent_deterministic_and_mathematically_consis
     )
     request = GuiBatchOptimizationRequest(
         inspection=batch_request.inspection,
-        weight_mode=batch_request.weight_mode,
+        can_fd_weight=batch_request.can_fd_weight,
+        classic_can_weight=batch_request.classic_can_weight,
         mode=batch_request.mode,
         balanced_tolerance=batch_request.balanced_tolerance,
         restart=adaptive,

@@ -305,11 +305,12 @@ def test_compare_cli_generates_five_stage_approximate_reports(tmp_path: Path) ->
     assert summary["weight_mode"] == "payload_bytes"
     assert summary["field_sources"]["weight_mode"] == "CLI --weight-mode override"
     assert summary["slot_load_threshold_us"] is None
-    assert [item["seed"] for item in summary["restarts"]] == [42, 43]
+    assert summary["comparison"]["objective_mode"] == "balanced"
+    assert [item["seed"] for item in summary["restarts"]] == [42]
     assert any("CLI overrides" in warning for warning in summary["warnings"])
     log = expected[-1].read_text(encoding="utf-8")
     assert "Comparison restart seed=42" in log
-    assert "Comparison restart seed=43" in log
+    assert "Comparison restart seed=43" not in log
 
 
 def test_objective_mode_cli_override_is_audited(tmp_path: Path) -> None:
@@ -391,8 +392,8 @@ def test_compare_weights_cli_generates_both_complete_reports(tmp_path: Path) -> 
         assert summary["network"]["data_bitrate_bit_s"] == 2_000_000
         assert summary["network"]["brs"] is True
         assert summary["field_sources"]["channel"] == "CLI --channel override"
-        expected_seeds = [42, 43] if mode == "payload_bytes" else [42]
-        assert [record["seed"] for record in summary["restarts"]] == expected_seeds
+        assert summary["comparison"]["objective_mode"] == "balanced"
+        assert [record["seed"] for record in summary["restarts"]] == [42]
     for mode in ("peak", "variance"):
         assert all(
             (output / "objective_modes" / mode / relative).is_file()

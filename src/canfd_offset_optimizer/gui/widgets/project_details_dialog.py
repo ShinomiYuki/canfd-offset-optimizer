@@ -35,9 +35,9 @@ class ProjectDetailsDialog(QDialog):
         self.tabs.addTab(self.network_table, "网段详情")
         self.tabs.addTab(self.import_table, "导入文件详情")
         self.weight_strategy_label = QLabel(
-            "权重策略：自动\n"
-            "CAN FD：帧时间（frame_time_us）\n"
-            "Classic CAN：Payload 长度近似（payload_bytes）"
+            "权重策略：按物理网段独立应用\n"
+            "Classic CAN：固定为 Payload 长度近似（payload_bytes）\n"
+            "CAN FD：使用批量优化设置中的 CAN FD 权重"
         )
         self.weight_strategy_label.setWordWrap(True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

@@ -124,7 +124,12 @@ def create_output_layout(root: Path) -> OutputLayout:
 
 
 def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> Path:
-    payload = {"offset_search": request.offset_search.as_metadata()}
+    payload = {
+        "mode": request.mode.value,
+        "classic_can_weight": request.classic_can_weight.value,
+        "can_fd_weight": request.can_fd_weight.value,
+        "offset_search": request.offset_search.as_metadata(),
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -219,6 +224,8 @@ def write_network_log(item: NetworkBatchResult, path: Path) -> Path:
         f"objective_mode={item.mode.value}",
     )
     content = list(lines)
+    if item.result:
+        content.append(f"bus_type={item.result.frame_protocol.value}")
     if item.result and item.result.classic_weight_model:
         content.append(
             f'classic_weight_model = "{item.result.classic_weight_model}"'

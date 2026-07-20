@@ -224,7 +224,8 @@ class MainWindow(QMainWindow):
         self._reset_current_results()
         self._append_log(
             f"开始批量优化 {len(request.inspection.optimizable_networks)} 个网段；"
-            f"权重={request.weight_mode.value}，模式={request.mode.value}。"
+            f"Classic CAN 权重={request.classic_can_weight.value}，"
+            f"CAN FD 权重={request.can_fd_weight.value}，模式={request.mode.value}。"
         )
 
         def operation(callback: ProgressCallback, token: CancellationToken) -> object:

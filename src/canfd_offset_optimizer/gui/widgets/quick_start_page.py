@@ -35,9 +35,10 @@ class QuickStartPage(QScrollArea):
             self._group(
                 "2. 参数怎么选",
                 "<b>权重</b>：此选项只作用于 CAN FD；Classic CAN 固定使用 Payload 长度近似权重。"
-                "Classic 的 Byte/slot 结果只用于相对均衡，不代表真实负载百分比。<br>"
+                "Classic 的 Byte/slot 结果只用于相对均衡，不代表真实负载百分比。"
+                "不同物理网段独立计算，不会混合 Byte 与 μs。<br>"
                 "<b>目标模式</b>：Peak 优先压低最高峰；Variance 优先让各时隙更均匀；"
-                "Balanced 在控制峰值的同时兼顾整体均匀。<br>"
+                "Balanced 在控制峰值的同时兼顾整体均匀。模式不因工程同时包含 Classic CAN 和 CAN FD 而禁用。<br>"
                 "<b>Balanced 容差</b>：允许峰值相对最优峰值略有增加，以换取更平滑的负载；"
                 "数值越小越偏向压峰。仅 Balanced 使用。<br>"
                 "<b>重启策略</b>：Fixed 固定尝试次数，耗时更可预测；Adaptive 在结果长期不再改善时提前停止。<br>"

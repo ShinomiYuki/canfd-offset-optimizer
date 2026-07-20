@@ -86,6 +86,7 @@ def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
         "display_name": item.display_name,
         "source_file": item.source_file,
         "status": item.status.value,
+        "bus_type": result.frame_protocol.value if result else None,
         "weight_mode": item.weight_mode.value,
         "weight_basis": (
             format_result_weight(result) if result else format_weight_mode(item.weight_mode)
@@ -151,6 +152,7 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                 "显示名称",
                 "来源DBC",
                 "状态",
+                "bus_type",
                 "权重",
                 "权重口径",
                 "负载单位",
@@ -178,6 +180,7 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                     item.display_name,
                     item.source_file,
                     item.status.value,
+                    result.frame_protocol.value if result else "",
                     item.weight_mode.value,
                     format_result_weight(result) if result else format_weight_mode(item.weight_mode),
                     format_load_unit(result) if result else "",

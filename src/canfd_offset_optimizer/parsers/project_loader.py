@@ -161,18 +161,6 @@ def load_project(
             config,
             objective=replace(config.objective, mode=objective_mode_override),
         )
-    if (
-        config.model.weight_mode is not WeightMode.FRAME_TIME_US
-        and config.objective.mode is not ObjectiveMode.PEAK
-    ):
-        warnings.append(
-            f"objective.mode={config.objective.mode.value} requires frame_time_us; "
-            "approximate weight mode was forced to peak"
-        )
-        config = replace(
-            config,
-            objective=replace(config.objective, mode=ObjectiveMode.PEAK),
-        )
     channel_name = config.network.channel
     if not channel_name:
         raise ConfigurationError("network.channel must be specified to select an ARXML channel")
@@ -187,13 +175,9 @@ def load_project(
         else "project.yaml model.weight_mode"
     )
     sources["objective_mode"] = (
-        "forced peak for approximate weight mode"
-        if config.model.weight_mode is not WeightMode.FRAME_TIME_US
-        else (
-            "CLI --objective-mode override"
-            if objective_mode_override is not None
-            else "project.yaml objective.mode"
-        )
+        "CLI --objective-mode override"
+        if objective_mode_override is not None
+        else "project.yaml objective.mode"
     )
     arxml: ArxmlChannelData | None = None
     if not arxml_dir.is_dir():

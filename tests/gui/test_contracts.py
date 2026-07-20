@@ -87,7 +87,7 @@ def test_batch_request_rejects_weight_not_common_to_all_networks(
     with pytest.raises(ValueError, match="every CAN FD network"):
         GuiBatchOptimizationRequest(
             inspection=payload_only,
-            weight_mode=WeightMode.FRAME_TIME_US,
+            can_fd_weight=WeightMode.FRAME_TIME_US,
             mode=OptimizationMode.PEAK,
             balanced_tolerance=0.05,
             restart=RestartSettings(),
@@ -97,11 +97,27 @@ def test_batch_request_rejects_weight_not_common_to_all_networks(
         )
 
 
-def test_payload_weight_forces_peak_mode(inspection: WorkspaceInspection) -> None:
-    with pytest.raises(ValueError, match="peak"):
+def test_payload_weight_supports_balanced_mode(inspection: WorkspaceInspection) -> None:
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
+        classic_can_weight=WeightMode.PAYLOAD_BYTES,
+        mode=OptimizationMode.BALANCED,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(),
+        candidate_pool_size=4,
+        enable_triple_search=False,
+        output_root=inspection.session.workspace_root / "user_output",
+    )
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_classic_weight_is_fixed_to_payload(inspection: WorkspaceInspection) -> None:
+    with pytest.raises(ValueError, match="Classic CAN"):
         GuiBatchOptimizationRequest(
             inspection=inspection,
-            weight_mode=WeightMode.PAYLOAD_BYTES,
+            can_fd_weight=WeightMode.FRAME_TIME_US,
+            classic_can_weight=WeightMode.FRAME_TIME_US,
             mode=OptimizationMode.BALANCED,
             balanced_tolerance=0.05,
             restart=RestartSettings(),

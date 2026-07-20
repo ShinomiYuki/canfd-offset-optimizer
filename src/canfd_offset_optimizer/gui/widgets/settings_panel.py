@@ -41,8 +41,6 @@ class SettingsPanel(QGroupBox):
     def __init__(self) -> None:
         super().__init__("批量优化设置")
         self._inspection: WorkspaceInspection | None = None
-        self._last_physical_mode = OptimizationMode.BALANCED
-        self._weight_forced_peak = False
 
         self.networks_label = QLabel("已发现网段：0 个")
         self.networks_label.setWordWrap(True)
@@ -59,6 +57,20 @@ class SettingsPanel(QGroupBox):
         self.mode_combo.addItem("Balanced（推荐）", OptimizationMode.BALANCED)
         self.mode_combo.addItem("Variance（实验）", OptimizationMode.VARIANCE)
         self.mode_combo.setCurrentIndex(1)
+
+        self.classic_weight_combo = QComboBox()
+        self.classic_weight_combo.addItem(
+            "Payload 长度（payload_bytes）", WeightMode.PAYLOAD_BYTES
+        )
+        self.classic_weight_combo.setEnabled(False)
+        self.classic_weight_combo.setToolTip(
+            "Classic CAN 当前暂使用 Payload 长度作为相对负载权重，"
+            "仅用于 Offset 均衡，不代表真实总线占用时间。"
+        )
+        self.can_fd_weight_combo = QComboBox()
+        # Compatibility alias used by existing integrations; this is now the
+        # visible, CAN-FD-specific selector rather than one project-wide weight.
+        self.weight_combo = self.can_fd_weight_combo
 
         self.offset_min_spin = self._offset_spin(minimum=0, value=15)
         self.offset_max_spin = self._offset_spin(minimum=0, value=100)
@@ -88,6 +100,8 @@ class SettingsPanel(QGroupBox):
         basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         basic.addRow(network_summary)
         basic.addRow("模式：", self.mode_combo)
+        basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
+        basic.addRow("CAN FD 权重：", self.can_fd_weight_combo)
         basic.addRow("Offset 范围：", offset_range)
         basic.addRow("Offset 步长：", offset_step)
         basic.addRow("", self.offset_summary_label)
@@ -147,11 +161,6 @@ class SettingsPanel(QGroupBox):
         self.advanced_layout.addRow("", self.triple_warning_label)
         self.advanced_content.setVisible(False)
 
-        # Kept as a non-visual compatibility adapter for older callers/tests. The
-        # production UI always selects the automatic per-protocol strategy.
-        self.weight_combo = QComboBox(self)
-        self.weight_combo.setVisible(False)
-
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addLayout(basic)
@@ -159,7 +168,9 @@ class SettingsPanel(QGroupBox):
         layout.addWidget(self.advanced_content)
 
         self.advanced_button.toggled.connect(self._toggle_advanced)
-        self.weight_combo.currentIndexChanged.connect(self._update_weight_controls)
+        self.can_fd_weight_combo.currentIndexChanged.connect(
+            self._update_weight_controls
+        )
         self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.details_button.clicked.connect(self.details_requested.emit)
@@ -184,7 +195,23 @@ class SettingsPanel(QGroupBox):
             f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
         )
         self.details_button.setEnabled(True)
-        self._set_weight_options(self._automatic_fd_weight_options(inspection))
+        has_classic = any(
+            network.frame_protocol is FrameProtocol.CLASSIC_CAN
+            for network in inspection.optimizable_networks
+        )
+        has_fd = any(
+            network.frame_protocol is FrameProtocol.CAN_FD
+            for network in inspection.optimizable_networks
+        )
+        self.classic_weight_combo.setToolTip(
+            "Classic CAN 当前暂使用 Payload 长度作为相对负载权重，"
+            "仅用于 Offset 均衡，不代表真实总线占用时间。"
+            + ("" if has_classic else " 当前工程没有可优化的 Classic CAN 网段。")
+        )
+        self._set_weight_options(
+            self._automatic_fd_weight_options(inspection), has_fd=has_fd
+        )
+        self.mode_combo.setEnabled(bool(inspection.optimizable_networks))
 
     @staticmethod
     def _automatic_fd_weight_options(
@@ -196,7 +223,7 @@ class SettingsPanel(QGroupBox):
             if network.frame_protocol is FrameProtocol.CAN_FD
         )
         if not fd_networks:
-            return (WeightMode.PAYLOAD_BYTES,)
+            return (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
         common = {WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US}
         for network in fd_networks:
             common.intersection_update(network.available_weight_modes)
@@ -210,13 +237,13 @@ class SettingsPanel(QGroupBox):
         self._inspection = None
         self.networks_label.setText("已发现网段：0 个")
         self.details_button.setEnabled(False)
-        self.weight_combo.clear()
+        self.can_fd_weight_combo.clear()
 
     def build_request(self) -> GuiBatchOptimizationRequest:
         if self._inspection is None:
             raise ValueError("尚未完成工程工作区检查")
-        weight_mode = self._selected_weight_mode(required=True)
-        assert weight_mode is not None
+        can_fd_weight = self._selected_weight_mode(required=True)
+        assert can_fd_weight is not None
         try:
             offset_search = OffsetSearchConfig(
                 self.offset_min_spin.value(),
@@ -227,7 +254,8 @@ class SettingsPanel(QGroupBox):
             raise ValueError(str(exc)) from exc
         return GuiBatchOptimizationRequest(
             inspection=self._inspection,
-            weight_mode=weight_mode,
+            can_fd_weight=can_fd_weight,
+            classic_can_weight=WeightMode.PAYLOAD_BYTES,
             mode=self._selected_mode(),
             balanced_tolerance=self.tolerance_spin.value(),
             restart=RestartSettings(
@@ -262,28 +290,30 @@ class SettingsPanel(QGroupBox):
             f"实际最大值 {config.effective_max_offset_ms} ms{warning}"
         )
 
-    def _set_weight_options(self, modes: tuple[WeightMode, ...]) -> None:
-        self.weight_combo.blockSignals(True)
-        self.weight_combo.clear()
+    def _set_weight_options(
+        self, modes: tuple[WeightMode, ...], *, has_fd: bool = True
+    ) -> None:
+        self.can_fd_weight_combo.blockSignals(True)
+        self.can_fd_weight_combo.clear()
         labels = {
             WeightMode.PAYLOAD_BYTES: "Payload 长度近似权重（payload_bytes）",
             WeightMode.FRAME_TIME_US: "帧时间（frame_time_us）",
         }
         for mode in modes:
-            self.weight_combo.addItem(labels[mode], mode)
+            self.can_fd_weight_combo.addItem(labels[mode], mode)
         preferred = (
             WeightMode.FRAME_TIME_US
             if WeightMode.FRAME_TIME_US in modes
             else (modes[0] if modes else None)
         )
         if preferred is not None:
-            self._select_combo_value(self.weight_combo, preferred)
-        self.weight_combo.setEnabled(len(modes) > 1)
-        self.weight_combo.setToolTip(
-            "兼容接口；正式 GUI 自动选择。CAN FD 使用帧时间，"
-            "Classic CAN 固定使用 Payload 长度近似。手动值只应用于 CAN FD。"
+            self._select_combo_value(self.can_fd_weight_combo, preferred)
+        self.can_fd_weight_combo.setEnabled(has_fd and len(modes) > 1)
+        self.can_fd_weight_combo.setToolTip(
+            "仅应用于 CAN FD 网段；默认使用帧时间权重。"
+            + ("" if has_fd else " 当前工程没有可优化的 CAN FD 网段。")
         )
-        self.weight_combo.blockSignals(False)
+        self.can_fd_weight_combo.blockSignals(False)
         self._update_weight_controls()
 
     def _selected_mode(self) -> OptimizationMode:
@@ -291,10 +321,10 @@ class SettingsPanel(QGroupBox):
         return value if isinstance(value, OptimizationMode) else OptimizationMode(value)
 
     def _selected_weight_mode(self, *, required: bool = False) -> WeightMode | None:
-        value = self.weight_combo.currentData()
+        value = self.can_fd_weight_combo.currentData()
         if value is None:
             if required:
-                raise ValueError("当前工程没有全部 CAN FD 网段共同支持的自动权重")
+                raise ValueError("当前工程没有全部 CAN FD 网段共同支持的权重")
             return None
         return value if isinstance(value, WeightMode) else WeightMode(value)
 
@@ -323,32 +353,13 @@ class SettingsPanel(QGroupBox):
         self.advanced_layout.setRowVisible(self.adaptive_max_spin, not fixed)
 
     def _update_weight_controls(self) -> None:
-        weight_mode = self._selected_weight_mode()
-        payload_selected = weight_mode is WeightMode.PAYLOAD_BYTES or (
-            self._inspection is not None
-            and any(
-                network.frame_protocol is FrameProtocol.CLASSIC_CAN
-                for network in self._inspection.optimizable_networks
-            )
-        )
-        if payload_selected and not self._weight_forced_peak:
-            self._last_physical_mode = self._selected_mode()
-            self._weight_forced_peak = True
-            self._select_combo_value(self.mode_combo, OptimizationMode.PEAK)
-        elif not payload_selected and self._weight_forced_peak:
-            self._weight_forced_peak = False
-            self._select_combo_value(self.mode_combo, self._last_physical_mode)
-        self.mode_combo.setEnabled(not payload_selected)
         self._update_mode_controls()
 
     def _on_mode_changed(self) -> None:
-        if not self._weight_forced_peak:
-            self._last_physical_mode = self._selected_mode()
         self._update_mode_controls()
 
     def _update_mode_controls(self) -> None:
-        show_tolerance = (
-            not self._weight_forced_peak
-            and self._selected_mode() is OptimizationMode.BALANCED
-        )
+        balanced = self._selected_mode() is OptimizationMode.BALANCED
+        show_tolerance = balanced
         self.advanced_layout.setRowVisible(self.tolerance_spin, show_tolerance)
+        self.advanced_layout.setRowVisible(self.candidate_pool_combo, balanced)

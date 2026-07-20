@@ -71,7 +71,7 @@ def inspection(backend: FixtureBackend, import_session: ImportSession) -> Worksp
 def batch_request(inspection: WorkspaceInspection) -> GuiBatchOptimizationRequest:
     return GuiBatchOptimizationRequest(
         inspection=inspection,
-        weight_mode=WeightMode.FRAME_TIME_US,
+        can_fd_weight=WeightMode.FRAME_TIME_US,
         mode=OptimizationMode.BALANCED,
         balanced_tolerance=0.05,
         restart=RestartSettings(

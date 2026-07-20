@@ -39,6 +39,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
         "网段",
         "来源 DBC",
         "状态",
+        "总线类型",
         "模式",
         "权重口径",
         "原始 Zss",
@@ -76,6 +77,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
             item.network_name,
             item.source_file,
             item.status.value,
+            result.frame_protocol.value if result else None,
             item.mode.value,
             item.weight_mode.value,
             result.original_metrics.zss if result else None,
@@ -98,7 +100,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
                 f"显示名称：{item.display_name}\n"
                 f"network_id：{item.network_id}\n来源 DBC：{item.source_file}"
             )
-        if role == int(Qt.ItemDataRole.TextAlignmentRole) and index.column() >= 5:
+        if role == int(Qt.ItemDataRole.TextAlignmentRole) and index.column() >= 6:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if role != int(Qt.ItemDataRole.DisplayRole):
             return None
@@ -112,6 +114,7 @@ class BatchSummaryTableModel(QAbstractTableModel):
             item.network_name,
             item.source_file,
             status_labels[item.status],
+            result.frame_protocol.value if result else "—",
             item.mode.value,
             format_result_weight(result) if result else format_weight_mode(item.weight_mode),
             format_integer(result.original_metrics.zss) if result else "—",

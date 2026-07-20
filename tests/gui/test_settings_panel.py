@@ -31,6 +31,8 @@ def test_arxml_project_can_choose_both_weight_modes(
     assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.BALANCED
     assert panel.mode_combo.isEnabled()
     request = panel.build_request()
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
     assert request.offset_search.candidate_offsets_ms == tuple(range(15, 101, 5))
 
 
@@ -41,7 +43,9 @@ def test_default_information_architecture_is_compact(qtbot) -> None:
 
     assert panel.advanced_content.isHidden()
     assert not panel.advanced_button.isChecked()
-    assert not panel.weight_combo.isVisible()
+    assert panel.classic_weight_combo.isVisible()
+    assert not panel.classic_weight_combo.isEnabled()
+    assert panel.can_fd_weight_combo.isVisible()
     assert not panel.advanced_content.isAncestorOf(panel.offset_min_spin)
     assert not panel.advanced_content.isAncestorOf(panel.offset_max_spin)
     assert not panel.advanced_content.isAncestorOf(panel.offset_step_spin)
@@ -61,10 +65,12 @@ def test_advanced_rows_use_conditional_visibility_without_resetting_values(
         panel.mode_combo.findData(OptimizationMode.PEAK)
     )
     assert not panel.advanced_layout.isRowVisible(panel.tolerance_spin)
+    assert not panel.advanced_layout.isRowVisible(panel.candidate_pool_combo)
     panel.mode_combo.setCurrentIndex(
         panel.mode_combo.findData(OptimizationMode.BALANCED)
     )
     assert panel.advanced_layout.isRowVisible(panel.tolerance_spin)
+    assert panel.advanced_layout.isRowVisible(panel.candidate_pool_combo)
     assert panel.tolerance_spin.value() == 0.125
 
     assert not panel.advanced_layout.isRowVisible(panel.fixed_attempts_spin)
@@ -152,7 +158,11 @@ def test_run_config_exports_effective_offset_search_metadata(
     panel.offset_max_spin.setValue(102)
     panel.offset_step_spin.setValue(10)
     path = write_run_config_json(panel.build_request(), tmp_path / "run_config.json")
-    assert json.loads(path.read_text(encoding="utf-8"))["offset_search"] == {
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "balanced"
+    assert payload["classic_can_weight"] == "payload_bytes"
+    assert payload["can_fd_weight"] == "frame_time_us"
+    assert payload["offset_search"] == {
         "min_offset_ms": 15,
         "max_offset_ms": 102,
         "offset_step_ms": 10,
@@ -161,7 +171,7 @@ def test_run_config_exports_effective_offset_search_metadata(
     }
 
 
-def test_dbc_only_project_forces_payload_and_peak(
+def test_dbc_only_fd_payload_keeps_mode_selectable(
     qtbot, workspace_root: Path, tmp_path: Path
 ) -> None:
     source = tmp_path / "dbc_only"
@@ -177,11 +187,11 @@ def test_dbc_only_project_forces_payload_and_peak(
     assert panel.weight_combo.count() == 1
     assert WeightMode(panel.weight_combo.currentData()) is WeightMode.PAYLOAD_BYTES
     assert not panel.weight_combo.isEnabled()
-    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.PEAK
-    assert not panel.mode_combo.isEnabled()
+    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.BALANCED
+    assert panel.mode_combo.isEnabled()
     request = panel.build_request()
-    assert request.weight_mode is WeightMode.PAYLOAD_BYTES
-    assert request.mode is OptimizationMode.PEAK
+    assert request.can_fd_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
 
 
 def test_skipped_networks_do_not_remove_weights_supported_by_optimizable_networks(
@@ -206,7 +216,7 @@ def test_skipped_networks_do_not_remove_weights_supported_by_optimizable_network
     assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
     request = panel.build_request()
     assert request.inspection is mixed_inspection
-    assert request.weight_mode is WeightMode.FRAME_TIME_US
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
 
 
 def test_classic_weight_is_fixed_while_fd_weight_remains_selectable(
@@ -226,8 +236,96 @@ def test_classic_weight_is_fixed_while_fd_weight_remains_selectable(
 
     assert panel.weight_combo.count() == 2
     assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
-    assert "只应用于 CAN FD" in panel.weight_combo.toolTip()
-    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.PEAK
-    assert not panel.mode_combo.isEnabled()
+    assert "仅应用于 CAN FD" in panel.weight_combo.toolTip()
+    assert panel.classic_weight_combo.count() == 1
+    assert not panel.classic_weight_combo.isEnabled()
+    assert panel.mode_combo.isEnabled()
+    for mode in (
+        OptimizationMode.PEAK,
+        OptimizationMode.BALANCED,
+        OptimizationMode.VARIANCE,
+    ):
+        panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
+        assert OptimizationMode(panel.mode_combo.currentData()) is mode
     request = panel.build_request()
-    assert request.weight_mode is WeightMode.FRAME_TIME_US
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
+    assert request.mode is OptimizationMode.VARIANCE
+
+
+def test_can_fd_weight_switch_propagates_without_disabling_mode(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.can_fd_weight_combo.setCurrentIndex(
+        panel.can_fd_weight_combo.findData(WeightMode.PAYLOAD_BYTES)
+    )
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    assert panel.mode_combo.isEnabled()
+    request = panel.build_request()
+    assert request.can_fd_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_classic_only_project_keeps_mode_selectable_and_fd_row_grey(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic_networks = tuple(
+        replace(
+            network,
+            frame_protocol=FrameProtocol.CLASSIC_CAN,
+            available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+            automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+            classic_weight_model=CLASSIC_WEIGHT_MODEL,
+        )
+        for network in inspection.networks
+    )
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(replace(inspection, networks=classic_networks))
+
+    assert not panel.classic_weight_combo.isEnabled()
+    assert not panel.can_fd_weight_combo.isEnabled()
+    assert panel.mode_combo.isEnabled()
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    request = panel.build_request()
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_mixed_protocol_batch_applies_weight_per_network(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic = replace(
+        inspection.networks[0],
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+        automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    mixed = replace(inspection, networks=(classic, *inspection.networks[1:]))
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(mixed)
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    request = panel.build_request()
+
+    batch = FixtureBackend(
+        workspace_root=inspection.session.workspace_root, delay_seconds=0
+    ).optimize_all_networks(request, lambda _update: None, CancellationToken())
+    by_id = batch.network_items_by_id
+    assert by_id[classic.network_id].result is not None
+    assert by_id[classic.network_id].result.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert by_id[classic.network_id].result.mode is OptimizationMode.BALANCED
+    for network in mixed.networks[1:]:
+        assert by_id[network.network_id].result is not None
+        assert by_id[network.network_id].result.weight_mode is WeightMode.FRAME_TIME_US
+        assert by_id[network.network_id].result.mode is OptimizationMode.BALANCED

@@ -696,8 +696,6 @@ def run_gcls(
     """
     objective = objective_config or ObjectiveConfig(mode=ObjectiveMode.PEAK)
     mode = objective.mode
-    if weight_mode is not WeightMode.FRAME_TIME_US and mode is not ObjectiveMode.PEAK:
-        mode = ObjectiveMode.PEAK
     load_threshold = (
         slot_load_threshold_us(config.slot_width_us, average_load_limit)
         if weight_mode is WeightMode.FRAME_TIME_US

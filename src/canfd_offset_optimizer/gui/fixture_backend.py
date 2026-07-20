@@ -26,6 +26,7 @@ from .contracts import (
     BatchOptimizationCancelled,
     BatchOptimizationResult,
     CancellationToken,
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
     ImportRecord,
@@ -389,7 +390,7 @@ class FixtureBackend:
                     display_name=network.display_name,
                     source_file=network.source_file,
                     status=NetworkRunStatus.CANCELLED,
-                    weight_mode=request.weight_mode,
+                    weight_mode=self._network_weight(network, request),
                     mode=request.mode,
                     error="用户在网段开始前取消了批量任务",
                     logs=("当前网段未开始。",),
@@ -410,7 +411,7 @@ class FixtureBackend:
                     display_name=network.display_name,
                     source_file=network.source_file,
                     status=NetworkRunStatus.SKIPPED,
-                    weight_mode=request.weight_mode,
+                    weight_mode=self._network_weight(network, request),
                     mode=request.mode,
                     error="FixtureBackend 配置为跳过该网段",
                     logs=("网段未开始优化。",),
@@ -426,7 +427,7 @@ class FixtureBackend:
                     display_name=network.display_name,
                     source_file=network.source_file,
                     status=NetworkRunStatus.FAILED,
-                    weight_mode=request.weight_mode,
+                    weight_mode=self._network_weight(network, request),
                     mode=request.mode,
                     error=f"FixtureBackend 模拟网段 {network.network_name} 优化失败",
                     logs=("已记录错误并继续后续网段。",),
@@ -453,7 +454,7 @@ class FixtureBackend:
                     display_name=network.display_name,
                     source_file=network.source_file,
                     status=NetworkRunStatus.CANCELLED,
-                    weight_mode=request.weight_mode,
+                    weight_mode=self._network_weight(network, request),
                     mode=request.mode,
                     error="用户取消了当前网段",
                     logs=("当前网段已在安全检查点停止。",),
@@ -473,7 +474,7 @@ class FixtureBackend:
                 display_name=network.display_name,
                 source_file=network.source_file,
                 status=NetworkRunStatus.SUCCEEDED,
-                weight_mode=request.weight_mode,
+                weight_mode=self._network_weight(network, request),
                 mode=request.mode,
                 result=result,
                 warnings=result.warnings,
@@ -543,7 +544,7 @@ class FixtureBackend:
             network_name=network.network_name,
             display_name=network.display_name,
             source_file=network.source_file,
-            weight_mode=request.weight_mode,
+            weight_mode=self._network_weight(network, request),
             mode=request.mode,
             original_metrics=before,
             optimized_metrics=after,
@@ -555,7 +556,9 @@ class FixtureBackend:
                 else ("stable_plateau" if profile % 2 else "patience_exhausted")
             ),
             elapsed_seconds=round(0.012 * attempts + profile / 1000, 3),
-            warnings=self._network_warnings(request),
+            warnings=self._network_warnings(
+                request, self._network_weight(network, request)
+            ),
             steady_loads_before=steady_before,
             steady_loads_after=steady_after,
             startup_loads_before=startup_before,
@@ -573,6 +576,8 @@ class FixtureBackend:
             ),
             output_directory=create_output_layout(output_directory).results
             / self._safe_name(f"{network.display_name}_{network.network_id[-8:]}"),
+            frame_protocol=network.frame_protocol,
+            classic_weight_model=network.classic_weight_model,
         )
         return self._write_success_outputs(result, output_directory)
 
@@ -619,7 +624,7 @@ class FixtureBackend:
                 display_name=network.display_name,
                 source_file=network.source_file,
                 status=NetworkRunStatus.SKIPPED,
-                weight_mode=request.weight_mode,
+                weight_mode=self._network_weight(network, request),
                 mode=request.mode,
                 error="批量任务已取消，网段未开始",
                 logs=("因用户取消而未运行。",),
@@ -903,11 +908,19 @@ class FixtureBackend:
             warnings.append(self._extra_warning)
         return tuple(warnings)
 
+    @staticmethod
+    def _network_weight(
+        network: NetworkSummary, request: GuiBatchOptimizationRequest
+    ) -> WeightMode:
+        if network.frame_protocol is FrameProtocol.CLASSIC_CAN:
+            return request.classic_can_weight
+        return request.can_fd_weight
+
     def _network_warnings(
-        self, request: GuiBatchOptimizationRequest
+        self, request: GuiBatchOptimizationRequest, weight_mode: WeightMode
     ) -> tuple[str, ...]:
         warnings = ["FixtureBackend 结果不可用于工程交付。"]
-        if request.weight_mode is WeightMode.PAYLOAD_BYTES:
+        if weight_mode is WeightMode.PAYLOAD_BYTES:
             warnings.append("Payload 权重不代表物理总线占用时间。")
         if request.enable_triple_search:
             warnings.append("已模拟启用高质量离线 3-opt；未执行真实核心搜索。")

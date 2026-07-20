@@ -589,8 +589,8 @@ class RealBackend(WorkspaceImporter):
         network: NetworkSummary, request: GuiBatchOptimizationRequest
     ) -> WeightMode:
         if network.frame_protocol is FrameProtocol.CLASSIC_CAN:
-            return WeightMode.PAYLOAD_BYTES
-        return request.weight_mode
+            return request.classic_can_weight
+        return request.can_fd_weight
 
     @staticmethod
     def _apply_request_settings(
@@ -769,7 +769,10 @@ class RealBackend(WorkspaceImporter):
     def _eligibility_reason(exc: CanfdOptimizerError) -> str:
         text = str(exc)
         if "mixes eligible Classic CAN and CAN FD" in text:
-            return f"跳过：同一物理网段混合了 Classic CAN 与 CAN FD，禁止混合权重。详情：{text}"
+            return (
+                "跳过：同一物理网段混合了 Classic CAN 与 CAN FD；"
+                f"当前核心不支持混合帧格式优化。详情：{text}"
+            )
         if "no eligible periodic TX messages" in text:
             return f"跳过：没有符合资格的周期 TX 报文。详情：{text}"
         if "not a CAN FD data frame" in text:

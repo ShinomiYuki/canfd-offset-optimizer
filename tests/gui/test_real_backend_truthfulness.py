@@ -229,7 +229,7 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
     )
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
-        weight_mode=WeightMode.FRAME_TIME_US,
+        can_fd_weight=WeightMode.FRAME_TIME_US,
         mode=OptimizationMode.BALANCED,
         balanced_tolerance=0.05,
         restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
@@ -280,8 +280,8 @@ def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         # This selector applies to FD only; Classic must stay on payload.
-        weight_mode=WeightMode.FRAME_TIME_US,
-        mode=OptimizationMode.PEAK,
+        can_fd_weight=WeightMode.FRAME_TIME_US,
+        mode=OptimizationMode.BALANCED,
         balanced_tolerance=0.05,
         restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
         candidate_pool_size=1,
@@ -292,6 +292,7 @@ def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
     result = batch.network_results[0].result
     assert result is not None
     assert result.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert result.mode is OptimizationMode.BALANCED
     assert result.frame_protocol is FrameProtocol.CLASSIC_CAN
     assert result.classic_weight_model == CLASSIC_WEIGHT_MODEL
     assert result.original_metrics.nvio is None
@@ -299,6 +300,9 @@ def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
     assert all(value % 8 == 0 for value in result.original_steady_load)
     log = (batch.output_directory / "logs" / "BD.log").read_text(encoding="utf-8")
     assert 'classic_weight_model = "payload_bytes_approximation"' in log
+    assert "bus_type=classic_can" in log
+    assert "weight_mode=payload_bytes" in log
+    assert "objective_mode=balanced" in log
     assert "load_unit=Byte/slot" in log
     assert "75%" not in log
 
@@ -409,8 +413,8 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
 
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
-        weight_mode=WeightMode.PAYLOAD_BYTES,
-        mode=OptimizationMode.PEAK,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
+        mode=OptimizationMode.BALANCED,
         balanced_tolerance=0.05,
         restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
         candidate_pool_size=1,
@@ -420,6 +424,10 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     batch = backend.optimize_all_networks(request, lambda update: None, token)
     assert batch.succeeded_count == 1
     assert batch.skipped_count == 2
+    succeeded = next(
+        item for item in batch.network_results if item.status is NetworkRunStatus.SUCCEEDED
+    )
+    assert succeeded.mode is OptimizationMode.BALANCED
     assert all(
         item.result is None
         for item in batch.network_results
@@ -495,7 +503,7 @@ def test_real_backend_short_run_maps_only_core_data(
     inspection = backend.inspect_workspace(session, lambda update: None, token)
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
-        weight_mode=WeightMode.PAYLOAD_BYTES,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
         mode=OptimizationMode.PEAK,
         balanced_tolerance=0.05,
         restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
