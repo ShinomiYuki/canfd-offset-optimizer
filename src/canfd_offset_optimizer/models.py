@@ -204,16 +204,24 @@ class NetworkModel:
         if self.startup_window.slot_width_us != self.steady_window.slot_width_us:
             raise ValueError("startup and steady windows must use the same slot width")
         maximum_offset = max(
-            max(message.allowed_offsets_us) for message in self.messages
-        )
-        if self.startup_window.end_us != maximum_offset:
-            raise ValueError("startup window must end at the maximum legal Offset")
-        if any(
-            offset % self.steady_window.slot_width_us
+            max(
+                max(message.allowed_offsets_us),
+                message.original_offset_us
+                if message.original_offset_us is not None
+                else 0,
+            )
             for message in self.messages
-            for offset in message.allowed_offsets_us
-        ):
-            raise ValueError("all legal Offsets must align to the slot width")
+        )
+        expected_boundary = max(
+            self.startup_window.slot_width_us,
+            (
+                (maximum_offset + self.startup_window.slot_width_us - 1)
+                // self.startup_window.slot_width_us
+            )
+            * self.startup_window.slot_width_us,
+        )
+        if self.startup_window.end_us != expected_boundary:
+            raise ValueError("startup window must cover the maximum legal Offset")
         if any(
             self.hyperperiod_us % message.cycle_time_us for message in self.messages
         ):
@@ -758,11 +766,16 @@ class OptimizationResult:
         )
         if any(value < 0 for array in arrays for value in array):
             raise ValueError("result load/count arrays must be non-negative")
-        if (
-            self.objective.mode is not ObjectiveMode.BALANCED
-            and (
-                self.objective > self.greedy_objective
-                or self.objective > self.initial_objective
+        original_is_candidate_baseline = all(
+            message.original_offset_us is None
+            or message.original_offset_us in message.allowed_offsets_us
+            for message in self.messages
+        )
+        if self.objective.mode is not ObjectiveMode.BALANCED and (
+            self.objective > self.greedy_objective
+            or (
+                original_is_candidate_baseline
+                and self.objective > self.initial_objective
             )
         ):
             raise ValueError("optimized objective must not be worse than its baselines")

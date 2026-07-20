@@ -219,13 +219,7 @@ def parse_dbc(
                 raise MissingFieldError(
                     f"{path}: message {message.name} has invalid original Offset"
                 )
-        if frame_protocol is FrameProtocol.CLASSIC_CAN and (
-            original_offset_us is None
-            or (
-                allowed_offsets_us is not None
-                and original_offset_us not in allowed_offsets_us
-            )
-        ):
+        if frame_protocol is FrameProtocol.CLASSIC_CAN and original_offset_us is None:
             rendered = (
                 "missing"
                 if original_offset_us is None
@@ -233,7 +227,7 @@ def parse_dbc(
             )
             warnings.append(
                 f"Classic CAN message {message.name} was excluded: original Offset "
-                f"{rendered} is not in the allowed Offset domain"
+                f"{rendered}; Classic CAN requires a real baseline Offset"
             )
             continue
         if frame_protocol is FrameProtocol.CLASSIC_CAN and (

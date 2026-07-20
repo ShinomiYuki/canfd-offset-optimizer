@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
+
+import pytest
 
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
@@ -12,6 +15,7 @@ from canfd_offset_optimizer.gui.contracts import (
     WorkspaceInspection,
 )
 from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
+from canfd_offset_optimizer.gui.artifact_outputs import write_run_config_json
 from canfd_offset_optimizer.gui.widgets.settings_panel import SettingsPanel
 
 
@@ -25,6 +29,54 @@ def test_arxml_project_can_choose_both_weight_modes(
     assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
     assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.BALANCED
     assert panel.mode_combo.isEnabled()
+    request = panel.build_request()
+    assert request.offset_search.candidate_offsets_ms == tuple(range(15, 101, 5))
+
+
+def test_offset_search_controls_build_non_divisible_request(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(15)
+    panel.offset_max_spin.setValue(102)
+    panel.offset_step_spin.setValue(10)
+    request = panel.build_request()
+    assert request.offset_search.candidate_offsets_ms == tuple(range(15, 96, 10))
+    assert "9" in panel.offset_summary_label.text()
+
+
+def test_invalid_offset_range_blocks_request(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(200)
+    panel.offset_max_spin.setValue(100)
+    assert "无效" in panel.offset_summary_label.text()
+    with pytest.raises(ValueError, match="max_offset_ms"):
+        panel.build_request()
+
+
+def test_run_config_exports_effective_offset_search_metadata(
+    qtbot, inspection: WorkspaceInspection, tmp_path: Path
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(15)
+    panel.offset_max_spin.setValue(102)
+    panel.offset_step_spin.setValue(10)
+    path = write_run_config_json(panel.build_request(), tmp_path / "run_config.json")
+    assert json.loads(path.read_text(encoding="utf-8"))["offset_search"] == {
+        "min_offset_ms": 15,
+        "max_offset_ms": 102,
+        "offset_step_ms": 10,
+        "effective_max_offset_ms": 95,
+        "candidate_count": 9,
+    }
 
 
 def test_dbc_only_project_forces_payload_and_peak(

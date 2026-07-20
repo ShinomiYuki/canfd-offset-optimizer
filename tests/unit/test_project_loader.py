@@ -8,12 +8,28 @@ from pathlib import Path
 
 import pytest
 
+from canfd_offset_optimizer.config import OffsetSearchConfig
 from canfd_offset_optimizer.exceptions import InputFileError, MissingFieldError
 from canfd_offset_optimizer.models import ObjectiveMode, WeightMode
 from canfd_offset_optimizer.parsers.project_loader import load_project
 
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
+
+
+def test_offset_search_override_reaches_every_core_message() -> None:
+    search = OffsetSearchConfig(0, 200, 10)
+    loaded = load_project(
+        FIXTURES / "dbc" / "four_messages.dbc",
+        FIXTURES / "arxml",
+        FIXTURES / "config" / "project.yaml",
+        offset_search_override=search,
+    )
+    assert loaded.config.optimization.offset_search == search
+    assert all(
+        message.allowed_offsets_us == search.candidate_offsets_us
+        for message in loaded.network.messages
+    )
 
 
 def test_loader_constructs_four_message_network() -> None:

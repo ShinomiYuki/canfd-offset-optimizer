@@ -9,7 +9,12 @@ from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
-from ..config import PeakToleranceConfig, RestartPolicy, load_project_config
+from ..config import (
+    OffsetSearchConfig,
+    PeakToleranceConfig,
+    RestartPolicy,
+    load_project_config,
+)
 from ..exceptions import CanfdOptimizerError
 from ..models import (
     FrameProtocol as CoreFrameProtocol,
@@ -24,6 +29,7 @@ from ..parsers.arxml_parser import discover_arxml_channel_names
 from ..parsers.dbc_parser import parse_dbc
 from ..parsers.project_loader import LoadedProject, load_project
 from ..reporting.objective_mode_writer import load_statistics
+from ..timeline.slot_map import precompute_slot_map
 from ..timeline.state import SearchState
 from .contracts import (
     BackendAvailability,
@@ -58,6 +64,7 @@ from .artifact_outputs import (
     write_load_curve_png,
     write_load_heatmap_png,
     write_network_log,
+    write_run_config_json,
 )
 from .dbc_offset_writer import DbcOffsetReplacement, write_dbc_with_offsets
 from .formatting import (
@@ -67,7 +74,7 @@ from .formatting import (
 from .workspace_io import DEFAULT_CONFIG_NOTE, WorkspaceImporter
 
 
-REQUIRED_ALLOWED_OFFSETS_US = tuple(range(15_000, 100_001, 5_000))
+REQUIRED_ALLOWED_OFFSETS_US = OffsetSearchConfig().candidate_offsets_us
 
 
 class RealBackend(WorkspaceImporter):
@@ -351,19 +358,8 @@ class RealBackend(WorkspaceImporter):
             weight_mode_override=core_weight,
             channel_override=channel_override,
             objective_mode_override=core_mode,
+            offset_search_override=request.offset_search,
         )
-        if loaded.config.optimization.allowed_offsets_us != REQUIRED_ALLOWED_OFFSETS_US:
-            actual = loaded.config.optimization.allowed_offsets_us
-            raise ValueError(
-                "非法候选 Offset：要求精确等于 15,20,...,100 ms；"
-                f"核心配置实际为 {tuple(value / 1000 for value in actual)} ms"
-            )
-        for message in loaded.network.messages:
-            self._validate_offset_contract(
-                message.name,
-                message.original_offset_us,
-                "core NetworkModel.original_offset_us",
-            )
         loaded = self._apply_request_settings(loaded, request)
         initial_state = self._baseline_state(loaded)
         attempt_limit = loaded.config.optimization.restart_policy.attempt_limit
@@ -415,6 +411,7 @@ class RealBackend(WorkspaceImporter):
                 row.message_name,
                 row.optimized_offset_us,
                 "core OptimizationResult.assignments",
+                request.offset_search.candidate_offsets_us,
             )
         layout = create_output_layout(batch_output)
         network_output = layout.results / self._safe_name(network.display_name)
@@ -453,6 +450,11 @@ class RealBackend(WorkspaceImporter):
                 "数据源：core load_project + run_gcls",
                 f"arxml_channel={channel_override or 'not_used'}",
                 f"weight_mode={actual_weight.value}",
+                f"offset_min_ms={request.offset_search.min_offset_ms}",
+                f"offset_max_ms={request.offset_search.max_offset_ms}",
+                f"offset_step_ms={request.offset_search.offset_step_ms}",
+                f"offset_effective_max_ms={request.offset_search.effective_max_offset_ms}",
+                f"offset_candidate_count={request.offset_search.candidate_count}",
                 *(
                     ('classic_weight_model = "payload_bytes_approximation"',)
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
@@ -463,6 +465,7 @@ class RealBackend(WorkspaceImporter):
             output_directory=network_output,
             frame_protocol=network.frame_protocol,
             classic_weight_model=network.classic_weight_model,
+            offset_search=request.offset_search,
         )
         stem = self._safe_name(network.display_name)
         progress_callback(
@@ -523,13 +526,17 @@ class RealBackend(WorkspaceImporter):
 
     @staticmethod
     def _validate_offset_contract(
-        message_name: str, offset_us: int | None, source: str
+        message_name: str,
+        offset_us: int | None,
+        source: str,
+        allowed_offsets_us: tuple[int, ...] = REQUIRED_ALLOWED_OFFSETS_US,
     ) -> None:
-        if offset_us not in REQUIRED_ALLOWED_OFFSETS_US:
+        if offset_us not in allowed_offsets_us:
             rendered = "missing" if offset_us is None else f"{offset_us / 1000:g} ms"
             raise ValueError(
-                f"非法 Offset：报文={message_name}，值={rendered}，数据源={source}；"
-                "要求 15..100 ms 且步长 5 ms，未执行取整或截断"
+                f"Illegal Offset: message={message_name}, value={rendered}, source={source}; "
+                f"candidate domain={tuple(value / 1000 for value in allowed_offsets_us)} ms; "
+                "no rounding or truncation was applied"
             )
 
     @staticmethod
@@ -539,13 +546,25 @@ class RealBackend(WorkspaceImporter):
 
     @staticmethod
     def _baseline_state(loaded: LoadedProject) -> SearchState:
-        state = SearchState(loaded.network.messages, loaded.slot_map)
-        for message in loaded.network.messages:
-            original = message.original_offset_us
-            state.apply(
+        baseline_messages = tuple(
+            replace(
                 message,
-                original if original in message.allowed_offsets_us else min(message.allowed_offsets_us),
+                allowed_offsets_us=(
+                    message.original_offset_us
+                    if message.original_offset_us is not None
+                    else min(message.allowed_offsets_us),
+                ),
             )
+            for message in loaded.network.messages
+        )
+        baseline_map = precompute_slot_map(
+            baseline_messages,
+            loaded.network.startup_window,
+            loaded.network.steady_window,
+        )
+        state = SearchState(baseline_messages, baseline_map)
+        for message in baseline_messages:
+            state.apply(message, message.allowed_offsets_us[0])
         return state
 
     @staticmethod
@@ -626,6 +645,7 @@ class RealBackend(WorkspaceImporter):
         )
         layout = create_output_layout(output_directory)
         export_batch_summary_csv(batch, layout.results / "networks_summary.csv")
+        write_run_config_json(request, layout.results / "run_config.json")
         for item in rows:
             write_network_log(
                 item,

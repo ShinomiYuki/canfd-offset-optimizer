@@ -3,10 +3,13 @@ from __future__ import annotations
 import csv
 import builtins
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
+from canfd_offset_optimizer.config import OffsetSearchConfig
 
 import canfd_offset_optimizer.gui.real_backend as real_backend_module
 from canfd_offset_optimizer.gui.app import create_backend
@@ -31,6 +34,7 @@ from canfd_offset_optimizer.gui.mock_backend import MockBackend
 from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 from canfd_offset_optimizer.gui.main_window import MainWindow
 from canfd_offset_optimizer.gui.real_backend import REQUIRED_ALLOWED_OFFSETS_US, RealBackend
+from canfd_offset_optimizer.parsers.project_loader import load_project
 
 
 CSV_FIXTURE = Path("tests/fixtures/ALL_offsets_weight_mode_comparison.csv")
@@ -344,13 +348,30 @@ def test_regression_contains_no_fabricated_ic_message_names() -> None:
 
 
 def test_real_adapter_offset_domain_is_exact_and_not_rounded() -> None:
-    assert REQUIRED_ALLOWED_OFFSETS_US == tuple(range(15_000, 100_001, 5_000))
-    assert 17_000 not in REQUIRED_ALLOWED_OFFSETS_US
-    assert 23_000 not in REQUIRED_ALLOWED_OFFSETS_US
-    assert 42_000 not in REQUIRED_ALLOWED_OFFSETS_US
-    with pytest.raises(ValueError, match=r"MsgBad.*17 ms.*未执行取整或截断"):
-        RealBackend._validate_offset_contract("MsgBad", 17_000, "core fixture")
+    search = OffsetSearchConfig(15, 102, 10)
+    assert REQUIRED_ALLOWED_OFFSETS_US == OffsetSearchConfig().candidate_offsets_us
+    assert search.candidate_offsets_us == tuple(range(15_000, 96_000, 10_000))
+    with pytest.raises(ValueError, match=r"MsgBad.*17 ms.*no rounding"):
+        RealBackend._validate_offset_contract(
+            "MsgBad", 17_000, "core fixture", search.candidate_offsets_us
+        )
 
+
+def test_original_offset_outside_candidates_is_preserved_in_baseline() -> None:
+    fixtures = Path("tests/fixtures")
+    loaded = load_project(
+        fixtures / "dbc" / "four_messages.dbc",
+        fixtures / "arxml",
+        fixtures / "config" / "project.yaml",
+        offset_search_override=OffsetSearchConfig(15, 25, 10),
+    )
+    messages = tuple(
+        replace(message, original_offset_us=20_000)
+        for message in loaded.network.messages
+    )
+    loaded = replace(loaded, network=replace(loaded.network, messages=messages))
+    baseline = RealBackend._baseline_state(loaded)
+    assert set(baseline.current_offsets.values()) == {20_000}
 
 def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     tmp_path: Path,

@@ -18,6 +18,51 @@ from .models import ObjectiveMode, PeakToleranceType, RestartMode, WeightMode
 
 
 @dataclass(frozen=True, slots=True)
+class OffsetSearchConfig:
+    """Public millisecond-based Offset candidate-domain configuration."""
+
+    min_offset_ms: int = 15
+    max_offset_ms: int = 100
+    offset_step_ms: int = 5
+
+    def __post_init__(self) -> None:
+        values = (self.min_offset_ms, self.max_offset_ms, self.offset_step_ms)
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise ConfigurationError("Offset search values must be finite integers")
+        if self.min_offset_ms < 0:
+            raise ConfigurationError("min_offset_ms must be non-negative")
+        if self.max_offset_ms < self.min_offset_ms:
+            raise ConfigurationError("max_offset_ms must not be smaller than min_offset_ms")
+        if self.offset_step_ms <= 0:
+            raise ConfigurationError("offset_step_ms must be positive")
+
+    @property
+    def candidate_offsets_ms(self) -> tuple[int, ...]:
+        return tuple(range(self.min_offset_ms, self.max_offset_ms + 1, self.offset_step_ms))
+
+    @property
+    def candidate_offsets_us(self) -> tuple[int, ...]:
+        return tuple(value * 1_000 for value in self.candidate_offsets_ms)
+
+    @property
+    def effective_max_offset_ms(self) -> int:
+        return self.min_offset_ms + (self.candidate_count - 1) * self.offset_step_ms
+
+    @property
+    def candidate_count(self) -> int:
+        return (self.max_offset_ms - self.min_offset_ms) // self.offset_step_ms + 1
+
+    def as_metadata(self) -> dict[str, int]:
+        return {
+            "min_offset_ms": self.min_offset_ms,
+            "max_offset_ms": self.max_offset_ms,
+            "offset_step_ms": self.offset_step_ms,
+            "effective_max_offset_ms": self.effective_max_offset_ms,
+            "candidate_count": self.candidate_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RestartPolicy:
     """! @brief 以总尝试次数表达的 fixed/adaptive 重启策略。"""
 
@@ -216,16 +261,11 @@ class OptimizationConfig:
             raise ConfigurationError("slot/cap/step/count values must be positive")
         if self.offset_min_us < 0 or self.offset_max_us < self.offset_min_us:
             raise ConfigurationError("offset range is invalid")
-        if self.offset_max_us == 0:
-            raise ConfigurationError("offset_max_us must be positive for startup analysis")
-        if (self.offset_max_us - self.offset_min_us) % self.offset_step_us:
-            raise ConfigurationError("offset range must be divisible by offset step")
-        if (
-            self.offset_min_us % self.slot_width_us
-            or self.offset_max_us % self.slot_width_us
-            or self.offset_step_us % self.slot_width_us
+        if any(
+            value % 1_000
+            for value in (self.offset_min_us, self.offset_max_us, self.offset_step_us)
         ):
-            raise ConfigurationError("offset range and step must align to slot_width_us")
+            raise ConfigurationError("offset search values must use integer milliseconds")
         if not self.pair_neighbor_steps or any(
             isinstance(step, bool) or not isinstance(step, int) or step <= 0
             for step in self.pair_neighbor_steps
@@ -243,8 +283,14 @@ class OptimizationConfig:
     @property
     def allowed_offsets_us(self) -> tuple[int, ...]:
         """! @brief 生成闭区间内严格递增的合法 Offset。"""
-        return tuple(
-            range(self.offset_min_us, self.offset_max_us + 1, self.offset_step_us)
+        return self.offset_search.candidate_offsets_us
+
+    @property
+    def offset_search(self) -> OffsetSearchConfig:
+        return OffsetSearchConfig(
+            self.offset_min_us // 1_000,
+            self.offset_max_us // 1_000,
+            self.offset_step_us // 1_000,
         )
 
 

@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...config import OffsetSearchConfig
+from ...exceptions import ConfigurationError
+
 from ..contracts import (
     GuiBatchOptimizationRequest,
     OptimizationMode,
@@ -93,12 +96,29 @@ class SettingsPanel(QGroupBox):
             self.candidate_pool_combo.addItem(str(size), size)
         self.triple_search_check = QCheckBox("启用冲突导向 3-opt")
         self.triple_search_check.setChecked(False)
+        self.offset_min_spin = QSpinBox()
+        self.offset_max_spin = QSpinBox()
+        self.offset_step_spin = QSpinBox()
+        for spin in (self.offset_min_spin, self.offset_max_spin):
+            spin.setRange(0, 2_147_483_647)
+            spin.setSuffix(" ms")
+        self.offset_step_spin.setRange(1, 2_147_483_647)
+        self.offset_step_spin.setSuffix(" ms")
+        self.offset_min_spin.setValue(15)
+        self.offset_max_spin.setValue(100)
+        self.offset_step_spin.setValue(5)
+        self.offset_summary_label = QLabel()
+        self.offset_summary_label.setWordWrap(True)
         triple_warning = QLabel("高质量离线搜索，可能显著增加全部网段总运行时间")
         triple_warning.setWordWrap(True)
         advanced.addRow("固定 attempts：", self.fixed_attempts_spin)
         advanced.addRow("自适应最少 attempts：", self.adaptive_min_spin)
         advanced.addRow("自适应最多 attempts：", self.adaptive_max_spin)
         advanced.addRow("Candidate pool：", self.candidate_pool_combo)
+        advanced.addRow("Offset 最小值：", self.offset_min_spin)
+        advanced.addRow("Offset 最大值：", self.offset_max_spin)
+        advanced.addRow("Offset 步长：", self.offset_step_spin)
+        advanced.addRow("", self.offset_summary_label)
         advanced.addRow("", self.triple_search_check)
         advanced.addRow("", triple_warning)
         self.advanced_content.setVisible(False)
@@ -112,6 +132,9 @@ class SettingsPanel(QGroupBox):
         self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.details_button.clicked.connect(self.details_requested.emit)
+        for spin in (self.offset_min_spin, self.offset_max_spin, self.offset_step_spin):
+            spin.valueChanged.connect(self._update_offset_summary)
+        self._update_offset_summary()
         self._update_restart_controls()
         self._update_mode_controls()
 
@@ -152,6 +175,14 @@ class SettingsPanel(QGroupBox):
             raise ValueError("尚未完成工程工作区检查")
         weight_mode = self._selected_weight_mode(required=True)
         assert weight_mode is not None
+        try:
+            offset_search = OffsetSearchConfig(
+                self.offset_min_spin.value(),
+                self.offset_max_spin.value(),
+                self.offset_step_spin.value(),
+            )
+        except ConfigurationError as exc:
+            raise ValueError(str(exc)) from exc
         return GuiBatchOptimizationRequest(
             inspection=self._inspection,
             weight_mode=weight_mode,
@@ -166,6 +197,24 @@ class SettingsPanel(QGroupBox):
             candidate_pool_size=int(self.candidate_pool_combo.currentData()),
             enable_triple_search=self.triple_search_check.isChecked(),
             output_root=self._inspection.session.workspace_root / "user_output",
+            offset_search=offset_search,
+        )
+
+    def _update_offset_summary(self) -> None:
+        try:
+            config = OffsetSearchConfig(
+                self.offset_min_spin.value(),
+                self.offset_max_spin.value(),
+                self.offset_step_spin.value(),
+            )
+        except ConfigurationError as exc:
+            self.offset_summary_label.setText(f"Offset 搜索范围无效：{exc}")
+            return
+        warning = "；候选较多，运行时间可能显著增加" if config.candidate_count > 1_000 else ""
+        self.offset_summary_label.setText(
+            f"范围 {config.min_offset_ms}～{config.max_offset_ms} ms，"
+            f"步长 {config.offset_step_ms} ms，候选 {config.candidate_count} 个，"
+            f"实际最大值 {config.effective_max_offset_ms} ms{warning}"
         )
 
     def _set_weight_options(self, modes: tuple[WeightMode, ...]) -> None:

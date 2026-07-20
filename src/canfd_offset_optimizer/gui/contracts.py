@@ -10,6 +10,8 @@ from threading import Event
 from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
+from ..config import OffsetSearchConfig
+
 
 class InputKind(str, Enum):
     """File classifications exposed by an import backend."""
@@ -260,6 +262,7 @@ class GuiBatchOptimizationRequest:
     candidate_pool_size: int
     enable_triple_search: bool
     output_root: Path
+    offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
 
     def __post_init__(self) -> None:
         if not self.inspection.can_optimize:
@@ -276,6 +279,8 @@ class GuiBatchOptimizationRequest:
             raise ValueError("candidate_pool_size is unsupported")
         if not isinstance(self.enable_triple_search, bool):
             raise ValueError("enable_triple_search must be boolean")
+        if not isinstance(self.offset_search, OffsetSearchConfig):
+            raise ValueError("offset_search must be an OffsetSearchConfig")
         if any(
             self.weight_mode not in network.available_weight_modes
             for network in self.inspection.optimizable_networks
@@ -416,6 +421,7 @@ class GuiOptimizationResult:
     exported_files: tuple[Path, ...] = field(default_factory=tuple)
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
     classic_weight_model: str | None = None
+    offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
@@ -424,6 +430,8 @@ class GuiOptimizationResult:
             raise ValueError("result optimization mode is unsupported")
         if not isinstance(self.frame_protocol, FrameProtocol):
             raise ValueError("result frame protocol is unsupported")
+        if not isinstance(self.offset_search, OffsetSearchConfig):
+            raise ValueError("result offset_search is invalid")
         if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
             if self.weight_mode is not WeightMode.PAYLOAD_BYTES:
                 raise ValueError("Classic CAN result must use payload_bytes")

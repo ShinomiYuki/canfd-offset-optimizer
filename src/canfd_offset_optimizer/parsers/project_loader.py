@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..config import ProjectConfig, load_project_config
+from ..config import OffsetSearchConfig, ProjectConfig, load_project_config
 from ..exceptions import ConfigurationError, InputFileError, MissingFieldError
 from ..models import (
     CanMessage,
@@ -65,12 +65,23 @@ def load_project(
     weight_mode_override: WeightMode | None = None,
     channel_override: str | None = None,
     objective_mode_override: ObjectiveMode | None = None,
+    offset_search_override: OffsetSearchConfig | None = None,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
     @raises MissingFieldError 精确权重模式缺少 bitrate/BRS 且无 YAML 覆盖时抛出。
     """
     config = load_project_config(config_path)
+    if offset_search_override is not None:
+        config = replace(
+            config,
+            optimization=replace(
+                config.optimization,
+                offset_min_us=offset_search_override.min_offset_ms * 1_000,
+                offset_max_us=offset_search_override.max_offset_ms * 1_000,
+                offset_step_us=offset_search_override.offset_step_ms * 1_000,
+            ),
+        )
     dbc = parse_dbc(
         dbc_path,
         allowed_offsets_us=config.optimization.allowed_offsets_us,

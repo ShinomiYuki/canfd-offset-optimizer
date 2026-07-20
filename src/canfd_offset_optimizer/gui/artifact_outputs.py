@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import struct
 from typing import TypeAlias
 import zlib
 
-from .contracts import BatchOptimizationResult, GuiOptimizationResult, NetworkBatchResult
+from .contracts import (
+    BatchOptimizationResult,
+    GuiBatchOptimizationRequest,
+    GuiOptimizationResult,
+    NetworkBatchResult,
+)
 from .load_presentation import (
     CONGESTION_COLORS,
     DEFAULT_DISPLAY_DURATION_MS,
@@ -115,6 +121,15 @@ def create_output_layout(root: Path) -> OutputLayout:
     for directory in (layout.logs, layout.plots, layout.results, layout.dbc):
         directory.mkdir(parents=True, exist_ok=True)
     return layout
+
+
+def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> Path:
+    payload = {"offset_search": request.offset_search.as_metadata()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
 
 
 def write_load_curve_png(
