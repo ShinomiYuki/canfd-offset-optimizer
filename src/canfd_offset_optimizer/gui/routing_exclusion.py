@@ -30,10 +30,19 @@ class _Sheet:
     rows: tuple[tuple[int, dict[int, str]], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _FlzcuRoutingLayout:
+    header_row: int
+    message_name_column: int
+    can_id_column: int
+    target_columns: tuple[tuple[int, str], ...]
+
+
 class RouteMessageTableParser:
     """Dependency-free reader for the subset of OOXML needed by routing tables."""
 
     SUPPORTED_SUFFIXES = frozenset({".xlsx"})
+    FLZCU_ROUTING_SHEET = "routing(flzcu)"
     COLUMN_ALIASES: Mapping[str, frozenset[str]] = {
         "target_network": frozenset(
             {
@@ -76,6 +85,24 @@ class RouteMessageTableParser:
             sheets = self._read_xlsx(source)
         except (BadZipFile, ElementTree.ParseError, KeyError, OSError, ValueError) as exc:
             raise RouteTableParseError(f"无法打开或解析 XLSX：{exc}") from exc
+
+        flzcu_sheets = tuple(
+            sheet
+            for sheet in sheets
+            if normalize_sheet_name(sheet.name) == self.FLZCU_ROUTING_SHEET
+        )
+        if flzcu_sheets:
+            return tuple(
+                record
+                for sheet in flzcu_sheets
+                for record in self._parse_flzcu_routing_sheet(sheet, source)
+            )
+
+        return self._parse_flat_sheets(sheets, source)
+
+    def _parse_flat_sheets(
+        self, sheets: Sequence[_Sheet], source: Path
+    ) -> tuple[RouteMessageRecord, ...]:
         records: list[RouteMessageRecord] = []
         schema_errors: list[str] = []
         parsed_sheet_count = 0
@@ -117,6 +144,92 @@ class RouteMessageTableParser:
         if parsed_sheet_count == 0:
             raise RouteTableParseError("路由报文表缺少目标网段或 CAN ID 列")
         return tuple(records)
+
+    def _parse_flzcu_routing_sheet(
+        self, sheet: _Sheet, source: Path
+    ) -> tuple[RouteMessageRecord, ...]:
+        layout = self._find_flzcu_layout(sheet)
+        if layout is None:
+            raise RouteTableParseError(
+                f"Sheet {sheet.name!r} 缺少 Service Subscriber Data、"
+                "Service Subscriber Subnet、目标 Msg Name 或目标 Msg ID 表头"
+            )
+
+        records: list[RouteMessageRecord] = []
+        for row_number, values in sheet.rows:
+            if row_number <= layout.header_row:
+                continue
+            selected_targets = tuple(
+                target_network
+                for column, target_network in layout.target_columns
+                if values.get(column, "").strip()
+            )
+            if not selected_targets:
+                continue
+            can_raw = values.get(layout.can_id_column, "").strip()
+            message_name = values.get(layout.message_name_column, "").strip()
+            for target_network in selected_targets:
+                records.append(
+                    RouteMessageRecord(
+                        target_network_raw=target_network,
+                        can_id_raw=can_raw,
+                        can_id=parse_can_id(can_raw),
+                        message_name=message_name or None,
+                        source_file=source.name,
+                        sheet_name=sheet.name,
+                        row_number=row_number,
+                    )
+                )
+        return tuple(records)
+
+    def _find_flzcu_layout(self, sheet: _Sheet) -> _FlzcuRoutingLayout | None:
+        for group_row, group_values in sheet.rows[:20]:
+            subscriber_data_column = _unique_column(
+                group_values, "servicesubscriberdata"
+            )
+            subscriber_subnet_column = _unique_column(
+                group_values, "servicesubscribersubnet"
+            )
+            if subscriber_data_column is None or subscriber_subnet_column is None:
+                continue
+            if subscriber_data_column >= subscriber_subnet_column:
+                continue
+            target_end_column = min(
+                (
+                    column
+                    for column, value in group_values.items()
+                    if column > subscriber_subnet_column and value.strip()
+                ),
+                default=None,
+            )
+            if target_end_column is None:
+                continue
+            for header_row, values in sheet.rows:
+                if not group_row < header_row <= group_row + 10:
+                    continue
+                destination_values = {
+                    column: value
+                    for column, value in values.items()
+                    if subscriber_data_column <= column < subscriber_subnet_column
+                }
+                message_name_column = _unique_column(destination_values, "msgname")
+                can_id_column = _unique_column(destination_values, "msgid")
+                if message_name_column is None or can_id_column is None:
+                    continue
+                target_columns = tuple(
+                    (column, target_network)
+                    for column, value in values.items()
+                    if subscriber_subnet_column <= column < target_end_column
+                    if (target_network := flzcu_can_network_name(value)) is not None
+                )
+                if target_columns:
+                    return _FlzcuRoutingLayout(
+                        header_row=header_row,
+                        message_name_column=message_name_column,
+                        can_id_column=can_id_column,
+                        target_columns=target_columns,
+                    )
+        return None
 
     def _find_header(self, sheet: _Sheet) -> tuple[int, dict[str, int]] | None:
         for row_number, values in sheet.rows[:50]:
@@ -197,6 +310,28 @@ class RouteMessageTableParser:
 
 def normalize_header(value: str) -> str:
     return re.sub(r"[\s_\-:/（）()]+", "", value).casefold()
+
+
+def normalize_sheet_name(value: str) -> str:
+    return re.sub(r"\s+", "", value).casefold()
+
+
+def flzcu_can_network_name(value: str) -> str | None:
+    """Map a left-domain routing matrix header to the imported DBC network name."""
+
+    match = re.fullmatch(r"FL_(?:CANFD|CAN)_([A-Z0-9_]+)", value.strip(), re.IGNORECASE)
+    if match is None:
+        return None
+    return match.group(1).upper()
+
+
+def _unique_column(values: Mapping[int, str], expected: str) -> int | None:
+    matches = [
+        column
+        for column, value in values.items()
+        if normalize_header(value) == expected
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def normalize_network_name(value: str) -> str:

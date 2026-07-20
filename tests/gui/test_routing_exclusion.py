@@ -117,6 +117,104 @@ def test_xlsx_parser_recognizes_explicit_chinese_and_english_aliases(
     assert records[0].row_number == 2
 
 
+def _company_routing_sheet(*data_rows: list[object]) -> list[list[object]]:
+    return [
+        [
+            "Signal Name",
+            "Routing Type",
+            "Service Provider",
+            "",
+            "",
+            "Service Subscriber Data",
+            "",
+            "",
+            "Service Subscriber Subnet",
+            "",
+            "",
+            "项目",
+        ],
+        ["", "", "服务提供者", "", "", "服务订阅数据", "", "", "网络服务订阅者网段"],
+        [
+            "",
+            "",
+            "Subnet",
+            "Msg Name",
+            "Msg ID",
+            "Msg Name",
+            "Msg FDF",
+            "Msg ID",
+            "FL_CANFD_IC",
+            "FL_CAN_BD",
+            "FL_LIN_RLHS",
+            "项目",
+        ],
+        ["说明", "说明", "说明", "说明", "说明", "目标报文名称", "", "目标报文 ID"],
+        *data_rows,
+    ]
+
+
+def test_company_workbook_reads_only_flzcu_and_expands_can_target_matrix(
+    tmp_path: Path,
+) -> None:
+    flzcu_row = [
+        "SignalA",
+        "Signal",
+        "FL_CANFD_CH",
+        "ACU_3",
+        "0x021",
+        "FLZCU_3",
+        "StandardCAN_FD",
+        "0x460",
+        "√",
+        "√\nx",
+        "√",
+        "√",
+    ]
+    frzcu_row = [
+        "SignalB",
+        "Message",
+        "FR_CANFD_CH",
+        "FR_1",
+        "0x100",
+        "FRZCU_1",
+        "StandardCAN_FD",
+        "0x777",
+        "√",
+    ]
+    path = _xlsx(
+        tmp_path / "company-routes.xlsx",
+        {
+            "Cover": [["Communication Routing Table"]],
+            "Routing(FRZCU)": _company_routing_sheet(frzcu_row),
+            "Routing(FLZCU) ": _company_routing_sheet(flzcu_row),
+            "信号转义": [["Signal Name", "Description"]],
+        },
+    )
+
+    records = RouteMessageTableParser().parse(path)
+
+    assert [record.target_network_raw for record in records] == ["IC", "BD"]
+    assert [record.can_id for record in records] == [0x460, 0x460]
+    assert all(record.message_name == "FLZCU_3" for record in records)
+    assert all(record.sheet_name == "Routing(FLZCU) " for record in records)
+    assert all(record.row_number == 5 for record in records)
+
+
+def test_malformed_flzcu_template_does_not_fall_back_to_other_sheets(
+    tmp_path: Path,
+) -> None:
+    path = _xlsx(
+        tmp_path / "malformed-company-routes.xlsx",
+        {
+            "Routing(FLZCU)": [["Service Subscriber Data"]],
+            "Fallback": [["目标网段", "CAN ID"], ["IC", "0x460"]],
+        },
+    )
+
+    with pytest.raises(RouteTableParseError, match="Service Subscriber Subnet"):
+        RouteMessageTableParser().parse(path)
+
+
 @pytest.mark.parametrize("kind", ("missing_column", "corrupted"))
 def test_invalid_workbook_is_not_silently_treated_as_empty(
     tmp_path: Path, kind: str
