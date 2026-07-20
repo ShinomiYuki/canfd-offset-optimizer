@@ -16,9 +16,14 @@ from .contracts import (
     BatchOptimizationResult,
     ImportRecord,
     ImportSession,
+    InputKind,
     NetworkBatchResult,
     NetworkRunStatus,
     OffsetAssignmentRow,
+    RouteExclusionStatus,
+    RouteMatchRecord,
+    RouteMatchStatus,
+    RouteRecordIssue,
     WorkspaceInspection,
 )
 from .formatting import (
@@ -217,7 +222,9 @@ class NetworkDetailsTableModel(QAbstractTableModel):
         "network_id",
         "来源 DBC",
         "可优化",
-        "报文数量",
+        "基础可优化报文",
+        "路由排除",
+        "实际参与优化",
         "警告或不可优化原因",
     )
 
@@ -256,7 +263,17 @@ class NetworkDetailsTableModel(QAbstractTableModel):
             network.network_id,
             network.source_file,
             "是" if network.is_optimizable else "否",
-            str(network.message_count),
+            str(
+                network.message_count
+                if network.base_eligible_message_count is None
+                else network.base_eligible_message_count
+            ),
+            str(network.routing_excluded_count),
+            str(
+                network.message_count
+                if network.final_eligible_message_count is None
+                else network.final_eligible_message_count
+            ),
             reason or "—",
         )
         return values[index.column()]
@@ -316,8 +333,13 @@ class ImportDetailsTableModel(QAbstractTableModel):
             return str(record.original_path)
         if role != int(Qt.ItemDataRole.DisplayRole):
             return None
+        kind_label = (
+            "路由报文排除表"
+            if record.kind is InputKind.ROUTING_TABLE
+            else record.kind.value
+        )
         values = (
-            record.kind.value,
+            kind_label,
             record.status.value,
             str(record.original_path),
             record.workspace_relative_path.as_posix()
@@ -350,6 +372,139 @@ class ImportDetailsTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._session = session
         self.endResetModel()
+
+
+class RouteExclusionTableModel(QAbstractTableModel):
+    """Every routing workbook row with its exact matching audit."""
+
+    HEADERS: Final[tuple[str, ...]] = (
+        "目标网段",
+        "CAN ID",
+        "Excel 报文名",
+        "DBC 报文名",
+        "匹配状态",
+        "处理结果",
+        "Excel 来源文件",
+        "Sheet",
+        "行号",
+        "说明",
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: tuple[RouteMatchRecord, ...] = ()
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if not index.isValid() or not 0 <= index.row() < len(self._rows):
+            return None
+        record = self._rows[index.row()]
+        if role == int(Qt.ItemDataRole.UserRole):
+            return record
+        if role == int(Qt.ItemDataRole.ToolTipRole):
+            return record.note
+        if role != int(Qt.ItemDataRole.DisplayRole):
+            return None
+        status_labels = {
+            RouteMatchStatus.MATCHED: "已匹配",
+            RouteMatchStatus.NOT_FOUND: "未找到",
+            RouteMatchStatus.AMBIGUOUS: "匹配歧义",
+            RouteMatchStatus.INVALID_CAN_ID: "CAN ID 无效",
+        }
+        exclusion_labels = {
+            RouteExclusionStatus.EXCLUDED: "已排除",
+            RouteExclusionStatus.ALREADY_EXCLUDED: "重复记录，已排除",
+            RouteExclusionStatus.NOT_EXCLUDED: "未排除",
+        }
+        issue_text = "、".join(issue.value for issue in record.issues)
+        values = (
+            record.route.target_network_raw or "—",
+            record.route.can_id_raw or "—",
+            record.route.message_name or "—",
+            record.dbc_message_name or "—",
+            status_labels[record.match_status],
+            exclusion_labels[record.exclusion_status],
+            record.route.source_file,
+            record.route.sheet_name,
+            str(record.route.row_number),
+            "；".join(filter(None, (record.note, issue_text))) or "—",
+        )
+        return values[index.column()]
+
+    def headerData(  # noqa: N802
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if role == int(Qt.ItemDataRole.DisplayRole) and orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.HEADERS):
+                return self.HEADERS[section]
+        return None
+
+    def set_inspection(self, inspection: WorkspaceInspection | None) -> None:
+        self.beginResetModel()
+        self._rows = (
+            () if inspection is None else inspection.routing_exclusion.records
+        )
+        self.endResetModel()
+
+    def record_at(self, row: int) -> RouteMatchRecord:
+        return self._rows[row]
+
+
+class RouteExclusionFilterProxy(QSortFilterProxyModel):
+    """Named filters used by the routing details tab."""
+
+    def __init__(self, source: RouteExclusionTableModel) -> None:
+        super().__init__()
+        self._filter_name = "all"
+        self.setSourceModel(source)
+
+    def set_filter_name(self, value: str) -> None:
+        self._filter_name = value
+        if hasattr(self, "beginFilterChange") and hasattr(self, "endFilterChange"):
+            self.beginFilterChange()
+            self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+        else:
+            self.invalidateFilter()
+
+    def filterAcceptsRow(  # noqa: N802
+        self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex
+    ) -> bool:
+        del source_parent
+        source = cast(RouteExclusionTableModel, self.sourceModel())
+        record = source.record_at(source_row)
+        if self._filter_name == "excluded":
+            return record.match_status is RouteMatchStatus.MATCHED
+        if self._filter_name == "not_found":
+            return record.match_status in {
+                RouteMatchStatus.NOT_FOUND,
+                RouteMatchStatus.INVALID_CAN_ID,
+            }
+        if self._filter_name == "ambiguous":
+            return record.match_status is RouteMatchStatus.AMBIGUOUS
+        if self._filter_name == "name_mismatch":
+            return RouteRecordIssue.NAME_MISMATCH_WARNING in record.issues
+        if self._filter_name == "duplicate":
+            return any(
+                issue
+                in {
+                    RouteRecordIssue.DUPLICATE,
+                    RouteRecordIssue.DUPLICATE_CONFLICT_WARNING,
+                }
+                for issue in record.issues
+            )
+        return True
 
 
 class AssignmentTableModel(QAbstractTableModel):

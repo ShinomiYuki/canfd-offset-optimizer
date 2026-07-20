@@ -127,8 +127,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.quick_start_page, "快速开始")
         self.tabs.addTab(self.summary_panel, "结果概览")
         self.tabs.addTab(self.assignment_table, "Offset 修改")
-        self.tabs.addTab(self.load_chart, "负载曲线")
-        self.tabs.addTab(self.load_heatmap, "负载热力图")
+        self.tabs.addTab(self.load_chart, "可优化报文负载曲线")
+        self.tabs.addTab(self.load_heatmap, "可优化报文负载热力图")
         self.tabs.addTab(details_page, "运行日志与详情")
         splitter = QSplitter()
         splitter.addWidget(left)
@@ -370,6 +370,12 @@ class MainWindow(QMainWindow):
                 self._append_log(f"工程冲突：{error}")
             for warning in value.warnings:
                 self._append_log(f"警告：{warning}")
+            routing = value.routing_exclusion
+            self._append_log(
+                f"路由报文排除：表 {routing.table_count}，记录 {routing.record_count}，"
+                f"匹配并排除 {routing.matched_count}，未找到 {routing.not_found_count}，"
+                f"歧义 {routing.ambiguous_count}。"
+            )
         else:
             if not isinstance(value, BatchOptimizationResult):
                 self._on_failed(WorkerFailure("后端批量结果缺失或类型无效。", repr(value)))

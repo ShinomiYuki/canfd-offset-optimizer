@@ -30,6 +30,7 @@ from ..parsers.dbc_parser import parse_dbc
 from ..parsers.project_loader import LoadedProject, load_project
 from ..reporting.objective_mode_writer import load_statistics
 from ..timeline.slot_map import precompute_slot_map
+from ..timeline.slot_map import build_windows
 from ..timeline.state import SearchState
 from .contracts import (
     BackendAvailability,
@@ -55,6 +56,8 @@ from .contracts import (
     ProgressPhase,
     ProgressUpdate,
     RestartMode,
+    RouteMessageRecord,
+    RoutingExclusionReport,
     WeightMode,
     WorkspaceInspection,
 )
@@ -64,6 +67,7 @@ from .artifact_outputs import (
     write_load_curve_png,
     write_load_heatmap_png,
     write_network_log,
+    write_routing_exclusion_csv,
     write_run_config_json,
 )
 from .dbc_offset_writer import DbcOffsetReplacement, write_dbc_with_offsets
@@ -72,6 +76,11 @@ from .formatting import (
     export_batch_summary_csv,
 )
 from .workspace_io import DEFAULT_CONFIG_NOTE, WorkspaceImporter
+from .routing_exclusion import (
+    RouteMessageTableParser,
+    RouteTableParseError,
+    match_route_messages,
+)
 
 
 REQUIRED_ALLOWED_OFFSETS_US = OffsetSearchConfig().candidate_offsets_us
@@ -109,6 +118,11 @@ class RealBackend(WorkspaceImporter):
         arxml_records = tuple(
             record for record in unique_records if record.kind is InputKind.ARXML
         )
+        routing_records = tuple(
+            record
+            for record in unique_records
+            if record.kind is InputKind.ROUTING_TABLE
+        )
         missing = tuple(
             kind
             for kind, records in ((InputKind.DBC, dbc_records), (InputKind.CONFIG, config_records))
@@ -130,6 +144,9 @@ class RealBackend(WorkspaceImporter):
                 errors.append(f"ARXML 通道检查失败：{type(exc).__name__}: {exc}")
         display_counts: dict[str, int] = {}
         networks: list[NetworkSummary] = []
+        parsed_messages_by_network: dict[
+            str, tuple[tuple[int, str, bool], ...]
+        ] = {}
         total = max(1, len(dbc_records))
         for index, record in enumerate(
             sorted(dbc_records, key=lambda item: str(item.workspace_relative_path).casefold()),
@@ -155,6 +172,10 @@ class RealBackend(WorkspaceImporter):
                     FrameProtocol.CLASSIC_CAN
                     if parsed.messages[0].frame_protocol is CoreFrameProtocol.CLASSIC_CAN
                     else FrameProtocol.CAN_FD
+                )
+                parsed_messages_by_network[network_id] = tuple(
+                    (message.can_id, message.name, message.is_extended)
+                    for message in parsed.messages
                 )
             except CanfdOptimizerError as exc:
                 message_count = 0
@@ -216,10 +237,69 @@ class RealBackend(WorkspaceImporter):
                     overall_total=total,
                 )
             )
+        routing_report = RoutingExclusionReport(table_count=len(routing_records))
+        route_source_records: list[RouteMessageRecord] = []
+        route_parser = RouteMessageTableParser()
+        for record in routing_records:
+            assert record.workspace_relative_path is not None
+            path = session.session_directory / record.workspace_relative_path
+            try:
+                route_source_records.extend(route_parser.parse(path))
+            except RouteTableParseError as exc:
+                errors.append(
+                    f"路由报文排除表解析失败：{path.name}：{exc}"
+                )
+        if not any(error.startswith("路由报文排除表解析失败：") for error in errors):
+            routing_report = match_route_messages(
+                route_source_records,
+                {network.network_id: network.network_name for network in networks},
+                parsed_messages_by_network,
+                table_count=len(routing_records),
+            )
+            updated_networks: list[NetworkSummary] = []
+            for network in networks:
+                base_count = len(parsed_messages_by_network.get(network.network_id, ()))
+                excluded_count = len(
+                    routing_report.excluded_can_ids(network.network_id)
+                )
+                final_count = base_count - excluded_count
+                if network.is_optimizable and final_count == 0:
+                    updated_networks.append(
+                        replace(
+                            network,
+                            is_optimizable=False,
+                            message_count=0,
+                            available_weight_modes=(),
+                            automatic_weight_mode=None,
+                            unoptimizable_reason=(
+                                "跳过：所有可优化周期 TX 报文均为路由报文"
+                            ),
+                            base_eligible_message_count=base_count,
+                            routing_excluded_count=excluded_count,
+                            final_eligible_message_count=0,
+                        )
+                    )
+                else:
+                    updated_networks.append(
+                        replace(
+                            network,
+                            message_count=final_count,
+                            base_eligible_message_count=base_count,
+                            routing_excluded_count=excluded_count,
+                            final_eligible_message_count=final_count,
+                        )
+                    )
+            networks = updated_networks
         used_paths = {
             record.workspace_relative_path
             for record in unique_records
-            if record.kind in {InputKind.DBC, InputKind.CONFIG, InputKind.ARXML}
+            if record.kind
+            in {
+                InputKind.DBC,
+                InputKind.CONFIG,
+                InputKind.ARXML,
+                InputKind.ROUTING_TABLE,
+            }
         }
         updated_session = replace(
             session,
@@ -229,9 +309,14 @@ class RealBackend(WorkspaceImporter):
             ),
         )
         self._write_manifest(updated_session)
-        warnings = self._inspection_warnings(updated_session)
+        warnings = self._inspection_warnings(updated_session, routing_report)
         return WorkspaceInspection(
-            updated_session, tuple(networks), missing, warnings, tuple(errors)
+            updated_session,
+            tuple(networks),
+            missing,
+            warnings,
+            tuple(errors),
+            routing_report,
         )
 
     def optimize_all_networks(
@@ -281,6 +366,9 @@ class RealBackend(WorkspaceImporter):
                         error=network.unoptimizable_reason,
                         warnings=network.warnings,
                         logs=(f"核心资格判定跳过：{network.unoptimizable_reason}",),
+                        base_eligible_message_count=self._base_count(network),
+                        routing_excluded_count=network.routing_excluded_count,
+                        final_eligible_message_count=self._final_count(network),
                     )
                 )
                 self._emit_finished(progress_callback, network, index, total, started,
@@ -298,6 +386,9 @@ class RealBackend(WorkspaceImporter):
                         network.source_file, NetworkRunStatus.SUCCEEDED,
                         detail.weight_mode, request.mode, result=detail,
                         warnings=detail.warnings, logs=detail.logs,
+                        base_eligible_message_count=self._base_count(network),
+                        routing_excluded_count=network.routing_excluded_count,
+                        final_eligible_message_count=self._final_count(network),
                     )
                 )
                 status = NetworkRunStatus.SUCCEEDED
@@ -308,6 +399,9 @@ class RealBackend(WorkspaceImporter):
                         network.source_file, NetworkRunStatus.CANCELLED,
                         actual_weight, request.mode,
                         logs=("用户取消；核心未产生成功结果。",),
+                        base_eligible_message_count=self._base_count(network),
+                        routing_excluded_count=network.routing_excluded_count,
+                        final_eligible_message_count=self._final_count(network),
                     )
                 )
                 results.extend(self._cancelled_rows(networks[index:], request))
@@ -323,6 +417,9 @@ class RealBackend(WorkspaceImporter):
                         network.source_file, NetworkRunStatus.FAILED,
                         actual_weight, request.mode, error=message,
                         logs=(f"真实后端失败：{message}",),
+                        base_eligible_message_count=self._base_count(network),
+                        routing_excluded_count=network.routing_excluded_count,
+                        final_eligible_message_count=self._final_count(network),
                     )
                 )
                 status = NetworkRunStatus.FAILED
@@ -360,6 +457,7 @@ class RealBackend(WorkspaceImporter):
             objective_mode_override=core_mode,
             offset_search_override=request.offset_search,
         )
+        loaded = self._apply_routing_exclusions(loaded, request, network)
         loaded = self._apply_request_settings(loaded, request)
         initial_state = self._baseline_state(loaded)
         attempt_limit = loaded.config.optimization.restart_policy.attempt_limit
@@ -448,6 +546,10 @@ class RealBackend(WorkspaceImporter):
             startup_counts_after=self._copy_int_tuple(core_result.startup_slot_counts),
             logs=(
                 "数据源：core load_project + run_gcls",
+                "负载口径：可优化报文负载曲线（路由报文已在 GCLS 前排除）",
+                f"base_eligible_message_count={self._base_count(network)}",
+                f"routing_excluded_count={network.routing_excluded_count}",
+                f"final_eligible_message_count={self._final_count(network)}",
                 f"arxml_channel={channel_override or 'not_used'}",
                 f"weight_mode={actual_weight.value}",
                 f"offset_min_ms={request.offset_search.min_offset_ms}",
@@ -510,6 +612,9 @@ class RealBackend(WorkspaceImporter):
                 result=detail,
                 warnings=detail.warnings,
                 logs=detail.logs,
+                base_eligible_message_count=self._base_count(network),
+                routing_excluded_count=network.routing_excluded_count,
+                final_eligible_message_count=self._final_count(network),
             ),
             layout.logs / f"{stem}.log",
         )
@@ -566,6 +671,101 @@ class RealBackend(WorkspaceImporter):
         for message in baseline_messages:
             state.apply(message, message.allowed_offsets_us[0])
         return state
+
+    @staticmethod
+    def _base_count(network: NetworkSummary) -> int:
+        return (
+            network.message_count
+            if network.base_eligible_message_count is None
+            else network.base_eligible_message_count
+        )
+
+    @staticmethod
+    def _final_count(network: NetworkSummary) -> int:
+        return (
+            network.message_count
+            if network.final_eligible_message_count is None
+            else network.final_eligible_message_count
+        )
+
+    @classmethod
+    def _apply_routing_exclusions(
+        cls,
+        loaded: LoadedProject,
+        request: GuiBatchOptimizationRequest,
+        network: NetworkSummary,
+    ) -> LoadedProject:
+        excluded_ids = request.inspection.routing_exclusion.excluded_can_ids(
+            network.network_id
+        )
+        if not excluded_ids:
+            return loaded
+        remaining = tuple(
+            message
+            for message in loaded.network.messages
+            if message.can_id not in excluded_ids
+        )
+        expected = cls._final_count(network)
+        if len(remaining) != expected:
+            raise BackendError(
+                f"网段 {network.display_name} 路由排除计数不一致："
+                f"预期 {expected}，实际 {len(remaining)}"
+            )
+        if not remaining:
+            raise BackendError("所有可优化周期 TX 报文均为路由报文")
+        startup, steady, hyperperiod = build_windows(
+            remaining,
+            loaded.config.optimization.slot_width_us,
+            loaded.config.optimization.hyperperiod_us,
+            loaded.config.optimization.hyperperiod_cap_us,
+        )
+        routing_paths = tuple(
+            dict.fromkeys(
+                request.inspection.session.session_directory
+                / record.workspace_relative_path
+                for record in request.inspection.session.records_of_kind(
+                    InputKind.ROUTING_TABLE
+                )
+                if record.workspace_relative_path is not None
+                and record.status is not ImportRecordStatus.INVALID
+            )
+        )
+        warnings = tuple(
+            warning
+            for warning in loaded.network.warnings
+            if not warning.startswith("average load exceeds configured limit")
+        )
+        filtered_network = replace(
+            loaded.network,
+            messages=remaining,
+            startup_window=startup,
+            steady_window=steady,
+            hyperperiod_us=hyperperiod,
+            warnings=warnings
+            + (
+                f"routing_excluded_count={len(excluded_ids)}；"
+                "路由报文未进入 GCLS 与可优化报文负载曲线",
+            ),
+            input_files=loaded.network.input_files + routing_paths,
+        )
+        if (
+            filtered_network.weight_mode is CoreWeightMode.FRAME_TIME_US
+            and filtered_network.average_load
+            > loaded.config.model.average_load_limit
+        ):
+            filtered_network = replace(
+                filtered_network,
+                warnings=filtered_network.warnings
+                + (
+                    "average load exceeds configured limit and cannot be repaired "
+                    "by Offset optimization",
+                ),
+            )
+        return replace(
+            loaded,
+            network=filtered_network,
+            slot_map=precompute_slot_map(remaining, startup, steady),
+        )
 
     @staticmethod
     def _metrics(
@@ -646,6 +846,10 @@ class RealBackend(WorkspaceImporter):
         layout = create_output_layout(output_directory)
         export_batch_summary_csv(batch, layout.results / "networks_summary.csv")
         write_run_config_json(request, layout.results / "run_config.json")
+        write_routing_exclusion_csv(
+            request.inspection.routing_exclusion,
+            layout.results / "routing_exclusion_summary.csv",
+        )
         for item in rows:
             write_network_log(
                 item,
@@ -690,6 +894,9 @@ class RealBackend(WorkspaceImporter):
                  else NetworkRunStatus.CANCELLED),
                 RealBackend._network_weight(network, request), request.mode,
                 error=network.unoptimizable_reason if not network.is_optimizable else None,
+                base_eligible_message_count=RealBackend._base_count(network),
+                routing_excluded_count=network.routing_excluded_count,
+                final_eligible_message_count=RealBackend._final_count(network),
             )
             for network in networks
         ]
@@ -782,7 +989,9 @@ class RealBackend(WorkspaceImporter):
         return f"跳过：核心解析判定不可优化。详情：{text}"
 
     @staticmethod
-    def _inspection_warnings(session: ImportSession) -> tuple[str, ...]:
+    def _inspection_warnings(
+        session: ImportSession, routing: RoutingExclusionReport
+    ) -> tuple[str, ...]:
         warnings: list[str] = []
         if any(record.note == DEFAULT_CONFIG_NOTE for record in session.records):
             warnings.append(DEFAULT_CONFIG_NOTE)
@@ -792,4 +1001,24 @@ class RealBackend(WorkspaceImporter):
             warnings.append(f"有 {unrecognized} 个未识别文件；未交给核心解析器。")
         if invalid:
             warnings.append(f"有 {invalid} 个输入无效或无法读取。")
+        if routing.not_found_count:
+            warnings.append(
+                f"路由报文表有 {routing.not_found_count} 条记录未找到匹配报文。"
+            )
+        if routing.ambiguous_count:
+            warnings.append(
+                f"路由报文表有 {routing.ambiguous_count} 条记录匹配歧义，未执行排除。"
+            )
+        if routing.invalid_can_id_count:
+            warnings.append(
+                f"路由报文表有 {routing.invalid_can_id_count} 条记录的 CAN ID 无效。"
+            )
+        conflict_count = sum(
+            "duplicate_conflict_warning" in {issue.value for issue in record.issues}
+            for record in routing.records
+        )
+        if conflict_count:
+            warnings.append(
+                f"路由报文表有 {conflict_count} 条重复记录的辅助信息冲突。"
+            )
         return tuple(warnings)

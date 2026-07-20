@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import csv
 import json
 from pathlib import Path
 import struct
@@ -14,6 +15,7 @@ from .contracts import (
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
     NetworkBatchResult,
+    RoutingExclusionReport,
 )
 from .load_presentation import (
     CONGESTION_COLORS,
@@ -124,16 +126,76 @@ def create_output_layout(root: Path) -> OutputLayout:
 
 
 def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> Path:
+    routing = request.inspection.routing_exclusion
     payload = {
         "mode": request.mode.value,
         "classic_can_weight": request.classic_can_weight.value,
         "can_fd_weight": request.can_fd_weight.value,
         "offset_search": request.offset_search.as_metadata(),
+        "routing_table_count": routing.table_count,
+        "routing_record_count": routing.record_count,
+        "routing_matched_count": routing.matched_count,
+        "routing_not_found_count": routing.not_found_count,
+        "routing_ambiguous_count": routing.ambiguous_count,
+        "routing_duplicate_count": routing.duplicate_count,
+        "routing_excluded_message_count": routing.excluded_message_count,
+        "final_optimized_message_count": (
+            request.inspection.final_eligible_message_count
+        ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    return path
+
+
+def write_routing_exclusion_csv(
+    report: RoutingExclusionReport, path: Path
+) -> Path:
+    """Write every source row, including unmatched and duplicate audit rows."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(
+            (
+                "target_network",
+                "target_network_id",
+                "can_id",
+                "can_id_raw",
+                "excel_message_name",
+                "dbc_message_name",
+                "match_status",
+                "exclusion_status",
+                "excel_source",
+                "sheet_name",
+                "row_number",
+                "note",
+            )
+        )
+        for record in report.records:
+            issues = "、".join(issue.value for issue in record.issues)
+            writer.writerow(
+                (
+                    record.route.target_network_raw,
+                    record.target_network_id or "",
+                    (
+                        f"0x{record.route.can_id:X}"
+                        if record.route.can_id is not None
+                        else ""
+                    ),
+                    record.route.can_id_raw,
+                    record.route.message_name or "",
+                    record.dbc_message_name or "",
+                    record.match_status.value,
+                    record.exclusion_status.value,
+                    record.route.source_file,
+                    record.route.sheet_name,
+                    record.route.row_number,
+                    "；".join(filter(None, (record.note, issues))),
+                )
+            )
     return path
 
 
@@ -222,6 +284,9 @@ def write_network_log(item: NetworkBatchResult, path: Path) -> Path:
         f"status={item.status.value}",
         f"weight_mode={item.weight_mode.value}",
         f"objective_mode={item.mode.value}",
+        f"base_eligible_message_count={item.base_eligible_message_count}",
+        f"routing_excluded_count={item.routing_excluded_count}",
+        f"final_eligible_message_count={item.final_eligible_message_count}",
     )
     content = list(lines)
     if item.result:

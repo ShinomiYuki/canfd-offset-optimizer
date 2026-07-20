@@ -77,11 +77,13 @@ class WorkspaceImporter:
         ".yaml": InputKind.CONFIG,
         ".yml": InputKind.CONFIG,
         ".arxml": InputKind.ARXML,
+        ".xlsx": InputKind.ROUTING_TABLE,
     }
     _CATEGORY_DIRECTORIES = {
         InputKind.DBC: "dbc",
         InputKind.CONFIG: "config",
         InputKind.ARXML: "arxml",
+        InputKind.ROUTING_TABLE: "routing",
         InputKind.OTHER_SUPPORTED: "other",
         InputKind.UNRECOGNIZED: "unrecognized",
     }

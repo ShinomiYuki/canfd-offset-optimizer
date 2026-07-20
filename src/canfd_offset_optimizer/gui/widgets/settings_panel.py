@@ -44,6 +44,10 @@ class SettingsPanel(QGroupBox):
 
         self.networks_label = QLabel("已发现网段：0 个")
         self.networks_label.setWordWrap(True)
+        self.messages_label = QLabel(
+            "基础可优化报文：0 / 路由排除：0 / 实际参与优化：0"
+        )
+        self.messages_label.setWordWrap(True)
         self.details_button = QPushButton("查看详情")
         self.details_button.setEnabled(False)
         network_summary = QWidget()
@@ -99,6 +103,7 @@ class SettingsPanel(QGroupBox):
         basic = QFormLayout()
         basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         basic.addRow(network_summary)
+        basic.addRow(self.messages_label)
         basic.addRow("模式：", self.mode_combo)
         basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
         basic.addRow("CAN FD 权重：", self.can_fd_weight_combo)
@@ -194,6 +199,11 @@ class SettingsPanel(QGroupBox):
         self.networks_label.setText(
             f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
         )
+        self.messages_label.setText(
+            f"基础可优化报文：{inspection.base_eligible_message_count} / "
+            f"路由排除：{inspection.routing_excluded_message_count} / "
+            f"实际参与优化：{inspection.final_eligible_message_count}"
+        )
         self.details_button.setEnabled(True)
         has_classic = any(
             network.frame_protocol is FrameProtocol.CLASSIC_CAN
@@ -236,6 +246,9 @@ class SettingsPanel(QGroupBox):
     def clear_inspection(self) -> None:
         self._inspection = None
         self.networks_label.setText("已发现网段：0 个")
+        self.messages_label.setText(
+            "基础可优化报文：0 / 路由排除：0 / 实际参与优化：0"
+        )
         self.details_button.setEnabled(False)
         self.can_fd_weight_combo.clear()
 

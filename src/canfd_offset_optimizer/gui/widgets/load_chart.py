@@ -199,7 +199,7 @@ class LoadChart(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
-        self.chart_title_label = QLabel("负载曲线：无结果")
+        self.chart_title_label = QLabel("可优化报文负载曲线：无结果")
         self.weight_basis_label = QLabel("权重口径：—")
         self.current_network_id: str | None = None
         self.window_combo = QComboBox()
@@ -263,7 +263,7 @@ class LoadChart(QWidget):
         if display_name:
             self.current_network_label.setText(f"当前网段：{display_name}（{message}）")
         self.current_network_label.setToolTip("")
-        self.chart_title_label.setText("负载曲线：无成功结果")
+        self.chart_title_label.setText("可优化报文负载曲线：无成功结果")
         self.weight_basis_label.setText("权重口径：—")
         self._result = None
         self.canvas.set_empty_message(message)
@@ -286,7 +286,7 @@ class LoadChart(QWidget):
             display_duration_ms = self._selected_display_duration_ms()
             repeat_count = steady_repeat_count(display_duration_ms)
             self.chart_title_label.setText(
-                f"{self._result.display_name} / 稳态负载，"
+                f"{self._result.display_name} / 可优化报文稳态负载，"
                 f"{STEADY_HYPERPERIOD_MS} ms 超周期重复展示 {repeat_count} 次 / "
                 f"{self._result.source_file}"
             )

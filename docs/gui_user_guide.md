@@ -33,7 +33,17 @@ user_input/<timestamp>_<project>/
 原文件不被修改。`import_manifest.json` 记录原始绝对路径、工作区相对路径、类型、
 大小、SHA-256、导入时间、去重/冲突状态和解析使用状态。
 
-至少需要一个 DBC。YAML/YML 项目配置和 ARXML 均可选：
+至少需要一个 DBC。YAML/YML 项目配置、ARXML 和路由报文排除表均可选：
+
+- `.xlsx` 路由报文排除表与其他文件一起拖入统一导入区，不提供独立路径输入框；
+- 仓库当前没有公司真实 Excel 样例，因此解析器使用明确别名映射而不是模糊猜测：目标网段支持
+  `目标网段`、`目标网络`、`目标总线`、`target_network`、`destination_network`、`target bus`；
+  CAN ID 支持 `CAN ID`、`报文ID`、`消息ID`、`帧ID`、`message_id`、`identifier`；可选报文名
+  支持 `报文名`、`报文名称`、`消息名`、`消息名称`、`message_name`；
+- 路由表按“目标网段 + CAN ID”匹配。目标网段通过当前工程的 `network_name` 精确映射为稳定
+  `network_id`，CAN ID 支持十六进制 `0x123`、`123h` 和十进制 `291`；报文名只用于审计；
+- 未提供路由表时排除数为 0，流程与原来相同；提供的 `.xlsx` 损坏或缺少目标网段/CAN ID
+  列时会明确阻止运行，不会假装成 0 条；单条未找到、歧义或无效 CAN ID 会记录诊断并继续；
 
 - 用户没有提供 YAML/YML 时，导入器自动把程序内置的 `default_project.yaml` 复制为本次
   `user_input/<session>/config/project.yaml`。内置文件内容与仓库
@@ -61,9 +71,11 @@ user_input/<timestamp>_<project>/
 
 ## 资格判定与批量状态
 
-资格由核心 DBC parser 决定，只接收周期 CAN FD TX 报文。每个 DBC 都会在工程汇总中
-保留一行：可优化网段进入 GCLS；经典 CAN、无周期 CAN FD TX 或其他核心解析不支持的
-网段标记为 `skipped`，并显示核心错误详情。
+基础资格由核心 DBC parser 决定。路由表只会从这批原本符合资格的周期 TX 报文中执行排除，
+匹配成功的 `routing_excluded` 报文在创建搜索状态和调用 GCLS 前即被移除。每个 DBC 都会在工程汇总中
+保留一行：可优化的 CAN FD 或 Classic CAN 网段进入 GCLS；没有可优化周期 TX、同一物理
+网段混合两种协议、全部基础资格报文均被路由排除或其他核心解析不支持的网段标记为
+`skipped`，并显示明确原因。
 
 `skipped` 网段没有 `GuiOptimizationResult`、指标、Offset 表、负载曲线或成功网段目录。
 单网段失败不伪装成功，后续网段继续处理；工程汇总分别统计 succeeded、failed、skipped
@@ -96,13 +108,17 @@ user_output/<timestamp>_<project>_real/
 │   └── <network>_heatmap.png
 ├── results/
 │   ├── networks_summary.csv
+│   ├── run_config.json
+│   ├── routing_exclusion_summary.csv
 │   └── <network>/offsets.csv
 └── dbc/
     └── <原 DBC 文件名>.dbc
 ```
 
 `results/networks_summary.csv` 汇总所有网段（包括失败、跳过和取消）；成功网段的 Offset 明细放在
-各自子目录。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
+各自子目录。`routing_exclusion_summary.csv` 保留原始目标网段、规范化 `network_id`、规范化及原始 CAN ID、Excel/DBC 报文名、
+匹配状态、排除状态、来源文件、Sheet、行号和诊断。`run_config.json` 记录路由表、记录、匹配、
+未找到、歧义、重复、实际排除和最终参与优化数量。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
 0～2000 ms 的重复稳态负载曲线，以及不重复的单个稳态窗口拥挤热力图。
 
 `dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。写入器只在已有
@@ -111,11 +127,15 @@ user_output/<timestamp>_<project>_real/
 同时存在 `GenMsgStartDelayTime` 和 `GenMsgDelayTime` 时只覆盖前者，后者保持不变。参与优化的报文
 缺少原 Offset、同一优先属性重复或无法精确定位时会失败关闭，不插入字段、不猜测、不整文件重排。
 
+Offset 表默认只包含真正进入 GCLS 的报文。路由排除报文没有 `optimized_offset`，不会进入
+assignment、“只看已修改报文”或 DBC Offset replacement；其原始 DBC 内容在输出副本中保持不变。
 Offset 表中的报文名、CAN ID、周期和原始 Offset 来自核心加载模型；优化 Offset、指标、
 Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult`。切换网段时 GUI 先清空
 旧曲线，再绑定当前 DTO，并在标题显示网段、窗口类型和源 DBC。失败、跳过和无选择状态均不
 复用上一次成功曲线。
 
+负载页明确命名为“可优化报文负载曲线”。当前核心负载模型统计参与 Offset 优化的报文集合，
+不存在不可调度背景负载层；因此路由报文从原始和优化后两组负载中一致排除，GUI 不自行重算。
 稳态曲线仍以核心返回的单个 500 ms 超周期、5 ms 时隙数组为唯一数据源。GUI 默认把该序列
 重复展示 4 次，在固定宽度画布中显示 0～2000 ms；可切换 500、1000、2000 或 5000 ms，
 不会插值、修改 DTO 或重新运行优化。标题会明确标注超周期重复次数。启动窗口始终只显示核心

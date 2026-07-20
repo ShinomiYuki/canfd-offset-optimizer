@@ -19,6 +19,7 @@ class InputKind(str, Enum):
     DBC = "dbc"
     CONFIG = "config"
     ARXML = "arxml"
+    ROUTING_TABLE = "routing_table"
     OTHER_SUPPORTED = "other_supported"
     UNRECOGNIZED = "unrecognized"
     INVALID = "invalid"
@@ -47,6 +48,25 @@ class WeightMode(str, Enum):
 class FrameProtocol(str, Enum):
     CLASSIC_CAN = "classic_can"
     CAN_FD = "can_fd"
+
+
+class RouteMatchStatus(str, Enum):
+    MATCHED = "matched"
+    NOT_FOUND = "not_found"
+    AMBIGUOUS = "ambiguous"
+    INVALID_CAN_ID = "invalid_can_id"
+
+
+class RouteExclusionStatus(str, Enum):
+    EXCLUDED = "routing_excluded"
+    ALREADY_EXCLUDED = "duplicate_routing_excluded"
+    NOT_EXCLUDED = "not_excluded"
+
+
+class RouteRecordIssue(str, Enum):
+    NAME_MISMATCH_WARNING = "name_mismatch_warning"
+    DUPLICATE = "duplicate"
+    DUPLICATE_CONFLICT_WARNING = "duplicate_conflict_warning"
 
 
 CLASSIC_WEIGHT_MODEL = "payload_bytes_approximation"
@@ -149,6 +169,142 @@ class ImportSession:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteMessageKey:
+    """Stable routing exclusion key: imported network identity plus CAN ID."""
+
+    target_network_id: str
+    can_id: int
+
+    def __post_init__(self) -> None:
+        if not self.target_network_id.strip():
+            raise ValueError("routing target_network_id must not be empty")
+        if not 0 <= self.can_id <= 0x1FFFFFFF:
+            raise ValueError("routing CAN ID is outside the CAN identifier range")
+
+
+@dataclass(frozen=True, slots=True)
+class RouteMessageRecord:
+    """One normalized source row read from a routing exclusion workbook."""
+
+    target_network_raw: str
+    can_id_raw: str
+    can_id: int | None
+    message_name: str | None
+    source_file: str
+    sheet_name: str
+    row_number: int
+    target_network_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.source_file.strip() or not self.sheet_name.strip():
+            raise ValueError("routing source file and sheet must not be empty")
+        if self.row_number <= 0:
+            raise ValueError("routing row_number must be positive")
+        if self.can_id is not None and not 0 <= self.can_id <= 0x1FFFFFFF:
+            raise ValueError("routing CAN ID is outside the CAN identifier range")
+        if self.target_network_id is not None and not self.target_network_id.strip():
+            raise ValueError("routing target_network_id must not be blank")
+
+
+@dataclass(frozen=True, slots=True)
+class RouteMatchRecord:
+    """Auditable result of matching one Excel row against parsed DBC messages."""
+
+    route: RouteMessageRecord
+    target_network_id: str | None
+    dbc_message_name: str | None
+    match_status: RouteMatchStatus
+    exclusion_status: RouteExclusionStatus
+    issues: tuple[RouteRecordIssue, ...] = ()
+    note: str = ""
+    dbc_is_extended: bool | None = None
+
+    def __post_init__(self) -> None:
+        if len(set(self.issues)) != len(self.issues):
+            raise ValueError("routing record issues must be unique")
+        if self.match_status is RouteMatchStatus.MATCHED:
+            if self.target_network_id is None or self.route.can_id is None:
+                raise ValueError("matched routing row requires a normalized key")
+            if self.dbc_message_name is None:
+                raise ValueError("matched routing row requires a DBC message")
+            if self.exclusion_status is RouteExclusionStatus.NOT_EXCLUDED:
+                raise ValueError("matched routing row must describe its exclusion")
+        elif self.exclusion_status is not RouteExclusionStatus.NOT_EXCLUDED:
+            raise ValueError("unmatched routing row must not exclude a message")
+
+    @property
+    def key(self) -> RouteMessageKey | None:
+        if self.target_network_id is None or self.route.can_id is None:
+            return None
+        return RouteMessageKey(self.target_network_id, self.route.can_id)
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingExclusionReport:
+    """Project-level immutable routing exclusion audit."""
+
+    table_count: int = 0
+    records: tuple[RouteMatchRecord, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.table_count < 0:
+            raise ValueError("routing table_count must be non-negative")
+
+    @property
+    def record_count(self) -> int:
+        return len(self.records)
+
+    @property
+    def matched_count(self) -> int:
+        return sum(
+            record.match_status is RouteMatchStatus.MATCHED
+            for record in self.records
+        )
+
+    @property
+    def not_found_count(self) -> int:
+        return sum(
+            record.match_status is RouteMatchStatus.NOT_FOUND for record in self.records
+        )
+
+    @property
+    def ambiguous_count(self) -> int:
+        return sum(
+            record.match_status is RouteMatchStatus.AMBIGUOUS for record in self.records
+        )
+
+    @property
+    def invalid_can_id_count(self) -> int:
+        return sum(
+            record.match_status is RouteMatchStatus.INVALID_CAN_ID
+            for record in self.records
+        )
+
+    @property
+    def duplicate_count(self) -> int:
+        return sum(
+            RouteRecordIssue.DUPLICATE in record.issues for record in self.records
+        )
+
+    @property
+    def excluded_keys(self) -> frozenset[RouteMessageKey]:
+        return frozenset(
+            record.key
+            for record in self.records
+            if record.match_status is RouteMatchStatus.MATCHED and record.key is not None
+        )
+
+    @property
+    def excluded_message_count(self) -> int:
+        return len(self.excluded_keys)
+
+    def excluded_can_ids(self, network_id: str) -> frozenset[int]:
+        return frozenset(
+            key.can_id for key in self.excluded_keys if key.target_network_id == network_id
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class NetworkSummary:
     """One discovered network with stable identity and explicit source metadata."""
 
@@ -163,6 +319,9 @@ class NetworkSummary:
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
     automatic_weight_mode: WeightMode | None = None
     classic_weight_model: str | None = None
+    base_eligible_message_count: int | None = None
+    routing_excluded_count: int = 0
+    final_eligible_message_count: int | None = None
     warnings: tuple[str, ...] = ()
     unoptimizable_reason: str | None = None
 
@@ -174,6 +333,22 @@ class NetworkSummary:
             raise ValueError("network source_workspace_path must be relative")
         if self.message_count < 0:
             raise ValueError("network message_count must be non-negative")
+        base_count = (
+            self.message_count
+            if self.base_eligible_message_count is None
+            else self.base_eligible_message_count
+        )
+        final_count = (
+            self.message_count
+            if self.final_eligible_message_count is None
+            else self.final_eligible_message_count
+        )
+        if min(base_count, self.routing_excluded_count, final_count) < 0:
+            raise ValueError("network routing eligibility counts must be non-negative")
+        if base_count - self.routing_excluded_count != final_count:
+            raise ValueError("network routing eligibility counts are inconsistent")
+        if self.message_count != final_count:
+            raise ValueError("network message_count must equal final eligible count")
         if self.is_optimizable and self.message_count <= 0:
             raise ValueError("optimizable network message_count must be positive")
         if self.is_optimizable and not self.available_weight_modes:
@@ -216,6 +391,9 @@ class WorkspaceInspection:
     missing_required: tuple[InputKind, ...] = ()
     warnings: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
+    routing_exclusion: RoutingExclusionReport = field(
+        default_factory=RoutingExclusionReport
+    )
 
     def __post_init__(self) -> None:
         network_ids = tuple(network.network_id for network in self.networks)
@@ -231,6 +409,28 @@ class WorkspaceInspection:
     @property
     def optimizable_networks(self) -> tuple[NetworkSummary, ...]:
         return tuple(network for network in self.networks if network.is_optimizable)
+
+    @property
+    def base_eligible_message_count(self) -> int:
+        return sum(
+            network.message_count
+            if network.base_eligible_message_count is None
+            else network.base_eligible_message_count
+            for network in self.networks
+        )
+
+    @property
+    def routing_excluded_message_count(self) -> int:
+        return sum(network.routing_excluded_count for network in self.networks)
+
+    @property
+    def final_eligible_message_count(self) -> int:
+        return sum(
+            network.message_count
+            if network.final_eligible_message_count is None
+            else network.final_eligible_message_count
+            for network in self.networks
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,6 +728,9 @@ class NetworkBatchResult:
     error: str | None = None
     warnings: tuple[str, ...] = ()
     logs: tuple[str, ...] = ()
+    base_eligible_message_count: int = 0
+    routing_excluded_count: int = 0
+    final_eligible_message_count: int = 0
 
     def __post_init__(self) -> None:
         identity = (self.network_id, self.network_name, self.display_name, self.source_file)
@@ -545,6 +748,26 @@ class NetworkBatchResult:
             or self.result.source_file != self.source_file
         ):
             raise ValueError("batch row and detailed result network identity must match")
+        if (
+            self.result is not None
+            and self.base_eligible_message_count == 0
+            and self.routing_excluded_count == 0
+            and self.final_eligible_message_count == 0
+        ):
+            inferred = len(self.result.assignments)
+            object.__setattr__(self, "base_eligible_message_count", inferred)
+            object.__setattr__(self, "final_eligible_message_count", inferred)
+        counts = (
+            self.base_eligible_message_count,
+            self.routing_excluded_count,
+            self.final_eligible_message_count,
+        )
+        if min(counts) < 0:
+            raise ValueError("batch routing eligibility counts must be non-negative")
+        if self.base_eligible_message_count - self.routing_excluded_count != (
+            self.final_eligible_message_count
+        ):
+            raise ValueError("batch routing eligibility counts are inconsistent")
 
     @property
     def zss_improvement(self) -> int | None:

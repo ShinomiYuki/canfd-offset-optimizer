@@ -668,7 +668,7 @@ def test_ic_and_su_selection_bind_fixed_assignments_curves_and_titles(
     assert window.load_chart.canvas.before_series == ic.original_steady_load * 4
     assert window.load_chart.canvas.before_series is not ic.original_steady_load
     assert (
-        "IC / 稳态负载，500 ms 超周期重复展示 4 次 / IC.dbc"
+        "IC / 可优化报文稳态负载，500 ms 超周期重复展示 4 次 / IC.dbc"
         == window.load_chart.chart_title_label.text()
     )
 
@@ -679,7 +679,7 @@ def test_ic_and_su_selection_bind_fixed_assignments_curves_and_titles(
     assert window.load_chart.canvas.before_series is not su.original_steady_load
     assert window.load_chart.canvas.before_series is not ic.original_steady_load
     assert (
-        "SU / 稳态负载，500 ms 超周期重复展示 4 次 / SU.dbc"
+        "SU / 可优化报文稳态负载，500 ms 超周期重复展示 4 次 / SU.dbc"
         == window.load_chart.chart_title_label.text()
     )
 

@@ -24,7 +24,11 @@ from ..contracts import (
     InputKind,
     WorkspaceInspection,
 )
-from ..view_models import ImportDetailsTableModel, NetworkDetailsTableModel
+from ..view_models import (
+    ImportDetailsTableModel,
+    NetworkDetailsTableModel,
+    RouteExclusionTableModel,
+)
 from .project_details_dialog import ProjectDetailsDialog
 
 
@@ -69,6 +73,7 @@ class InputPanel(QGroupBox):
         InputKind.DBC: "DBC",
         InputKind.CONFIG: "项目配置",
         InputKind.ARXML: "ARXML",
+        InputKind.ROUTING_TABLE: "路由报文排除表",
         InputKind.OTHER_SUPPORTED: "其他支持输入",
         InputKind.UNRECOGNIZED: "无法识别",
         InputKind.INVALID: "无效/无法读取",
@@ -85,8 +90,12 @@ class InputPanel(QGroupBox):
         self._has_session = False
         self.network_details_model = NetworkDetailsTableModel()
         self.import_details_model = ImportDetailsTableModel()
+        self.routing_details_model = RouteExclusionTableModel()
         self.details_dialog = ProjectDetailsDialog(
-            self.network_details_model, self.import_details_model, self
+            self.network_details_model,
+            self.import_details_model,
+            self.routing_details_model,
+            self,
         )
         self.drop_area = ImportDropArea()
         self.add_button = QPushButton("添加文件或文件夹")
@@ -102,6 +111,8 @@ class InputPanel(QGroupBox):
         self.required_label = QLabel("缺少必需输入：DBC")
         self.required_label.setWordWrap(True)
         self.optional_label = QLabel("可选输入：项目配置（缺省使用内置默认）、未发现 ARXML")
+        self.routing_label = QLabel("路由报文表：未提供")
+        self.routing_label.setWordWrap(True)
         self.networks_label = QLabel("已发现网段：0")
         self.networks_label.setWordWrap(True)
         self.count_labels: dict[InputKind, QLabel] = {}
@@ -112,8 +123,9 @@ class InputPanel(QGroupBox):
             counts.addWidget(label, index // 3, index % 3)
         self.duplicate_label = QLabel("重复：0")
         self.conflict_label = QLabel("冲突：0")
-        counts.addWidget(self.duplicate_label, 2, 0)
-        counts.addWidget(self.conflict_label, 2, 1)
+        status_row = (len(InputKind) + 2) // 3
+        counts.addWidget(self.duplicate_label, status_row, 0)
+        counts.addWidget(self.conflict_label, status_row, 1)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.drop_area)
@@ -122,6 +134,7 @@ class InputPanel(QGroupBox):
         layout.addLayout(counts)
         layout.addWidget(self.required_label)
         layout.addWidget(self.optional_label)
+        layout.addWidget(self.routing_label)
         layout.addWidget(self.networks_label)
 
         self.drop_area.paths_dropped.connect(self.add_sources)
@@ -140,7 +153,10 @@ class InputPanel(QGroupBox):
         self.clear_button.setEnabled(True)
         for kind, label in self.count_labels.items():
             count = sum(record.kind is kind for record in session.records)
-            label.setText(f"{self._KIND_LABELS[kind]}：{count}")
+            if kind is InputKind.ROUTING_TABLE and count == 0:
+                label.setText("路由报文表：未提供")
+            else:
+                label.setText(f"{self._KIND_LABELS[kind]}：{count}")
         duplicates = sum(
             record.status is ImportRecordStatus.DUPLICATE for record in session.records
         )
@@ -153,6 +169,7 @@ class InputPanel(QGroupBox):
     def set_inspection(self, inspection: WorkspaceInspection) -> None:
         self.set_session(inspection.session)
         self.network_details_model.set_inspection(inspection)
+        self.routing_details_model.set_inspection(inspection)
         missing = [self._KIND_LABELS[kind] for kind in inspection.missing_required]
         if missing:
             self.required_label.setText(f"缺少必需输入：{'、'.join(missing)}")
@@ -164,6 +181,15 @@ class InputPanel(QGroupBox):
             self.required_label.setText("必需输入齐全")
         has_arxml = bool(inspection.session.records_of_kind(InputKind.ARXML))
         self.optional_label.setText("可选输入：已发现 ARXML" if has_arxml else "可选输入：未发现 ARXML")
+        routing = inspection.routing_exclusion
+        if routing.table_count:
+            self.routing_label.setText(
+                f"路由记录：{routing.record_count} / 已匹配：{routing.matched_count} / "
+                f"未匹配：{routing.not_found_count + routing.invalid_can_id_count} / "
+                f"存在歧义：{routing.ambiguous_count}"
+            )
+        else:
+            self.routing_label.setText("路由报文表：未提供")
         discovered = len(inspection.networks)
         optimizable = len(inspection.optimizable_networks)
         self.networks_label.setText(
@@ -174,11 +200,13 @@ class InputPanel(QGroupBox):
         self._has_session = False
         self.import_details_model.set_session(None)
         self.network_details_model.set_inspection(None)
+        self.routing_details_model.set_inspection(None)
         self.details_dialog.hide()
         self.session_label.setText("尚未导入工程")
         self.session_label.setToolTip("")
         self.required_label.setText("缺少必需输入：DBC")
         self.optional_label.setText("可选输入：项目配置（缺省使用内置默认）、未发现 ARXML")
+        self.routing_label.setText("路由报文表：未提供")
         self.networks_label.setText("已发现网段：0")
         for kind, label in self.count_labels.items():
             label.setText(f"{self._KIND_LABELS[kind]}：0")

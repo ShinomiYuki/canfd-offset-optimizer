@@ -72,17 +72,18 @@ def test_main_window_uses_count_summary_and_shared_live_details_models(
         "Classic CAN：固定为 Payload 长度近似（payload_bytes）\n"
         "CAN FD：使用批量优化设置中的 CAN FD 权重"
     )
-    assert dialog.tabs.count() == 2
+    assert dialog.tabs.count() == 3
     assert [dialog.tabs.tabText(index) for index in range(2)] == [
         "网段详情",
         "导入文件详情",
     ]
+    assert dialog.tabs.tabText(2) == "路由报文排除"
     assert dialog.network_table.model() is window.input_panel.network_details_model
     assert dialog.import_table.model() is window.input_panel.import_details_model
     assert dialog.network_table.model().rowCount() == 3
     assert window.import_session is not None
     assert dialog.import_table.model().rowCount() == len(window.import_session.records)
-    assert dialog.network_table.model().columnCount() == 7
+    assert dialog.network_table.model().columnCount() == 9
     assert dialog.import_table.model().columnCount() == 6
     assert dialog.import_table.model().index(0, 4).data() != "—"
     dialog.hide()
@@ -204,7 +205,7 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     assert window.load_chart.canvas.before_series == gl.result.original_steady_load * 4
     assert window.load_chart.canvas.after_series == gl.result.optimized_steady_load * 4
     assert window.load_chart.canvas.before_series is not gl.result.original_steady_load
-    assert "GL / 稳态负载，500 ms 超周期重复展示 4 次" in (
+    assert "GL / 可优化报文稳态负载，500 ms 超周期重复展示 4 次" in (
         window.load_chart.chart_title_label.text()
     )
     assert gl.network_id in window.log_view.toPlainText()
@@ -219,7 +220,7 @@ def test_selection_after_sort_and_filter_drives_all_details_by_network_id(
     assert window.load_chart.canvas.after_series == su.result.optimized_steady_load * 4
     assert window.load_chart.canvas.before_series is not su.result.original_steady_load
     assert window.load_chart.canvas.before_series is not gl.result.original_steady_load
-    assert "SU / 稳态负载，500 ms 超周期重复展示 4 次" in (
+    assert "SU / 可优化报文稳态负载，500 ms 超周期重复展示 4 次" in (
         window.load_chart.chart_title_label.text()
     )
     assert su.network_id in window.log_view.toPlainText()
@@ -255,7 +256,7 @@ def test_failed_selection_clears_success_data_and_no_selection_has_placeholder(
     assert window.assignment_table.model.rowCount() == 0
     assert window.load_chart.canvas.before_series == ()
     assert window.load_chart.canvas.after_series == ()
-    assert window.load_chart.chart_title_label.text() == "负载曲线：无成功结果"
+    assert window.load_chart.chart_title_label.text() == "可优化报文负载曲线：无成功结果"
     assert window.assignment_table.current_network_id == su.network_id
     assert window.load_chart.current_network_id == su.network_id
     assert "模拟网段 SU 优化失败" in window.log_view.toPlainText()

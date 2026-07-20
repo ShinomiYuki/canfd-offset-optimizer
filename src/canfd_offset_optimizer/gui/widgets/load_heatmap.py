@@ -188,7 +188,7 @@ class LoadHeatmap(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.current_network_label = QLabel("当前网段：请选择一个网段")
-        self.title_label = QLabel("拥挤热力图：无结果")
+        self.title_label = QLabel("可优化报文拥挤热力图：无结果")
         self.weight_basis_label = QLabel("权重口径：—")
         self.current_network_id: str | None = None
         self.network_combo = QComboBox()
@@ -278,7 +278,7 @@ class LoadHeatmap(QWidget):
         self.current_network_label.setText(f"当前网段：{label}")
         self.current_network_label.setToolTip("")
         self._sync_network_combo(network_id)
-        self.title_label.setText("拥挤热力图：无成功结果")
+        self.title_label.setText("可优化报文拥挤热力图：无成功结果")
         self.weight_basis_label.setText("权重口径：—")
         self._result = None
         self._external_heatmap_path = None
@@ -297,7 +297,7 @@ class LoadHeatmap(QWidget):
         if self.window_combo.currentIndex() == 0:
             duration_ms = len(self._result.original_steady_load) * SLOT_WIDTH_MS
             self.title_label.setText(
-                f"{self._result.display_name} / 稳态窗口报文拥挤热力图，"
+                f"{self._result.display_name} / 稳态窗口可优化报文拥挤热力图，"
                 f"核心真实范围 {duration_ms} ms / {self._result.source_file}"
             )
             if len(self._result.original_steady_load) > MAX_INLINE_HEATMAP_SLOTS:
@@ -312,7 +312,7 @@ class LoadHeatmap(QWidget):
         else:
             duration_ms = len(self._result.original_startup_load) * SLOT_WIDTH_MS
             self.title_label.setText(
-                f"{self._result.display_name} / 启动窗口报文拥挤热力图，"
+                f"{self._result.display_name} / 启动窗口可优化报文拥挤热力图，"
                 f"核心真实范围 {duration_ms} ms / {self._result.source_file}"
             )
             self._show_inline(

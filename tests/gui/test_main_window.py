@@ -73,8 +73,8 @@ def test_unified_import_automatically_inspects_and_enables_batch(
         "快速开始",
         "结果概览",
         "Offset 修改",
-        "负载曲线",
-        "负载热力图",
+        "可优化报文负载曲线",
+        "可优化报文负载热力图",
         "运行日志与详情",
     ]
     import_until_ready(qtbot, window, (source_project,))
