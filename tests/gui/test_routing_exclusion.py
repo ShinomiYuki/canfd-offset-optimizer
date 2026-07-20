@@ -474,6 +474,60 @@ def test_real_backend_accepts_standard_gateway_table(tmp_path: Path) -> None:
     assert by_name["PT"].routing_excluded_count == 0
 
 
+@pytest.mark.parametrize(
+    ("stem", "expected"),
+    (
+        (
+            "BAIC_B70KS(EP1)_ADAS BUS_Matrix_CANFD_V4.0_20260618_VDC",
+            "ADAS_BUS",
+        ),
+        ("BAIC_B70KS(EP1)_VDC_BUS2_Matrix_CANFD_V4.0", "VDC_BUS2"),
+        ("E0X_PT_Car FLZCU_VCU_DA Message list V1.2 Draft", "DA"),
+    ),
+)
+def test_real_backend_extracts_matrix_network_name(stem: str, expected: str) -> None:
+    assert RealBackend._network_name_from_stem(stem) == expected
+
+
+def test_matrix_dbc_name_maps_standard_route_to_current_network(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    dbc = Path("tests/fixtures/dbc/minimal.dbc").read_text(encoding="utf-8")
+    dbc += '\nBA_ "GenMsgStartDelayTime" BO_ 2147484768 20;\n'
+    matrix_name = "BAIC_B70KS(EP1)_ADAS BUS_Matrix_CANFD_V4.0_20260618_VDC.dbc"
+    (source / matrix_name).write_text(dbc, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    _xlsx(
+        source / "gateway-routing.xlsx",
+        {
+            "直接报文路由": _direct_routing_sheet(
+                _direct_route_row(
+                    "SourceMessage",
+                    "0x111",
+                    "BDCAN",
+                    "Msg460Ext",
+                    "0x460",
+                    "ADAS_BUS",
+                )
+            )
+        },
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda _update: None, token)
+    inspection = backend.inspect_workspace(session, lambda _update: None, token)
+
+    assert not inspection.errors
+    assert len(inspection.networks) == 1
+    network = inspection.networks[0]
+    assert network.network_name == "ADAS_BUS"
+    assert network.routing_excluded_count == 1
+    assert inspection.routing_exclusion.matched_count == 1
+    assert inspection.routing_exclusion.not_found_count == 0
+
+
 def test_real_backend_excludes_routes_before_gcls_and_keeps_same_id_other_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

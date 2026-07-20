@@ -54,6 +54,8 @@ Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `
 
 每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
 `network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
+对于 `<车型>_<网段>_Matrix_<协议/版本>.dbc` 命名，必须将 `_Matrix` 前的网段片段规范化为
+`network_name`，例如 `..._ADAS BUS_Matrix_...` 映射为 `ADAS_BUS`；不得将整个文件名误作网段名。
 
 DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导入器必须把随程序发布、内容与仓库
 `input/config/project.yaml` 一致的默认配置复制到会话 `config/project.yaml`，并在 manifest 与警告中

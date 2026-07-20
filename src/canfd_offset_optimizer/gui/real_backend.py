@@ -970,6 +970,15 @@ class RealBackend(WorkspaceImporter):
         vcu_match = re.search(r"(?:^|_)VCU_([A-Z][A-Z0-9]{1,7})(?:_|\s|$)", stem)
         if vcu_match:
             return vcu_match.group(1)
+        matrix_marker = re.search(r"_Matrix(?:_|$)", stem, re.IGNORECASE)
+        if matrix_marker:
+            prefix = stem[: matrix_marker.start()]
+            if ")" in prefix:
+                matrix_network = prefix.rsplit(")", 1)[1].strip("_ -")
+            else:
+                matrix_network = prefix.rsplit("_", 1)[-1].strip("_ -")
+            if matrix_network:
+                return WorkspaceImporter._safe_name(matrix_network)
         return WorkspaceImporter._safe_name(stem)
 
     @staticmethod

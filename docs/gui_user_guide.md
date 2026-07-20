@@ -79,6 +79,7 @@ user_input/<timestamp>_<project>/
 `frame_time_us` 模型；本版本不实现该精确模型。
 
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。
+`..._ADAS BUS_Matrix_...` 一类 DBC 文件名会显示并匹配为 `ADAS_BUS`，完整文件名仍只作为来源信息。
 
 ## 资格判定与批量状态
 
