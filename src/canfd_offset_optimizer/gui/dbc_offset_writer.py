@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
@@ -96,7 +97,7 @@ def _prepare_write(
         if frame_id in by_raw_id:
             matches_by_id.setdefault(frame_id, []).append(match)
 
-    selected_by_id: dict[int, re.Match[bytes]] = {}
+    selected_by_id: dict[int, tuple[re.Match[bytes], ...]] = {}
     missing: list[DbcOffsetReplacement] = []
     invalid: list[str] = []
     for frame_id, item in by_raw_id.items():
@@ -108,15 +109,17 @@ def _prepare_write(
             ]
             if preferred:
                 break
-        if len(preferred) > 1:
+        if len(preferred) > 1 and len(
+            {Decimal(match.group("value").decode("ascii")) for match in preferred}
+        ) > 1:
             invalid.append(item.message_name)
         elif preferred:
-            selected_by_id[frame_id] = preferred[0]
+            selected_by_id[frame_id] = tuple(preferred)
         else:
             missing.append(item)
     if invalid:
         raise ValueError(
-            "DBC 中参与优化的报文存在重复的原 Offset 属性：" + ", ".join(invalid)
+            "DBC 中参与优化的报文存在冲突的原 Offset 属性值：" + ", ".join(invalid)
         )
 
     declared = {
@@ -151,14 +154,15 @@ def _prepare_write(
             key=lambda attribute: (-counts[attribute], _OFFSET_ATTRIBUTES.index(attribute)),
         )
     elif selected_by_id:
-        insertion_attribute = next(iter(selected_by_id.values())).group("attribute")
+        insertion_attribute = next(iter(selected_by_id.values()))[0].group("attribute")
 
     selected = tuple(
         sorted(
             (
-                (selected_by_id[frame_id], item)
+                (match, item)
                 for frame_id, item in by_raw_id.items()
                 if frame_id in selected_by_id
+                for match in selected_by_id[frame_id]
             ),
             key=lambda pair: pair[0].start("value"),
         )
@@ -169,7 +173,7 @@ def _prepare_write(
         selected,
         tuple(missing),
         insertion_attribute,
-        DbcOffsetWritePlan(attribute_name, len(selected), len(missing)),
+        DbcOffsetWritePlan(attribute_name, len(selected_by_id), len(missing)),
     )
 
 
@@ -198,7 +202,9 @@ def _verify_updated_bytes(
             if selected:
                 break
         expected = str(item.offset_us // 1_000).encode("ascii")
-        if len(selected) != 1 or selected[0].group("value") != expected:
+        if not selected or any(
+            match.group("value") != expected for match in selected
+        ):
             invalid.append(item.message_name)
     if invalid:
         raise ValueError("DBC Offset 写回验证失败：" + ", ".join(invalid))

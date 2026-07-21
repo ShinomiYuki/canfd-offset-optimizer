@@ -784,6 +784,88 @@ def test_dbc_export_failure_keeps_core_result_and_other_artifacts(
     assert re.fullmatch(r"\d{8}_\d{6}_\d{6}", batch.output_directory.name)
 
 
+@pytest.mark.parametrize(
+    ("duplicate_value", "expect_dbc"),
+    (("15", True), ("20", False)),
+)
+def test_real_backend_handles_duplicate_offset_values_without_losing_core_result(
+    tmp_path: Path,
+    duplicate_value: str,
+    expect_dbc: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    dbc_name = "CAR_VCU_PT Message.dbc"
+    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_ "GenMsgStartDelayTime" BO_ 913 15;',
+        'BA_ "GenMsgStartDelayTime" BO_ 913 15;\n'
+        f'BA_ "GenMsgStartDelayTime" BO_ 913 {duplicate_value};',
+    ).replace(
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;',
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;\n'
+        'BA_ "GenMsgStartDelayTime" BO_ 2147484768 20;',
+    )
+    source_dbc = source / dbc_name
+    source_dbc.write_text(dbc_text, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
+        mode=OptimizationMode.PEAK,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
+        candidate_pool_size=1,
+        enable_triple_search=False,
+        output_root=tmp_path / "user_output",
+    )
+
+    batch = backend.optimize_all_networks(request, lambda update: None, token)
+    item = batch.network_results[0]
+
+    assert batch.status.value == "succeeded"
+    assert batch.succeeded_count == 1
+    assert batch.failed_count == 0
+    assert item.status is NetworkRunStatus.SUCCEEDED
+    assert item.error is None
+    assert item.result is not None
+    assert item.result.assignments
+    assert source_dbc.read_text(encoding="utf-8") == dbc_text
+    assert (batch.output_directory / "results" / "PT" / "offsets.csv").is_file()
+    assert (batch.output_directory / "plots" / "PT_load_curve.png").is_file()
+    assert (batch.output_directory / "plots" / "PT_heatmap.png").is_file()
+    assert (batch.output_directory / "logs" / "PT.log").is_file()
+
+    exported_dbc = tuple(
+        path for path in item.result.exported_files if path.suffix.casefold() == ".dbc"
+    )
+    if expect_dbc:
+        assert batch.dbc_write_failed_count == 0
+        assert item.result.dbc_write_error is None
+        assert len(exported_dbc) == 1
+        optimized_ms = next(
+            row.optimized_offset_us // 1_000
+            for row in item.result.assignments
+            if row.message_name == "Msg391"
+        )
+        assert (
+            exported_dbc[0]
+            .read_text(encoding="utf-8")
+            .count(f'BA_ "GenMsgStartDelayTime" BO_ 913 {optimized_ms};')
+            == 2
+        )
+    else:
+        assert batch.dbc_write_failed_count == 1
+        assert item.result.dbc_write_error is not None
+        assert "存在冲突的原 Offset 属性值" in item.result.dbc_write_error
+        assert exported_dbc == ()
+
+
 def test_production_source_does_not_read_regression_csv_or_hardcode_network_set() -> None:
     # Reporting is allowed to *write* a comparison artifact with this historic
     # filename.  The production GUI adapter must never read the test fixture.

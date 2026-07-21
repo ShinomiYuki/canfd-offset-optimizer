@@ -51,6 +51,56 @@ def test_writer_changes_only_existing_offset_numeric_tokens_in_a_copy(
     assert not tuple(output.parent.glob(".dbc-*.tmp"))
 
 
+def test_writer_updates_all_equal_duplicate_offsets_and_keeps_lower_priority(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.dbc"
+    original = (
+        b'VERSION "keep exactly"\r\n'
+        b'BO_ 100 MsgA: 8 VCU\r\n'
+        b'BA_ "GenMsgStartDelayTime" BO_ 100 15; // first\r\n'
+        b'BA_ "GenMsgDelayTime" BO_ 100 5; // lower priority\r\n'
+        b'BA_ "GenMsgStartDelayTime" BO_ 100 15.0; // second\r\n'
+        b'BA_ "GenMsgStartDelayTime" BO_ 100 +15; // third\r\n'
+    )
+    source.write_bytes(original)
+    output = tmp_path / "dbc" / "copy.dbc"
+    replacements = (DbcOffsetReplacement("MsgA", 100, False, 35_000),)
+
+    plan = inspect_dbc_offset_write(source, replacements)
+    written = write_dbc_with_offsets(source, output, replacements)
+
+    assert plan.attribute_name == "GenMsgStartDelayTime"
+    assert plan.replaced_count == 1
+    assert plan.inserted_count == 0
+    assert source.read_bytes() == original
+    updated = written.read_bytes()
+    assert updated.count(b'"GenMsgStartDelayTime" BO_ 100 35;') == 3
+    assert b'"GenMsgDelayTime" BO_ 100 5; // lower priority' in updated
+    assert not tuple(output.parent.glob(".dbc-*.tmp"))
+
+
+def test_writer_rejects_conflicting_duplicate_offset_values(tmp_path: Path) -> None:
+    source = tmp_path / "source.dbc"
+    original = (
+        b'BO_ 100 MsgA: 8 VCU\n'
+        b'BA_ "GenMsgStartDelayTime" BO_ 100 15;\n'
+        b'BA_ "GenMsgStartDelayTime" BO_ 100 20;\n'
+    )
+    source.write_bytes(original)
+    output = tmp_path / "dbc" / "copy.dbc"
+    replacements = (DbcOffsetReplacement("MsgA", 100, False, 35_000),)
+
+    with pytest.raises(ValueError, match="存在冲突的原 Offset 属性值"):
+        inspect_dbc_offset_write(source, replacements)
+    with pytest.raises(ValueError, match="存在冲突的原 Offset 属性值"):
+        write_dbc_with_offsets(source, output, replacements)
+
+    assert source.read_bytes() == original
+    assert not output.exists()
+    assert not output.parent.exists()
+
+
 def test_writer_fails_closed_when_offset_schema_is_undeclared(tmp_path: Path) -> None:
     source = tmp_path / "source.dbc"
     source.write_bytes(b'BO_ 100 MsgA: 8 VCU\n')

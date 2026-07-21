@@ -128,8 +128,10 @@ mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligib
    核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。
 7. DBC 输出必须从导入工作区副本生成。已有 Offset 只允许字节级替换数字 token；继承
    `BA_DEF_DEF_` 默认值的参与优化报文可补充显式 `BA_` 赋值，但属性必须已声明为 `BO_`。
-   不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件；重复定位、未声明属性或写后回读
-   不一致时将 DBC 导出降级为警告。核心优化成功项仍必须携带完整 `GuiOptimizationResult`，通过
+   同一报文最高优先级 Offset 属性存在多条同值声明时，必须保留全部声明并同步替换所有数字
+   token，`replaced_count` 仍按报文数统计；重复声明值冲突、属性未声明或写后回读不一致时将
+   DBC 导出降级为警告。不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件。核心优化
+   成功项仍必须携带完整 `GuiOptimizationResult`，通过
    `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
    basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
 8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
