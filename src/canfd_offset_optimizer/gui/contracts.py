@@ -621,6 +621,7 @@ class GuiOptimizationResult:
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
     classic_weight_model: str | None = None
     offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
+    dbc_write_error: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
@@ -631,6 +632,8 @@ class GuiOptimizationResult:
             raise ValueError("result frame protocol is unsupported")
         if not isinstance(self.offset_search, OffsetSearchConfig):
             raise ValueError("result offset_search is invalid")
+        if self.dbc_write_error is not None and not self.dbc_write_error.strip():
+            raise ValueError("result dbc_write_error must be non-empty when present")
         if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
             if self.weight_mode is not WeightMode.PAYLOAD_BYTES:
                 raise ValueError("Classic CAN result must use payload_bytes")
@@ -823,6 +826,13 @@ class BatchOptimizationResult:
     @property
     def cancelled_count(self) -> int:
         return sum(item.status is NetworkRunStatus.CANCELLED for item in self.network_results)
+
+    @property
+    def dbc_write_failed_count(self) -> int:
+        return sum(
+            item.result is not None and item.result.dbc_write_error is not None
+            for item in self.network_results
+        )
 
     @property
     def status(self) -> BatchRunStatus:

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+import canfd_offset_optimizer.gui.dbc_offset_writer as writer_module
+
 from canfd_offset_optimizer.gui.dbc_offset_writer import (
     DbcOffsetReplacement,
     inspect_dbc_offset_write,
@@ -46,6 +48,7 @@ def test_writer_changes_only_existing_offset_numeric_tokens_in_a_copy(
     assert written == output.resolve()
     assert source.read_bytes() == original
     assert output.read_bytes() == expected
+    assert not tuple(output.parent.glob(".dbc-*.tmp"))
 
 
 def test_writer_fails_closed_when_offset_schema_is_undeclared(tmp_path: Path) -> None:
@@ -103,3 +106,47 @@ def test_writer_refuses_to_overwrite_the_source_file(tmp_path: Path) -> None:
             source,
             (DbcOffsetReplacement("MsgA", 100, False, 35_000),),
         )
+
+
+def test_writer_rejects_final_path_over_safety_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.dbc"
+    source.write_bytes(b'BA_ "GenMsgStartDelayTime" BO_ 100 15;\n')
+    output = tmp_path / "dbc" / "unchanged-name.dbc"
+    monkeypatch.setattr(writer_module, "windows_utf16_path_length", lambda _path: 241)
+
+    with pytest.raises(ValueError, match=r"241 > 240"):
+        write_dbc_with_offsets(
+            source,
+            output,
+            (DbcOffsetReplacement("MsgA", 100, False, 35_000),),
+        )
+
+    assert not output.exists()
+
+
+def test_writer_removes_short_temporary_file_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.dbc"
+    source.write_bytes(b'BA_ "GenMsgStartDelayTime" BO_ 100 15;\n')
+    output = tmp_path / "dbc" / "unchanged-name.dbc"
+    original_replace = Path.replace
+
+    def fail_temporary_replace(path: Path, target: Path) -> Path:
+        if path.name.startswith(".dbc-"):
+            raise OSError("injected replace failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_temporary_replace)
+
+    with pytest.raises(OSError, match="injected replace failure"):
+        write_dbc_with_offsets(
+            source,
+            output,
+            (DbcOffsetReplacement("MsgA", 100, False, 35_000),),
+        )
+
+    assert not output.exists()
+    assert not tuple(output.parent.glob(".dbc-*.tmp"))

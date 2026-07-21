@@ -72,7 +72,8 @@ class QuickStartPage(QScrollArea):
                 "<b>logs/</b> 保存批次和各网段日志；<b>plots/</b> 保存每个成功网段的负载图与热力图；"
                 "<b>results/</b> 保存全网段汇总 CSV 和各网段 Offset CSV；<br>"
                 "其中 <b>routing_exclusion_summary.csv</b> 保存路由表逐行匹配与排除审计；"
-                "<b>dbc/</b> 保存写入优化后 Offset 的 DBC 副本。原始用户 DBC 不会被修改。",
+                "<b>dbc/</b> 保存写入优化后 Offset 的 DBC 副本。批次目录只使用时间戳，原始用户 "
+                "DBC 不会被修改；若 DBC 写回失败，CSV、图表和 GUI 优化结果仍会保留并显示警告。",
             )
         )
         note = QLabel("提示：首次使用建议保留默认参数，先确认所有网段都能成功，再逐项调整。")

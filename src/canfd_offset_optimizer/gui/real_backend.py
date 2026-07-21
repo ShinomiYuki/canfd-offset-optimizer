@@ -79,6 +79,11 @@ from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
 )
+from .output_paths import (
+    create_timestamped_batch_directory,
+    dbc_output_destination,
+    short_output_stem,
+)
 from .workspace_io import DEFAULT_CONFIG_NOTE, WorkspaceImporter
 from .routing_exclusion import (
     RouteMessageTableParser,
@@ -331,11 +336,9 @@ class RealBackend(WorkspaceImporter):
     ) -> BatchOptimizationResult:
         started = perf_counter()
         session = request.inspection.session
-        output_directory = self._unique_directory(
-            request.output_root.resolve(),
-            f"{self._session_id(session.project_name)}_real",
+        output_directory = create_timestamped_batch_directory(
+            request.output_root.resolve()
         )
-        output_directory.mkdir(parents=True, exist_ok=False)
         create_output_layout(output_directory)
         results: list[NetworkBatchResult] = []
         networks = request.inspection.networks
@@ -463,25 +466,29 @@ class RealBackend(WorkspaceImporter):
         )
         loaded = self._apply_routing_exclusions(loaded, request, network)
         loaded = self._apply_request_settings(loaded, request)
-        # Fail before the potentially expensive search if the output DBC cannot
-        # safely represent every optimized assignment. Inherited BA_DEF_DEF_
-        # values are materialized as explicit BA_ assignments in the copy.
-        offset_write_plan = inspect_dbc_offset_write(
-            dbc_path,
-            tuple(
-                DbcOffsetReplacement(
-                    message.name,
-                    message.can_id,
-                    message.is_extended,
-                    (
-                        message.original_offset_us
-                        if message.original_offset_us is not None
-                        else min(message.allowed_offsets_us)
-                    ),
-                )
-                for message in loaded.network.messages
-            ),
+        preflight_replacements = tuple(
+            DbcOffsetReplacement(
+                message.name,
+                message.can_id,
+                message.is_extended,
+                (
+                    message.original_offset_us
+                    if message.original_offset_us is not None
+                    else min(message.allowed_offsets_us)
+                ),
+            )
+            for message in loaded.network.messages
         )
+        offset_write_plan = None
+        dbc_preflight_error: str | None = None
+        try:
+            offset_write_plan = inspect_dbc_offset_write(
+                dbc_path, preflight_replacements
+            )
+        except (OSError, ValueError) as exc:
+            # DBC is an export artifact. Its inability to accept assignments must
+            # not discard a valid and potentially expensive core optimization.
+            dbc_preflight_error = f"{type(exc).__name__}: {exc}"
         initial_state = self._baseline_state(loaded)
         attempt_limit = loaded.config.optimization.restart_policy.attempt_limit
 
@@ -535,7 +542,8 @@ class RealBackend(WorkspaceImporter):
                 request.offset_search.candidate_offsets_us,
             )
         layout = create_output_layout(batch_output)
-        network_output = layout.results / self._safe_name(network.display_name)
+        stem = short_output_stem(network.display_name)
+        network_output = layout.results / stem
         network_output.mkdir(parents=False, exist_ok=False)
         detail = GuiOptimizationResult(
             network.network_id,
@@ -580,9 +588,18 @@ class RealBackend(WorkspaceImporter):
                 f"offset_step_ms={request.offset_search.offset_step_ms}",
                 f"offset_effective_max_ms={request.offset_search.effective_max_offset_ms}",
                 f"offset_candidate_count={request.offset_search.candidate_count}",
-                f"dbc_offset_attribute={offset_write_plan.attribute_name or 'existing'}",
-                f"dbc_offset_replaced_count={offset_write_plan.replaced_count}",
-                f"dbc_offset_inserted_count={offset_write_plan.inserted_count}",
+                *(
+                    (
+                        f"dbc_offset_attribute={offset_write_plan.attribute_name or 'existing'}",
+                        f"dbc_offset_replaced_count={offset_write_plan.replaced_count}",
+                        f"dbc_offset_inserted_count={offset_write_plan.inserted_count}",
+                    )
+                    if offset_write_plan is not None
+                    else (
+                        "dbc_offset_preflight=failed",
+                        f"dbc_offset_preflight_error={dbc_preflight_error}",
+                    )
+                ),
                 *(
                     ('classic_weight_model = "payload_bytes_approximation"',)
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
@@ -595,7 +612,6 @@ class RealBackend(WorkspaceImporter):
             classic_weight_model=network.classic_weight_model,
             offset_search=request.offset_search,
         )
-        stem = self._safe_name(network.display_name)
         progress_callback(
             ProgressUpdate(
                 ProgressPhase.FINALIZING,
@@ -622,10 +638,46 @@ class RealBackend(WorkspaceImporter):
             )
             for message in loaded.network.messages
         )
-        dbc_output = layout.dbc / network.source_file
-        if dbc_output.exists():
-            dbc_output = layout.dbc / f"{stem}_{network.source_file}"
-        dbc_path = write_dbc_with_offsets(dbc_path, dbc_output, replacements)
+        dbc_output = dbc_output_destination(
+            layout.dbc,
+            network.source_file,
+            network.display_name,
+            network.network_id,
+        )
+        written_dbc_path: Path | None = None
+        dbc_write_error = dbc_preflight_error
+        if dbc_write_error is None:
+            try:
+                written_dbc_path = write_dbc_with_offsets(
+                    dbc_path, dbc_output, replacements
+                )
+            except (OSError, ValueError) as exc:
+                dbc_write_error = f"{type(exc).__name__}: {exc}"
+        if dbc_write_error is None:
+            detail = replace(
+                detail,
+                logs=detail.logs
+                + (
+                    "dbc_write_status=succeeded",
+                    f"dbc_output_path={written_dbc_path}",
+                ),
+            )
+        else:
+            warning = (
+                "DBC 写回失败；优化结果及其他输出已保留："
+                f"{dbc_write_error}；目标：{dbc_output}"
+            )
+            detail = replace(
+                detail,
+                warnings=detail.warnings + (warning,),
+                logs=detail.logs
+                + (
+                    "dbc_write_status=failed",
+                    f"dbc_write_error={dbc_write_error}",
+                    f"dbc_output_path={dbc_output}",
+                ),
+                dbc_write_error=dbc_write_error,
+            )
         log_path = write_network_log(
             NetworkBatchResult(
                 network.network_id,
@@ -644,16 +696,10 @@ class RealBackend(WorkspaceImporter):
             ),
             layout.logs / f"{stem}.log",
         )
-        return replace(
-            detail,
-            exported_files=(
-                assignment_path,
-                load_plot_path,
-                heatmap_path,
-                log_path,
-                dbc_path,
-            ),
-        )
+        exported_files = [assignment_path, load_plot_path, heatmap_path, log_path]
+        if written_dbc_path is not None:
+            exported_files.append(written_dbc_path)
+        return replace(detail, exported_files=tuple(exported_files))
 
     @staticmethod
     def _validate_offset_contract(
@@ -879,7 +925,7 @@ class RealBackend(WorkspaceImporter):
         for item in rows:
             write_network_log(
                 item,
-                layout.logs / f"{self._safe_name(item.display_name)}.log",
+                layout.logs / f"{short_output_stem(item.display_name)}.log",
             )
         write_batch_log(batch, layout.logs / "batch.log")
         return batch

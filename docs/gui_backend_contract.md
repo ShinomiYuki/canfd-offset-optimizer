@@ -95,7 +95,8 @@ mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligib
 `results_by_network_id` 映射。最终状态是
 `succeeded/failed/skipped/cancelled`。成功项包含完整 `GuiOptimizationResult`；失败项包含用户可读
 错误；部分失败不能丢失成功结果。批量根目录固定提供 `logs/`、`plots/`、`results/` 和 `dbc/`；
-`results/networks_summary.csv` 汇总所有网段，只有成功网段创建 Offset 明细、图表和 DBC 副本，
+批次根目录名必须是纯微秒时间戳。`results/networks_summary.csv` 汇总所有网段，成功网段创建 Offset
+明细和图表并尝试生成 DBC 副本，
 失败、跳过和取消网段仍必须写独立日志。`results/routing_exclusion_summary.csv` 保留每个 Excel
 来源行；`run_config.json` 保存项目级路由统计；网段 CSV/日志保存
 `base_eligible_message_count`、`routing_excluded_count`、`final_eligible_message_count`。
@@ -128,6 +129,8 @@ mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligib
 7. DBC 输出必须从导入工作区副本生成。已有 Offset 只允许字节级替换数字 token；继承
    `BA_DEF_DEF_` 默认值的参与优化报文可补充显式 `BA_` 赋值，但属性必须已声明为 `BO_`。
    不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件；重复定位、未声明属性或写后回读
-   不一致时失败关闭，并在搜索前完成写入能力预检。
+   不一致时将 DBC 导出降级为警告。核心优化成功项仍必须携带完整 `GuiOptimizationResult`，通过
+   `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
+   basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
 8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
    后续公共 service 就绪后应替换此处导入，不影响 GUI contracts/widgets。

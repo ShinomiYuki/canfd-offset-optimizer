@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from tempfile import NamedTemporaryFile
+
+from .output_paths import WINDOWS_SAFE_DBC_PATH_LENGTH, windows_utf16_path_length
 
 
 # Mirrors dbc_parser.DBC_ATTRIBUTES["start_delay"] precedence without importing
@@ -52,6 +55,17 @@ class DbcOffsetWritePlan:
     attribute_name: str
     replaced_count: int
     inserted_count: int
+
+
+def validate_dbc_output_path(output_path: Path) -> None:
+    """Reject unsafe legacy-Windows paths without changing the DBC basename."""
+
+    length = windows_utf16_path_length(output_path)
+    if length > WINDOWS_SAFE_DBC_PATH_LENGTH:
+        raise ValueError(
+            "DBC 最终输出路径超过 Windows 安全预算："
+            f"{length} > {WINDOWS_SAFE_DBC_PATH_LENGTH}；{output_path.resolve(strict=False)}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +221,7 @@ def write_dbc_with_offsets(
     destination = output_path.resolve(strict=False)
     if source == destination:
         raise ValueError("DBC output must be a copy, not the imported source file")
+    validate_dbc_output_path(destination)
     prepared = _prepare_write(source, replacements)
     chunks: list[bytes] = []
     cursor = 0
@@ -234,7 +249,19 @@ def write_dbc_with_offsets(
     _verify_updated_bytes(updated, replacements)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(destination.name + ".tmp")
-    temporary.write_bytes(updated)
-    temporary.replace(destination)
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="wb",
+            prefix=".dbc-",
+            suffix=".tmp",
+            dir=destination.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(updated)
+        temporary.replace(destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return destination

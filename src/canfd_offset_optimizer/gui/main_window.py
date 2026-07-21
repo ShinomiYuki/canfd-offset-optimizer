@@ -434,7 +434,8 @@ class MainWindow(QMainWindow):
         self.summary_panel.set_batch(result)
         self._append_log(
             f"批量汇总：成功 {result.succeeded_count}，失败 {result.failed_count}，"
-            f"跳过 {result.skipped_count}，取消 {result.cancelled_count}。"
+            f"跳过 {result.skipped_count}，取消 {result.cancelled_count}，"
+            f"DBC写回失败 {result.dbc_write_failed_count}。"
         )
 
     def _select_network(self, value: object) -> None:
@@ -479,6 +480,16 @@ class MainWindow(QMainWindow):
             f"来源 DBC：{item.source_file}",
             f"状态：{item.status.value}",
         ]
+        if item.result is not None:
+            if item.result.dbc_write_error:
+                details.extend(
+                    (
+                        "DBC输出：失败（优化结果及其他输出已保留）",
+                        f"DBC写回错误：{item.result.dbc_write_error}",
+                    )
+                )
+            else:
+                details.append("DBC输出：成功")
         if item.error:
             details.append(f"错误：{item.error}")
         details.extend(f"警告：{warning}" for warning in item.warnings)

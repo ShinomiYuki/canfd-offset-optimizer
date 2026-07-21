@@ -20,6 +20,7 @@ from .artifact_outputs import (
     write_load_heatmap_png,
     write_network_log,
 )
+from .output_paths import create_timestamped_batch_directory, short_output_stem
 from .contracts import (
     BackendAvailability,
     BackendError,
@@ -361,9 +362,7 @@ class FixtureBackend:
         if self._fail_all_optimization:
             raise BackendError("FixtureBackend 模拟工程级批量优化失败")
         started = perf_counter()
-        output_id = self._session_id(request.inspection.session.project_name)
-        output_directory = self._unique_directory(request.output_root, output_id)
-        output_directory.mkdir(parents=True, exist_ok=False)
+        output_directory = create_timestamped_batch_directory(request.output_root)
         create_output_layout(output_directory)
         network_results: list[NetworkBatchResult] = []
         networks = request.inspection.optimizable_networks
@@ -575,7 +574,7 @@ class FixtureBackend:
                 "生成网段用户产物",
             ),
             output_directory=create_output_layout(output_directory).results
-            / self._safe_name(f"{network.display_name}_{network.network_id[-8:]}"),
+            / short_output_stem(f"{network.display_name}_{network.network_id[-8:]}"),
             frame_protocol=network.frame_protocol,
             classic_weight_model=network.classic_weight_model,
         )
@@ -588,7 +587,7 @@ class FixtureBackend:
         layout = create_output_layout(batch_output)
         result.output_directory.mkdir(parents=True, exist_ok=True)
         offsets = export_assignments_csv(result, result.output_directory / "offsets.csv")
-        stem = self._safe_name(result.display_name)
+        stem = short_output_stem(result.display_name)
         load_plot = write_load_curve_png(result, layout.plots / f"{stem}_load_curve.png")
         heatmap = write_load_heatmap_png(result, layout.plots / f"{stem}_heatmap.png")
         log_path = write_network_log(
@@ -675,7 +674,7 @@ class FixtureBackend:
         layout = create_output_layout(output_directory)
         write_network_log(
             item,
-            layout.logs / f"{FixtureBackend._safe_name(item.display_name)}.log",
+            layout.logs / f"{short_output_stem(item.display_name)}.log",
         )
 
     @staticmethod
@@ -685,7 +684,7 @@ class FixtureBackend:
         for item in batch.network_results:
             write_network_log(
                 item,
-                layout.logs / f"{FixtureBackend._safe_name(item.display_name)}.log",
+                layout.logs / f"{short_output_stem(item.display_name)}.log",
             )
         write_batch_log(batch, layout.logs / "batch.log")
 

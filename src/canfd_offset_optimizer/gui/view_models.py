@@ -115,10 +115,13 @@ class BatchSummaryTableModel(QAbstractTableModel):
             NetworkRunStatus.SKIPPED: "跳过",
             NetworkRunStatus.CANCELLED: "取消",
         }
+        status_text = status_labels[item.status]
+        if result is not None and result.dbc_write_error is not None:
+            status_text = "成功（DBC写回失败）"
         display: tuple[str, ...] = (
             item.network_name,
             item.source_file,
-            status_labels[item.status],
+            status_text,
             result.frame_protocol.value if result else "—",
             item.mode.value,
             format_result_weight(result) if result else format_weight_mode(item.weight_mode),

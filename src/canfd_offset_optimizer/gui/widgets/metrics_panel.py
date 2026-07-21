@@ -86,7 +86,8 @@ class BatchSummaryPanel(QGroupBox):
         self.model.set_batch(batch)
         self.count_label.setText(
             f"成功 {batch.succeeded_count} / 失败 {batch.failed_count} / "
-            f"跳过 {batch.skipped_count} / 取消 {batch.cancelled_count}"
+            f"跳过 {batch.skipped_count} / 取消 {batch.cancelled_count} / "
+            f"DBC写回失败 {batch.dbc_write_failed_count}"
         )
         self.elapsed_label.setText(f"总耗时：{batch.elapsed_seconds:.3f} s")
         self.output_label.setText(f"输出目录：{batch.output_directory}")

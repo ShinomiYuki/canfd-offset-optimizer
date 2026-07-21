@@ -94,6 +94,30 @@ def test_each_summary_row_reads_its_own_network_result(
     assert len(seen_metrics) == len(batch_result.network_results)
 
 
+def test_summary_marks_successful_result_with_dbc_write_warning(
+    qapp, batch_result: BatchOptimizationResult,
+) -> None:
+    del qapp
+    original = batch_result.network_results[0]
+    assert original.result is not None
+    detail = replace(original.result, dbc_write_error="FileNotFoundError: too long")
+    warned = replace(
+        original,
+        result=detail,
+        warnings=original.warnings + ("DBC 写回失败；其他输出已保留",),
+    )
+    batch = replace(
+        batch_result,
+        network_results=(warned, *batch_result.network_results[1:]),
+    )
+    model = BatchSummaryTableModel()
+    model.set_batch(batch)
+
+    assert model.index(0, 2).data(Qt.ItemDataRole.DisplayRole) == "成功（DBC写回失败）"
+    assert batch.succeeded_count == len(batch.network_results)
+    assert batch.dbc_write_failed_count == 1
+
+
 def test_assignment_filter_copy_and_dtos_remain_immutable(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:

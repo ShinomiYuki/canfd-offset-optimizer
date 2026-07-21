@@ -80,6 +80,10 @@ def export_assignments_csv(result: GuiOptimizationResult, path: Path) -> Path:
 
 def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
     result = item.result
+    dbc_path = next(
+        (path for path in result.exported_files if path.suffix.casefold() == ".dbc"),
+        None,
+    ) if result else None
     return {
         "network_id": item.network_id,
         "network": item.network_name,
@@ -106,6 +110,13 @@ def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
         "logs": list(item.logs),
         "output_directory": str(result.output_directory) if result and result.output_directory else None,
         "exported_files": [str(path) for path in result.exported_files] if result else [],
+        "dbc_write_status": (
+            "failed"
+            if result and result.dbc_write_error
+            else ("succeeded" if dbc_path is not None else "not_applicable")
+        ),
+        "dbc_output_path": str(dbc_path) if dbc_path is not None else None,
+        "dbc_write_error": result.dbc_write_error if result else None,
     }
 
 
@@ -139,6 +150,7 @@ def export_network_summary_json(result: GuiOptimizationResult, path: Path) -> Pa
         "startup_counts_after": list(result.startup_counts_after),
         "logs": list(result.logs),
         "exported_files": [str(item) for item in result.exported_files],
+        "dbc_write_error": result.dbc_write_error,
     }
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
@@ -174,11 +186,22 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                 "停止原因",
                 "耗时(s)",
                 "警告数量",
+                "DBC输出状态",
+                "DBC输出路径",
+                "DBC写回错误",
                 "错误",
             )
         )
         for item in batch.network_results:
             result = item.result
+            dbc_path = next(
+                (
+                    exported
+                    for exported in result.exported_files
+                    if exported.suffix.casefold() == ".dbc"
+                ),
+                None,
+            ) if result else None
             writer.writerow(
                 (
                     item.network_id,
@@ -205,6 +228,13 @@ def export_batch_summary_csv(batch: BatchOptimizationResult, path: Path) -> Path
                     result.stop_reason if result else "",
                     f"{result.elapsed_seconds:.6f}" if result else "",
                     len(item.warnings),
+                    (
+                        "failed"
+                        if result and result.dbc_write_error
+                        else ("succeeded" if dbc_path is not None else "not_applicable")
+                    ),
+                    str(dbc_path) if dbc_path is not None else "",
+                    result.dbc_write_error if result else "",
                     item.error or "",
                 )
             )
@@ -226,6 +256,7 @@ def export_batch_summary_json(batch: BatchOptimizationResult, path: Path) -> Pat
             "failed": batch.failed_count,
             "skipped": batch.skipped_count,
             "cancelled": batch.cancelled_count,
+            "dbc_write_failed": batch.dbc_write_failed_count,
         },
         "warnings": list(batch.warnings),
         "errors": list(batch.errors),

@@ -291,6 +291,18 @@ def write_network_log(item: NetworkBatchResult, path: Path) -> Path:
     content = list(lines)
     if item.result:
         content.append(f"bus_type={item.result.frame_protocol.value}")
+        dbc_status = (
+            "failed"
+            if item.result.dbc_write_error
+            else (
+                "succeeded"
+                if "dbc_write_status=succeeded" in item.result.logs
+                else "not_applicable"
+            )
+        )
+        content.append(f"dbc_write_status={dbc_status}")
+        if item.result.dbc_write_error:
+            content.append(f"dbc_write_error={item.result.dbc_write_error}")
     if item.result and item.result.classic_weight_model:
         content.append(
             f'classic_weight_model = "{item.result.classic_weight_model}"'
@@ -315,6 +327,7 @@ def write_batch_log(batch: BatchOptimizationResult, path: Path) -> Path:
         f"failed={batch.failed_count}",
         f"skipped={batch.skipped_count}",
         f"cancelled={batch.cancelled_count}",
+        f"dbc_write_failed={batch.dbc_write_failed_count}",
     ]
     lines.extend(f"warning={warning}" for warning in batch.warnings)
     lines.extend(f"error={error}" for error in batch.errors)

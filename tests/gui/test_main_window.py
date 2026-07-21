@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from canfd_offset_optimizer.gui.contracts import (
@@ -175,6 +176,38 @@ def test_partial_failure_remains_browsable_and_does_not_hide_successes(
     )
     assert window.assignment_table.model.rowCount() == 0
     assert "模拟网段 GL 优化失败" in window.log_view.toPlainText()
+
+
+def test_dbc_write_warning_keeps_gui_result_browsable(
+    qtbot, batch_result: BatchOptimizationResult, workspace_root: Path
+) -> None:
+    first = batch_result.network_results[0]
+    assert first.result is not None
+    detail = replace(first.result, dbc_write_error="FileNotFoundError: path too long")
+    warned = replace(
+        first,
+        result=detail,
+        warnings=first.warnings + ("DBC 写回失败；其他输出已保留",),
+    )
+    batch = replace(
+        batch_result,
+        network_results=(warned, *batch_result.network_results[1:]),
+    )
+    window = MainWindow(
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
+        dialog_handler=lambda *_args: None,
+    )
+    qtbot.addWidget(window)
+
+    window._apply_batch_result(batch)
+    assert window.summary_panel.select_network_id(warned.network_id)
+    qtbot.waitUntil(lambda: window.selected_network_id == warned.network_id)
+
+    assert window.assignment_table.model.rowCount() > 0
+    assert window.load_chart.export_button.isEnabled()
+    assert "DBC输出：失败（优化结果及其他输出已保留）" in window.log_view.toPlainText()
+    assert "FileNotFoundError: path too long" in window.log_view.toPlainText()
+    assert "DBC写回失败 1" in window.summary_panel.count_label.text()
 
 
 def test_missing_dbc_is_explicit_while_default_config_is_automatic(

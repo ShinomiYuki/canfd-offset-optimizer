@@ -5,6 +5,7 @@ import builtins
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+import re
 from typing import Any, cast
 
 import pytest
@@ -701,6 +702,86 @@ def test_ic_and_su_selection_bind_fixed_assignments_curves_and_titles(
         "SU / 可优化报文稳态负载，500 ms 超周期重复展示 4 次 / SU.dbc"
         == window.load_chart.chart_title_label.text()
     )
+
+
+@pytest.mark.parametrize("failure_stage", ("preflight", "write"))
+def test_dbc_export_failure_keeps_core_result_and_other_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    dbc_name = "CAR_VCU_PT Message.dbc"
+    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;',
+        'BA_ "GenMsgCycleTime" BO_ 2147484768 100;\n'
+        'BA_ "GenMsgStartDelayTime" BO_ 2147484768 20;',
+    )
+    (source / dbc_name).write_text(dbc_text, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
+        mode=OptimizationMode.PEAK,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
+        candidate_pool_size=1,
+        enable_triple_search=False,
+        output_root=tmp_path / "user_output",
+    )
+
+    injected = (
+        ValueError("injected preflight failure")
+        if failure_stage == "preflight"
+        else FileNotFoundError("injected write failure")
+    )
+    target = (
+        "inspect_dbc_offset_write"
+        if failure_stage == "preflight"
+        else "write_dbc_with_offsets"
+    )
+
+    def fail_dbc_export(*_args: Any, **_kwargs: Any) -> Any:
+        raise injected
+
+    monkeypatch.setattr(real_backend_module, target, fail_dbc_export)
+    batch = backend.optimize_all_networks(request, lambda update: None, token)
+    item = batch.network_results[0]
+
+    assert batch.status.value == "succeeded"
+    assert batch.succeeded_count == 1
+    assert batch.failed_count == 0
+    assert batch.dbc_write_failed_count == 1
+    assert item.status is NetworkRunStatus.SUCCEEDED
+    assert item.error is None
+    assert item.result is not None
+    assert item.result.dbc_write_error is not None
+    assert "injected" in item.result.dbc_write_error
+    assert item.result.assignments
+    assert not any(path.suffix.casefold() == ".dbc" for path in item.result.exported_files)
+    assert (batch.output_directory / "results" / "PT" / "offsets.csv").is_file()
+    assert (batch.output_directory / "plots" / "PT_load_curve.png").is_file()
+    assert (batch.output_directory / "plots" / "PT_heatmap.png").is_file()
+    network_log = (batch.output_directory / "logs" / "PT.log").read_text(
+        encoding="utf-8"
+    )
+    assert "dbc_write_status=failed" in network_log
+    assert "injected" in network_log
+    summary = (batch.output_directory / "results" / "networks_summary.csv").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "DBC输出状态" in summary
+    assert "failed" in summary
+    assert "injected" in summary
+    assert (source / dbc_name).read_text(encoding="utf-8") == dbc_text
+    assert re.fullmatch(r"\d{8}_\d{6}_\d{6}", batch.output_directory.name)
 
 
 def test_production_source_does_not_read_regression_csv_or_hardcode_network_set() -> None:
