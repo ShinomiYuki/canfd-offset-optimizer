@@ -35,3 +35,9 @@ output/diagnostics_smoke/*
 /docs/严格代码审查与验收报告_2026-07-16.md
 user_input/
 user_output/
+
+# Local test and automation scratch directories.
+/.codex/
+/.codex_tmp/
+/.pytest_tmp/
+/test_tmp/
