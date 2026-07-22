@@ -39,9 +39,11 @@ from .contracts import (
     BatchOptimizationResult,
     CancellationToken,
     CLASSIC_WEIGHT_MODEL,
+    DbcSenderSelectionSummary,
     FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
+    MessageEligibilityStatus,
     ImportRecord,
     ImportRecordStatus,
     ImportSession,
@@ -58,6 +60,8 @@ from .contracts import (
     RestartMode,
     RouteMessageRecord,
     RoutingExclusionReport,
+    SenderNodeSelectionConfig,
+    SenderSelectionDbcStatus,
     WeightMode,
     WorkspaceInspection,
 )
@@ -66,6 +70,7 @@ from .artifact_outputs import (
     write_batch_log,
     write_load_curve_png,
     write_load_heatmap_png,
+    write_message_eligibility_csv,
     write_network_log,
     write_routing_exclusion_csv,
     write_run_config_json,
@@ -83,6 +88,13 @@ from .output_paths import (
     create_timestamped_batch_directory,
     dbc_output_destination,
     short_output_stem,
+)
+from .sender_selection import (
+    apply_selection_to_summary,
+    build_sender_inventory,
+    dbc_identity,
+    dbc_revision,
+    validate_complete_selection,
 )
 from .workspace_io import DEFAULT_CONFIG_NOTE, WorkspaceImporter
 from .routing_exclusion import (
@@ -153,6 +165,7 @@ class RealBackend(WorkspaceImporter):
                 errors.append(f"ARXML 通道检查失败：{type(exc).__name__}: {exc}")
         display_counts: dict[str, int] = {}
         networks: list[NetworkSummary] = []
+        sender_summaries: list[DbcSenderSelectionSummary] = []
         parsed_messages_by_network: dict[
             str, tuple[tuple[int, str, bool], ...]
         ] = {}
@@ -171,6 +184,8 @@ class RealBackend(WorkspaceImporter):
             display_name = network_name if ordinal == 1 else f"{network_name} ({ordinal})"
             identity_material = f"{record.workspace_relative_path.as_posix()}|{record.sha256 or ''}"
             network_id = f"net-{hashlib.sha256(identity_material.encode()).hexdigest()[:16]}"
+            record_sha256 = record.sha256 or hashlib.sha256(path.read_bytes()).hexdigest()
+            dbc_id = dbc_identity(record.workspace_relative_path, record_sha256)
             try:
                 parsed = parse_dbc(path, allowed_offsets_us=allowed_offsets_us)
                 message_count = len(parsed.messages)
@@ -192,34 +207,50 @@ class RealBackend(WorkspaceImporter):
                 reason = self._eligibility_reason(exc)
                 network_warnings = []
                 frame_protocol = FrameProtocol.CAN_FD
-            available_weight_modes: tuple[WeightMode, ...] = ()
-            automatic_weight_mode: WeightMode | None = None
+            sender_summary = build_sender_inventory(
+                dbc_id=dbc_id,
+                dbc_file=path.name,
+                network_id=network_id,
+                network_name=network_name,
+                source_workspace_path=record.workspace_relative_path,
+                sha256=record_sha256,
+                dbc_path=path,
+                allowed_offsets_us=allowed_offsets_us,
+            )
+            sender_summaries.append(sender_summary)
+            parsed_messages_by_network[network_id] = tuple(
+                (message.can_id, message.message_name, message.is_extended)
+                for message in sender_summary.messages
+                if message.can_id is not None and message.base_eligible
+            )
+            frame_time_channel = self._resolve_frame_time_channel(
+                path.name, configured_channel, arxml_channels
+            )
+            fd_modes = [WeightMode.PAYLOAD_BYTES]
+            if frame_time_channel is not None:
+                fd_modes.append(WeightMode.FRAME_TIME_US)
+            available_weight_modes: tuple[WeightMode, ...] = tuple(fd_modes)
+            automatic_weight_mode: WeightMode | None = (
+                WeightMode.FRAME_TIME_US
+                if frame_time_channel is not None
+                else WeightMode.PAYLOAD_BYTES
+            )
             classic_weight_model: str | None = None
-            if optimizable:
-                if frame_protocol is FrameProtocol.CLASSIC_CAN:
-                    available_weight_modes = (WeightMode.PAYLOAD_BYTES,)
-                    automatic_weight_mode = WeightMode.PAYLOAD_BYTES
-                    classic_weight_model = CLASSIC_WEIGHT_MODEL
-                    network_warnings.append(
-                        'classic_weight_model = "payload_bytes_approximation"'
-                    )
-                else:
-                    frame_time_channel = self._resolve_frame_time_channel(
-                        path.name, configured_channel, arxml_channels
-                    )
-                    modes = [WeightMode.PAYLOAD_BYTES]
-                    if frame_time_channel is not None:
-                        modes.append(WeightMode.FRAME_TIME_US)
-                        automatic_weight_mode = WeightMode.FRAME_TIME_US
-                        network_warnings.append(
-                            f"frame_time_us ARXML Controller：{frame_time_channel}"
-                        )
-                    else:
-                        automatic_weight_mode = WeightMode.PAYLOAD_BYTES
-                        network_warnings.append(
-                            "CAN FD 缺少唯一 ARXML Controller 映射，只能选择 payload_bytes。"
-                        )
-                    available_weight_modes = tuple(modes)
+            if optimizable and frame_protocol is FrameProtocol.CLASSIC_CAN:
+                available_weight_modes = (WeightMode.PAYLOAD_BYTES,)
+                automatic_weight_mode = WeightMode.PAYLOAD_BYTES
+                classic_weight_model = CLASSIC_WEIGHT_MODEL
+                network_warnings.append(
+                    'classic_weight_model = "payload_bytes_approximation"'
+                )
+            elif optimizable and frame_time_channel is not None:
+                network_warnings.append(
+                    f"frame_time_us ARXML Controller：{frame_time_channel}"
+                )
+            elif optimizable:
+                network_warnings.append(
+                    "CAN FD 缺少唯一 ARXML Controller 映射，只能选择 payload_bytes。"
+                )
             networks.append(
                 NetworkSummary(
                     network_id=network_id,
@@ -235,6 +266,8 @@ class RealBackend(WorkspaceImporter):
                     classic_weight_model=classic_weight_model,
                     warnings=tuple(network_warnings),
                     unoptimizable_reason=reason,
+                    dbc_id=dbc_id,
+                    dbc_message_count=sender_summary.message_count,
                 )
             )
             progress_callback(
@@ -267,12 +300,15 @@ class RealBackend(WorkspaceImporter):
             )
             updated_networks: list[NetworkSummary] = []
             for network in networks:
-                base_count = len(parsed_messages_by_network.get(network.network_id, ()))
+                if not network.is_optimizable:
+                    updated_networks.append(network)
+                    continue
+                base_count = network.message_count
                 excluded_count = len(
                     routing_report.excluded_can_ids(network.network_id)
                 )
                 final_count = base_count - excluded_count
-                if network.is_optimizable and final_count == 0:
+                if final_count == 0:
                     updated_networks.append(
                         replace(
                             network,
@@ -299,6 +335,23 @@ class RealBackend(WorkspaceImporter):
                         )
                     )
             networks = updated_networks
+            sender_summaries = [
+                replace(
+                    summary,
+                    messages=tuple(
+                        replace(
+                            message,
+                            routing_match=(
+                                message.can_id is not None
+                                and message.can_id
+                                in routing_report.excluded_can_ids(summary.network_id)
+                            ),
+                        )
+                        for message in summary.messages
+                    ),
+                )
+                for summary in sender_summaries
+            ]
         used_paths = {
             record.workspace_relative_path
             for record in unique_records
@@ -319,13 +372,114 @@ class RealBackend(WorkspaceImporter):
         )
         self._write_manifest(updated_session)
         warnings = self._inspection_warnings(updated_session, routing_report)
+        summaries = tuple(sender_summaries)
+        revision = dbc_revision(summaries)
         return WorkspaceInspection(
-            updated_session,
-            tuple(networks),
-            missing,
-            warnings,
-            tuple(errors),
-            routing_report,
+            session=updated_session,
+            networks=tuple(networks),
+            missing_required=missing,
+            warnings=warnings,
+            errors=tuple(errors),
+            routing_exclusion=routing_report,
+            sender_selection=SenderNodeSelectionConfig(dbc_revision=revision),
+            sender_selection_summaries=summaries,
+            dbc_revision=revision,
+        )
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
+    ) -> WorkspaceInspection:
+        """Confirm per-DBC local transmitters and derive the formal final set."""
+
+        if selection.dbc_revision != inspection.dbc_revision:
+            raise ValueError("发送节点选择不属于当前 DBC 集合或内容版本")
+        validate_complete_selection(inspection.sender_selection_summaries, selection)
+        confirmed = replace(selection, confirmed=True)
+        summaries = tuple(
+            apply_selection_to_summary(summary, confirmed)
+            for summary in inspection.sender_selection_summaries
+        )
+        by_network = {summary.network_id: summary for summary in summaries}
+        networks: list[NetworkSummary] = []
+        for network in inspection.networks:
+            summary = by_network[network.network_id]
+            excluded = summary.excluded_by_user
+            final_count = summary.final_eligible_count
+            base_count = summary.base_eligible_count
+            selected_input_errors = tuple(
+                record.exclusion_reason
+                for record in summary.messages
+                if record.selected_transmitter_match
+                and record.final_status is MessageEligibilityStatus.INPUT_ERROR
+            )
+            if excluded:
+                reason = "用户明确排除该 DBC"
+            elif selected_input_errors:
+                reason = selected_input_errors[0]
+            elif summary.status is SenderSelectionDbcStatus.INPUT_ERROR:
+                reason = summary.note or "DBC 输入异常"
+            elif summary.selected_sender_message_count == 0:
+                reason = "所选本机节点没有发送任何报文"
+            elif base_count == 0:
+                reason = "所选本机节点没有基础合资格周期 TX 报文"
+            elif final_count == 0:
+                reason = "所选本机节点的合资格周期 TX 均被路由表排除"
+            else:
+                reason = None
+            selected_protocols = {
+                record.frame_protocol
+                for record in summary.messages
+                if record.selected_transmitter_match
+                and record.base_eligible
+                and record.final_status is not MessageEligibilityStatus.INPUT_ERROR
+                and record.frame_protocol is not None
+            }
+            selected_protocol = (
+                next(iter(selected_protocols))
+                if len(selected_protocols) == 1
+                else network.frame_protocol
+            )
+            available_modes = network.available_weight_modes
+            automatic_weight = network.automatic_weight_mode
+            classic_model = None
+            if selected_protocol is FrameProtocol.CLASSIC_CAN:
+                available_modes = (WeightMode.PAYLOAD_BYTES,)
+                automatic_weight = WeightMode.PAYLOAD_BYTES
+                classic_model = CLASSIC_WEIGHT_MODEL
+            elif not available_modes:
+                available_modes = (WeightMode.PAYLOAD_BYTES,)
+                automatic_weight = WeightMode.PAYLOAD_BYTES
+            networks.append(
+                replace(
+                    network,
+                    is_optimizable=reason is None,
+                    frame_protocol=selected_protocol,
+                    available_weight_modes=available_modes,
+                    automatic_weight_mode=automatic_weight,
+                    classic_weight_model=classic_model,
+                    message_count=final_count,
+                    base_eligible_message_count=base_count,
+                    routing_excluded_count=summary.routing_excluded_count,
+                    final_eligible_message_count=final_count,
+                    unoptimizable_reason=reason,
+                    dbc_message_count=summary.message_count,
+                    selected_transmitters=summary.selected_transmitters,
+                    selected_transmitter_message_count=(
+                        summary.selected_sender_message_count
+                    ),
+                    unselected_transmitter_excluded_count=(
+                        summary.unselected_transmitter_count
+                    ),
+                    excluded_by_user=excluded,
+                )
+            )
+        return replace(
+            inspection,
+            networks=tuple(networks),
+            sender_selection=confirmed,
+            sender_selection_summaries=summaries,
         )
 
     def optimize_all_networks(
@@ -463,6 +617,9 @@ class RealBackend(WorkspaceImporter):
             channel_override=channel_override,
             objective_mode_override=core_mode,
             offset_search_override=request.offset_search,
+            selected_transmitters=request.sender_selection.selected_for(
+                network.dbc_id or ""
+            ),
         )
         loaded = self._apply_routing_exclusions(loaded, request, network)
         loaded = self._apply_request_settings(loaded, request)
@@ -918,6 +1075,9 @@ class RealBackend(WorkspaceImporter):
         layout = create_output_layout(output_directory)
         export_batch_summary_csv(batch, layout.results / "networks_summary.csv")
         write_run_config_json(request, layout.results / "run_config.json")
+        write_message_eligibility_csv(
+            request, layout.results / "message_eligibility.csv"
+        )
         write_routing_exclusion_csv(
             request.inspection.routing_exclusion,
             layout.results / "routing_exclusion_summary.csv",

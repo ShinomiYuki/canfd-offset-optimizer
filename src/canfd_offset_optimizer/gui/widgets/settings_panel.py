@@ -37,6 +37,8 @@ class SettingsPanel(QGroupBox):
     """Expose a compact basic form and opt-in expert search settings."""
 
     details_requested = Signal()
+    sender_selection_requested = Signal()
+    validity_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__("批量优化设置")
@@ -55,6 +57,16 @@ class SettingsPanel(QGroupBox):
         network_summary_layout.setContentsMargins(0, 0, 0, 0)
         network_summary_layout.addWidget(self.networks_label, 1)
         network_summary_layout.addWidget(self.details_button)
+
+        self.sender_selection_label = QLabel("发送节点筛选：未完成")
+        self.sender_selection_label.setWordWrap(True)
+        self.sender_selection_button = QPushButton("选择发送节点")
+        self.sender_selection_button.setEnabled(False)
+        sender_selection_row = QWidget()
+        sender_selection_layout = QHBoxLayout(sender_selection_row)
+        sender_selection_layout.setContentsMargins(0, 0, 0, 0)
+        sender_selection_layout.addWidget(self.sender_selection_label, 1)
+        sender_selection_layout.addWidget(self.sender_selection_button)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Peak（严格峰值）", OptimizationMode.PEAK)
@@ -103,6 +115,7 @@ class SettingsPanel(QGroupBox):
         basic = QFormLayout()
         basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         basic.addRow(network_summary)
+        basic.addRow(sender_selection_row)
         basic.addRow(self.messages_label)
         basic.addRow("模式：", self.mode_combo)
         basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
@@ -179,8 +192,26 @@ class SettingsPanel(QGroupBox):
         self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.details_button.clicked.connect(self.details_requested.emit)
+        self.sender_selection_button.clicked.connect(
+            self.sender_selection_requested.emit
+        )
         for spin in (self.offset_min_spin, self.offset_max_spin, self.offset_step_spin):
             spin.valueChanged.connect(self._update_offset_summary)
+        for control_signal in (
+            self.mode_combo.currentIndexChanged,
+            self.can_fd_weight_combo.currentIndexChanged,
+            self.offset_min_spin.valueChanged,
+            self.offset_max_spin.valueChanged,
+            self.offset_step_spin.valueChanged,
+            self.tolerance_spin.valueChanged,
+            self.restart_combo.currentIndexChanged,
+            self.fixed_attempts_spin.valueChanged,
+            self.adaptive_min_spin.valueChanged,
+            self.adaptive_max_spin.valueChanged,
+            self.candidate_pool_combo.currentIndexChanged,
+            self.triple_search_check.toggled,
+        ):
+            control_signal.connect(lambda *_args: self.validity_changed.emit())
         self._update_offset_summary()
         self._update_restart_controls()
         self._update_mode_controls()
@@ -196,14 +227,36 @@ class SettingsPanel(QGroupBox):
         self._inspection = inspection
         discovered = len(inspection.networks)
         optimizable = len(inspection.optimizable_networks)
-        self.networks_label.setText(
-            f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
-        )
-        self.messages_label.setText(
-            f"基础可优化报文：{inspection.base_eligible_message_count} / "
-            f"路由排除：{inspection.routing_excluded_message_count} / "
-            f"实际参与优化：{inspection.final_eligible_message_count}"
-        )
+        if inspection.sender_selection_ready:
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：{optimizable} / "
+                f"已跳过：{discovered - optimizable}"
+            )
+            self.messages_label.setText(
+                f"基础可优化报文：{inspection.base_eligible_message_count} / "
+                f"路由排除：{inspection.routing_excluded_message_count} / "
+                f"实际参与优化：{inspection.final_eligible_message_count}"
+            )
+            selected_count = sum(
+                len(item.selected_transmitters)
+                for item in inspection.sender_selection_summaries
+            )
+            self.sender_selection_label.setText(
+                "发送节点筛选：已完成\n"
+                f"已处理 {len(inspection.sender_selection_summaries)} 个 DBC，"
+                f"已选择 {selected_count} 个节点"
+            )
+            self.sender_selection_button.setText("修改选择")
+        else:
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：待发送节点筛选 / 已跳过：—"
+            )
+            self.messages_label.setText(
+                "基础可优化报文：待发送节点筛选 / 路由排除：— / 实际参与优化：—"
+            )
+            self.sender_selection_label.setText("发送节点筛选：未完成")
+            self.sender_selection_button.setText("选择发送节点")
+        self.sender_selection_button.setEnabled(inspection.can_select_senders)
         self.details_button.setEnabled(True)
         has_classic = any(
             network.frame_protocol is FrameProtocol.CLASSIC_CAN
@@ -221,7 +274,9 @@ class SettingsPanel(QGroupBox):
         self._set_weight_options(
             self._automatic_fd_weight_options(inspection), has_fd=has_fd
         )
-        self.mode_combo.setEnabled(bool(inspection.optimizable_networks))
+        self.mode_combo.setEnabled(
+            inspection.sender_selection_ready and bool(inspection.optimizable_networks)
+        )
 
     @staticmethod
     def _automatic_fd_weight_options(
@@ -250,6 +305,9 @@ class SettingsPanel(QGroupBox):
             "基础可优化报文：0 / 路由排除：0 / 实际参与优化：0"
         )
         self.details_button.setEnabled(False)
+        self.sender_selection_label.setText("发送节点筛选：未完成")
+        self.sender_selection_button.setText("选择发送节点")
+        self.sender_selection_button.setEnabled(False)
         self.can_fd_weight_combo.clear()
 
     def build_request(self) -> GuiBatchOptimizationRequest:
@@ -281,7 +339,17 @@ class SettingsPanel(QGroupBox):
             enable_triple_search=self.triple_search_check.isChecked(),
             output_root=self._inspection.session.workspace_root / "user_output",
             offset_search=offset_search,
+            sender_selection=self._inspection.sender_selection,
         )
+
+    def can_build_request(self) -> bool:
+        if self._inspection is None or not self._inspection.can_optimize:
+            return False
+        try:
+            self.build_request()
+        except (TypeError, ValueError):
+            return False
+        return True
 
     def _update_offset_summary(self) -> None:
         try:

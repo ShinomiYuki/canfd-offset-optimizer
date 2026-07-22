@@ -39,6 +39,7 @@ class ParsedDbcMessage:
     definition_index: int
     field_sources: tuple[tuple[str, str], ...]
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    transmitter_nodes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,45 +149,61 @@ def _is_fd_message(message: Any) -> bool:
     return bool(getattr(message, "is_fd", False))
 
 
-def _tx_sender(message: Any) -> str | None:
-    """! @brief 返回第一个具体发送节点；外部占位发送方返回 None。
+def transmitter_nodes(message: Any) -> tuple[str, ...]:
+    """返回报文的全部具体发送节点，保留 DBC 顺序并去重。
 
     @details
-    Vector DBC 常用 `Vector__XXX` 作为外部发送方占位符；这类报文是当前 ECU
-    的 RX 报文。具体发送节点不依赖 BU_ 列表是否完整。
+    `Vector__XXX`、空节点和纯空白节点均不是可选本机发送节点。节点名只做
+    首尾空白清理，不进行大小写、内部空白、substring 或别名匹配。
     """
-    senders = tuple(str(sender) for sender in (getattr(message, "senders", ()) or ()))
-    concrete = tuple(sender for sender in senders if sender and sender != "Vector__XXX")
-    if not concrete:
-        return None
-    return concrete[0]
+    result: list[str] = []
+    for raw_sender in getattr(message, "senders", ()) or ():
+        sender = str(raw_sender).strip()
+        if not sender or sender == "Vector__XXX" or sender in result:
+            continue
+        result.append(sender)
+    return tuple(result)
 
 
-def parse_dbc(
+def message_cycle_time_us(message: Any) -> int | None:
+    """Return the same normalized positive cycle used by formal DBC parsing."""
+    return _cycle_us(message)[0]
+
+
+def message_frame_protocol(message: Any) -> FrameProtocol:
+    """Return the same frame protocol classification used by formal parsing."""
+    return FrameProtocol.CAN_FD if _is_fd_message(message) else FrameProtocol.CLASSIC_CAN
+
+
+def message_is_declared_periodic(message: Any) -> bool:
+    """Return whether DBC send-type metadata explicitly declares cyclic traffic."""
+    return _is_declared_periodic(message)
+
+
+def parse_loaded_dbc(
+    database: Any,
     path: Path,
     *,
     allowed_offsets_us: tuple[int, ...] | None = None,
+    selected_transmitters: frozenset[str] | None = None,
 ) -> DbcParseResult:
-    """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
-
-    @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
-    @raises InputFileError 文件不存在或 cantools 无法解析时抛出。
-    """
+    """Apply formal DBC eligibility to an already loaded cantools database."""
     path = path.resolve()
-    if not path.is_file():
-        raise InputFileError(f"DBC file does not exist: {path}")
-    cantools = importlib.import_module("cantools")
-    try:
-        database = cantools.database.load_file(str(path), strict=False)
-    except Exception as exc:  # 外部解析库可能按格式失败点抛出多种异常，统一转为领域错误。
-        raise InputFileError(f"cannot parse DBC {path}: {exc}") from exc
+    selected = (
+        None
+        if selected_transmitters is None
+        else frozenset(name.strip() for name in selected_transmitters if name.strip())
+    )
     parsed: list[ParsedDbcMessage] = []
     warnings: list[str] = []
     for definition_index, message in enumerate(database.messages):
-        sender = _tx_sender(message)
+        senders = transmitter_nodes(message)
         # cantools represents the reserved Vector__XXX sender as an empty list.
-        if sender is None:
+        if not senders:
             continue
+        if selected is not None and not selected.intersection(senders):
+            continue
+        sender = senders[0]
         cycle_us, cycle_source = _cycle_us(message)
         if cycle_us is None:
             if _is_declared_periodic(message):
@@ -269,6 +286,7 @@ def parse_dbc(
             ("cycle_time_us", f"{source_prefix}:{cycle_source}"),
             ("payload_bytes", f"{source_prefix}:BO_"),
             ("sender_ecu", f"{source_prefix}:BO_"),
+            ("transmitter_nodes", f"{source_prefix}:cantools.Message.senders"),
         ]
         if original_source is not None:
             field_sources.append(
@@ -286,6 +304,7 @@ def parse_dbc(
                 definition_index=definition_index,
                 field_sources=tuple(field_sources),
                 frame_protocol=frame_protocol,
+                transmitter_nodes=senders,
             )
         )
     if not parsed:
@@ -297,3 +316,30 @@ def parse_dbc(
             "periodic TX messages; Byte and microsecond weights cannot be mixed"
         )
     return DbcParseResult(tuple(parsed), tuple(warnings))
+
+
+def parse_dbc(
+    path: Path,
+    *,
+    allowed_offsets_us: tuple[int, ...] | None = None,
+    selected_transmitters: frozenset[str] | None = None,
+) -> DbcParseResult:
+    """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
+
+    @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
+    @raises InputFileError 文件不存在或 cantools 无法解析时抛出。
+    """
+    path = path.resolve()
+    if not path.is_file():
+        raise InputFileError(f"DBC file does not exist: {path}")
+    cantools = importlib.import_module("cantools")
+    try:
+        database = cantools.database.load_file(str(path), strict=False)
+    except Exception as exc:  # 外部解析库可能按格式失败点抛出多种异常，统一转为领域错误。
+        raise InputFileError(f"cannot parse DBC {path}: {exc}") from exc
+    return parse_loaded_dbc(
+        database,
+        path,
+        allowed_offsets_us=allowed_offsets_us,
+        selected_transmitters=selected_transmitters,
+    )

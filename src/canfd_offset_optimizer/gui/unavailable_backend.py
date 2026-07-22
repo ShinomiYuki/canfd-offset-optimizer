@@ -12,6 +12,7 @@ from .contracts import (
     GuiBatchOptimizationRequest,
     ImportSession,
     ProgressCallback,
+    SenderNodeSelectionConfig,
     WorkspaceInspection,
 )
 from .workspace_io import WorkspaceImporter
@@ -36,6 +37,14 @@ class UnavailableBackend(WorkspaceImporter):
     ) -> WorkspaceInspection:
         del progress_callback, cancellation_token
         return WorkspaceInspection(session, (), errors=(self._message,))
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
+    ) -> WorkspaceInspection:
+        del inspection, selection
+        raise BackendError("当前后端不提供 DBC 发送节点筛选。")
 
     def optimize_all_networks(
         self,

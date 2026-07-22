@@ -29,6 +29,7 @@ from canfd_offset_optimizer.gui.contracts import (
     OptimizationMode,
     RestartMode,
     RestartSettings,
+    SenderNodeSelectionConfig,
     WeightMode,
 )
 from canfd_offset_optimizer.gui.mock_backend import MockBackend
@@ -41,6 +42,29 @@ from canfd_offset_optimizer.parsers.project_loader import load_project
 
 CSV_FIXTURE = Path("tests/fixtures/ALL_offsets_weight_mode_comparison.csv")
 DBC_FIXTURE = Path("tests/fixtures/dbc/minimal.dbc")
+
+
+def _confirm_all_real_sender_nodes(
+    backend: RealBackend, inspection: Any
+) -> Any:
+    """Explicitly preserve the old all-sender test scope after the new gate."""
+    selected: dict[str, frozenset[str]] = {}
+    excluded: set[str] = set()
+    for summary in inspection.sender_selection_summaries:
+        names = frozenset(
+            item.node_name for item in summary.node_stats if item.selectable
+        )
+        if names:
+            selected[summary.dbc_id] = names
+        else:
+            excluded.add(summary.dbc_id)
+    config = SenderNodeSelectionConfig(
+        selected_transmitters_by_dbc=selected,
+        excluded_dbc_ids=frozenset(excluded),
+        confirmed=True,
+        dbc_revision=inspection.dbc_revision,
+    )
+    return backend.apply_sender_selection(inspection, config)
 
 
 def _csv_rows() -> list[dict[str, str]]:
@@ -228,6 +252,7 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
         == (WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US)
         for network in inspection.optimizable_networks
     )
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         can_fd_weight=WeightMode.FRAME_TIME_US,
@@ -237,6 +262,7 @@ def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
     batch = backend.optimize_all_networks(request, lambda update: None, token)
 
@@ -297,6 +323,8 @@ def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
     assert network.available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
     assert network.classic_weight_model == CLASSIC_WEIGHT_MODEL
 
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
+
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         # This selector applies to FD only; Classic must stay on payload.
@@ -307,6 +335,7 @@ def test_classic_backend_uses_payload_and_exports_no_fake_physical_claim(
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
     batch = backend.optimize_all_networks(request, lambda update: None, token)
     result = batch.network_results[0].result
@@ -431,6 +460,8 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     assert "没有符合资格的周期 TX" in skipped["EMPTY"].unoptimizable_reason
     assert all(item.message_count == 0 for item in skipped.values())
 
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
+
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         can_fd_weight=WeightMode.PAYLOAD_BYTES,
@@ -440,6 +471,7 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
     batch = backend.optimize_all_networks(request, lambda update: None, token)
     assert batch.succeeded_count == 1
@@ -480,6 +512,9 @@ def test_real_import_uses_bundled_default_when_project_yaml_is_missing(
         session, lambda update: None, CancellationToken()
     )
     assert inspection.missing_required == ()
+    assert not inspection.can_optimize
+    assert not inspection.sender_selection_ready
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
     assert inspection.can_optimize
     assert any("内置默认 project.yaml" in warning for warning in inspection.warnings)
 
@@ -521,6 +556,7 @@ def test_real_backend_short_run_maps_only_core_data(
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda update: None, token)
     inspection = backend.inspect_workspace(session, lambda update: None, token)
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         can_fd_weight=WeightMode.PAYLOAD_BYTES,
@@ -530,6 +566,7 @@ def test_real_backend_short_run_maps_only_core_data(
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
     progress: list[Any] = []
     batch = backend.optimize_all_networks(request, progress.append, token)
@@ -726,6 +763,7 @@ def test_dbc_export_failure_keeps_core_result_and_other_artifacts(
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda update: None, token)
     inspection = backend.inspect_workspace(session, lambda update: None, token)
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         can_fd_weight=WeightMode.PAYLOAD_BYTES,
@@ -735,6 +773,7 @@ def test_dbc_export_failure_keeps_core_result_and_other_artifacts(
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
 
     injected = (
@@ -814,6 +853,7 @@ def test_real_backend_handles_duplicate_offset_values_without_losing_core_result
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda update: None, token)
     inspection = backend.inspect_workspace(session, lambda update: None, token)
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
     request = GuiBatchOptimizationRequest(
         inspection=inspection,
         can_fd_weight=WeightMode.PAYLOAD_BYTES,
@@ -823,6 +863,7 @@ def test_real_backend_handles_duplicate_offset_values_without_losing_core_result
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
     )
 
     batch = backend.optimize_all_networks(request, lambda update: None, token)

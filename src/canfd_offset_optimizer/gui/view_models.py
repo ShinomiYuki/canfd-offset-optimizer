@@ -14,9 +14,12 @@ from PySide6.QtCore import (
 
 from .contracts import (
     BatchOptimizationResult,
+    DbcSenderSelectionSummary,
     ImportRecord,
     ImportSession,
     InputKind,
+    MessageEligibilityRecord,
+    MessageEligibilityStatus,
     NetworkBatchResult,
     NetworkRunStatus,
     OffsetAssignmentRow,
@@ -24,6 +27,7 @@ from .contracts import (
     RouteMatchRecord,
     RouteMatchStatus,
     RouteRecordIssue,
+    SenderSelectionDbcStatus,
     WorkspaceInspection,
 )
 from .formatting import (
@@ -224,10 +228,14 @@ class NetworkDetailsTableModel(QAbstractTableModel):
         "网段显示名称",
         "network_id",
         "来源 DBC",
-        "可优化",
-        "基础可优化报文",
+        "DBC 报文总数",
+        "所选本机节点",
+        "本机节点发送报文",
+        "基础合资格报文",
+        "其他 ECU 排除",
         "路由排除",
-        "实际参与优化",
+        "最终参与优化",
+        "可优化",
         "警告或不可优化原因",
     )
 
@@ -265,18 +273,22 @@ class NetworkDetailsTableModel(QAbstractTableModel):
             network.display_name,
             network.network_id,
             network.source_file,
-            "是" if network.is_optimizable else "否",
+            str(network.dbc_message_count),
+            "、".join(network.selected_transmitters) or "—",
+            str(network.selected_transmitter_message_count),
             str(
                 network.message_count
                 if network.base_eligible_message_count is None
                 else network.base_eligible_message_count
             ),
+            str(network.unselected_transmitter_excluded_count),
             str(network.routing_excluded_count),
             str(
                 network.message_count
                 if network.final_eligible_message_count is None
                 else network.final_eligible_message_count
             ),
+            "是" if network.is_optimizable else "否",
             reason or "—",
         )
         return values[index.column()]
@@ -507,6 +519,222 @@ class RouteExclusionFilterProxy(QSortFilterProxyModel):
                 }
                 for issue in record.issues
             )
+        return True
+
+
+class SenderSelectionSummaryTableModel(QAbstractTableModel):
+    """Per-DBC local-transmitter selection and eligibility audit."""
+
+    HEADERS: Final[tuple[str, ...]] = (
+        "DBC 文件",
+        "网段",
+        "发送节点数",
+        "所选本机节点",
+        "用户排除",
+        "DBC 报文总数",
+        "本机节点发送",
+        "基础合资格",
+        "其他 ECU 排除",
+        "路由排除",
+        "最终参与优化",
+        "状态",
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: tuple[DbcSenderSelectionSummary, ...] = ()
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if not index.isValid() or not 0 <= index.row() < len(self._rows):
+            return None
+        item = self._rows[index.row()]
+        if role == int(Qt.ItemDataRole.UserRole):
+            return item.dbc_id
+        if role == int(Qt.ItemDataRole.ToolTipRole):
+            return f"dbc_id：{item.dbc_id}\nSHA-256：{item.sha256}\n{item.note}"
+        if role != int(Qt.ItemDataRole.DisplayRole):
+            return None
+        statuses = {
+            SenderSelectionDbcStatus.UNPROCESSED: "未处理",
+            SenderSelectionDbcStatus.SELECTED: "已选择节点",
+            SenderSelectionDbcStatus.EXCLUDED_BY_USER: "明确不参与优化",
+            SenderSelectionDbcStatus.NO_IDENTIFIABLE_TRANSMITTER: "无可识别发送节点",
+            SenderSelectionDbcStatus.INPUT_ERROR: "输入异常",
+        }
+        values = (
+            item.dbc_file,
+            item.network_name,
+            str(len(item.node_stats)),
+            "、".join(item.selected_transmitters) or "—",
+            "是" if item.excluded_by_user else "否",
+            str(item.message_count),
+            str(item.selected_sender_message_count),
+            str(item.base_eligible_count),
+            str(item.unselected_transmitter_count),
+            str(item.routing_excluded_count),
+            str(item.final_eligible_count),
+            statuses[item.status],
+        )
+        return values[index.column()]
+
+    def headerData(  # noqa: N802
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if role == int(Qt.ItemDataRole.DisplayRole) and orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.HEADERS):
+                return self.HEADERS[section]
+        return None
+
+    def set_inspection(self, inspection: WorkspaceInspection | None) -> None:
+        self.beginResetModel()
+        self._rows = () if inspection is None else inspection.sender_selection_summaries
+        self.endResetModel()
+
+
+class MessageEligibilityTableModel(QAbstractTableModel):
+    """Every DBC message with the final reason it did or did not enter GCLS."""
+
+    HEADERS: Final[tuple[str, ...]] = (
+        "DBC",
+        "网段",
+        "CAN ID",
+        "报文名",
+        "DBC 发送节点",
+        "命中所选节点",
+        "周期(ms)",
+        "总线类型",
+        "命中路由表",
+        "最终状态",
+        "排除原因",
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rows: tuple[MessageEligibilityRecord, ...] = ()
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:  # noqa: N802
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if not index.isValid() or not 0 <= index.row() < len(self._rows):
+            return None
+        item = self._rows[index.row()]
+        if role == int(Qt.ItemDataRole.UserRole):
+            return item
+        if role == int(Qt.ItemDataRole.ToolTipRole):
+            return item.exclusion_reason
+        if role != int(Qt.ItemDataRole.DisplayRole):
+            return None
+        labels = {
+            MessageEligibilityStatus.FINAL_ELIGIBLE: "参与优化",
+            MessageEligibilityStatus.BASE_ELIGIBLE: "等待发送节点选择",
+            MessageEligibilityStatus.EXCLUDED_UNSELECTED_TRANSMITTER: "排除：发送节点未选择",
+            MessageEligibilityStatus.EXCLUDED_BY_USER: "排除：用户排除该 DBC",
+            MessageEligibilityStatus.NON_PERIODIC: "排除：非周期报文",
+            MessageEligibilityStatus.UNSUPPORTED_SEND_TYPE: "排除：不支持的发送类型/资格",
+            MessageEligibilityStatus.ROUTING_EXCLUDED: "排除：路由报文",
+            MessageEligibilityStatus.NO_VALID_TRANSMITTER: "排除：无有效发送节点",
+            MessageEligibilityStatus.INPUT_ERROR: "排除：输入异常",
+        }
+        values = (
+            item.dbc_file,
+            item.network_name,
+            format_can_id(item.can_id) if item.can_id is not None else "—",
+            item.message_name,
+            "、".join(item.transmitter_nodes) or "—",
+            "是" if item.selected_transmitter_match else "否",
+            format_milliseconds(item.cycle_time_us) if item.cycle_time_us is not None else "—",
+            item.frame_protocol.value if item.frame_protocol is not None else "—",
+            "是" if item.routing_match else "否",
+            labels[item.final_status],
+            item.exclusion_reason or "—",
+        )
+        return values[index.column()]
+
+    def headerData(  # noqa: N802
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> object | None:
+        if role == int(Qt.ItemDataRole.DisplayRole) and orientation == Qt.Orientation.Horizontal:
+            if 0 <= section < len(self.HEADERS):
+                return self.HEADERS[section]
+        return None
+
+    def set_inspection(self, inspection: WorkspaceInspection | None) -> None:
+        self.beginResetModel()
+        self._rows = (
+            ()
+            if inspection is None
+            else tuple(
+                message
+                for summary in inspection.sender_selection_summaries
+                for message in summary.messages
+            )
+        )
+        self.endResetModel()
+
+    def record_at(self, row: int) -> MessageEligibilityRecord:
+        return self._rows[row]
+
+
+class MessageEligibilityFilterProxy(QSortFilterProxyModel):
+    """Named audit filters used by the sender-selection details tab."""
+
+    def __init__(self, source: MessageEligibilityTableModel) -> None:
+        super().__init__()
+        self._filter_name = "all"
+        self.setSourceModel(source)
+
+    def set_filter_name(self, value: str) -> None:
+        self._filter_name = value
+        if hasattr(self, "beginFilterChange") and hasattr(self, "endFilterChange"):
+            self.beginFilterChange()
+            self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+        else:
+            self.invalidateFilter()
+
+    def filterAcceptsRow(  # noqa: N802
+        self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex
+    ) -> bool:
+        del source_parent
+        source = cast(MessageEligibilityTableModel, self.sourceModel())
+        record = source.record_at(source_row)
+        if self._filter_name == "final":
+            return record.final_status is MessageEligibilityStatus.FINAL_ELIGIBLE
+        if self._filter_name == "unselected":
+            return record.final_status is MessageEligibilityStatus.EXCLUDED_UNSELECTED_TRANSMITTER
+        if self._filter_name == "routing":
+            return record.final_status is MessageEligibilityStatus.ROUTING_EXCLUDED
+        if self._filter_name == "non_periodic":
+            return record.final_status is MessageEligibilityStatus.NON_PERIODIC
+        if self._filter_name == "error":
+            return record.final_status in {
+                MessageEligibilityStatus.INPUT_ERROR,
+                MessageEligibilityStatus.NO_VALID_TRANSMITTER,
+                MessageEligibilityStatus.UNSUPPORTED_SEND_TYPE,
+            }
         return True
 
 

@@ -55,6 +55,7 @@ class ProgressPanel(QGroupBox):
             WorkflowState.IDLE: "等待导入工程",
             WorkflowState.IMPORTING: "正在复制并分类输入",
             WorkflowState.INSPECTING: "正在检查工作区",
+            WorkflowState.AWAITING_SENDER_SELECTION: "待选择 DBC 本机发送节点",
             WorkflowState.INCOMPLETE: "工程输入不完整或存在冲突",
             WorkflowState.READY: "全部网段已就绪",
             WorkflowState.RUNNING: "正在顺序优化全部网段",

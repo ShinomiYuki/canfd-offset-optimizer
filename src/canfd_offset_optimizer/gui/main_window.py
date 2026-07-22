@@ -10,6 +10,7 @@ from PySide6.QtCore import QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
+    QDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -31,9 +32,11 @@ from .contracts import (
     OptimizationBackend,
     ProgressCallback,
     ProgressUpdate,
+    SenderNodeSelectionConfig,
     WorkspaceInspection,
 )
 from .formatting import export_assignments_csv
+from .sender_selection import reconcile_selection
 from .state import WorkflowState, WorkflowStateMachine
 from .widgets.assignment_table import AssignmentTable
 from .widgets.input_panel import InputPanel
@@ -42,6 +45,7 @@ from .widgets.load_heatmap import LoadHeatmap
 from .widgets.metrics_panel import BatchSummaryPanel
 from .widgets.progress_panel import ProgressPanel
 from .widgets.quick_start_page import QuickStartPage
+from .widgets.sender_selection_dialog import SenderSelectionDialog
 from .widgets.settings_panel import SettingsPanel
 from .workers import BackendOperation, BackendWorker, WorkerFailure
 
@@ -74,6 +78,7 @@ class MainWindow(QMainWindow):
         self._state = WorkflowStateMachine()
         self._session: ImportSession | None = None
         self._inspection: WorkspaceInspection | None = None
+        self._sender_selection_cache: SenderNodeSelectionConfig | None = None
         self._result: BatchOptimizationResult | None = None
         self._selected_network_id: str | None = None
         self._thread: QThread | None = None
@@ -140,6 +145,10 @@ class MainWindow(QMainWindow):
         self.input_panel.sources_selected.connect(self.import_sources)
         self.input_panel.clear_requested.connect(self.clear_current_session)
         self.settings_panel.details_requested.connect(self.input_panel.show_details)
+        self.settings_panel.sender_selection_requested.connect(
+            self.edit_sender_selection
+        )
+        self.settings_panel.validity_changed.connect(self._refresh_controls)
         self.progress_panel.run_requested.connect(self.start_optimization)
         self.progress_panel.cancel_requested.connect(self.request_cancel)
         self.summary_panel.network_selected.connect(self._select_network)
@@ -193,6 +202,8 @@ class MainWindow(QMainWindow):
         if not self._state.can_transition(WorkflowState.IMPORTING):
             return
         self._state.transition(WorkflowState.IMPORTING)
+        if self._inspection is not None and self._inspection.sender_selection.confirmed:
+            self._sender_selection_cache = self._inspection.sender_selection
         self._reset_current_results()
         self._session = None
         self._inspection = None
@@ -210,7 +221,12 @@ class MainWindow(QMainWindow):
                 f"优化不可用：{self._backend_availability.message}"
             )
             return
-        if self.task_active or self._inspection is None or not self._inspection.can_optimize:
+        if self.task_active or self._inspection is None:
+            return
+        if not self._inspection.sender_selection_ready:
+            self._append_log("请先完成 DBC 本机发送节点选择。")
+            return
+        if not self._inspection.can_optimize:
             return
         try:
             request = self.settings_panel.build_request()
@@ -247,6 +263,7 @@ class MainWindow(QMainWindow):
             return
         self._session = None
         self._inspection = None
+        self._sender_selection_cache = None
         self._reset_current_results()
         self._state.reset()
         self.input_panel.clear_display()
@@ -358,12 +375,36 @@ class MainWindow(QMainWindow):
             if not isinstance(value, WorkspaceInspection):
                 self._on_failed(WorkerFailure("后端工作区检查结果无效。", repr(value)))
                 return
-            self._inspection = value
-            self._session = value.session
-            self.input_panel.set_inspection(value)
-            self.settings_panel.set_inspection(value)
-            target = WorkflowState.READY if value.can_optimize else WorkflowState.INCOMPLETE
+            reconciled = reconcile_selection(
+                self._sender_selection_cache,
+                value.sender_selection_summaries,
+            )
+            inspected = value
+            if value.sender_selection_summaries:
+                if reconciled.confirmed:
+                    inspected = self._backend.apply_sender_selection(value, reconciled)
+                else:
+                    inspected = WorkspaceInspection(
+                        session=value.session,
+                        networks=value.networks,
+                        missing_required=value.missing_required,
+                        warnings=value.warnings,
+                        errors=value.errors,
+                        routing_exclusion=value.routing_exclusion,
+                        sender_selection=reconciled,
+                        sender_selection_summaries=value.sender_selection_summaries,
+                        dbc_revision=value.dbc_revision,
+                    )
+            self._inspection = inspected
+            self._session = inspected.session
+            self.input_panel.set_inspection(inspected)
+            self.settings_panel.set_inspection(inspected)
+            target = self._inspection_target_state(inspected)
             self._state.transition(target)
+            if target is WorkflowState.AWAITING_SENDER_SELECTION:
+                self._append_log(
+                    "DBC 解析完成；请为每个 DBC 选择本机发送节点或明确排除。"
+                )
             for kind in value.missing_required:
                 self._append_log(f"缺少必需输入：{self.input_panel.kind_label(kind)}")
             for error in value.errors:
@@ -522,6 +563,50 @@ class MainWindow(QMainWindow):
         self.load_heatmap.clear_batch()
         self._clear_selected_network()
 
+    def edit_sender_selection(self) -> None:
+        inspection = self._inspection
+        if self.task_active or inspection is None or not inspection.can_select_senders:
+            return
+        dialog = SenderSelectionDialog(inspection, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selection = dialog.selection_config
+        if selection is None:
+            return
+        try:
+            updated = self._backend.apply_sender_selection(inspection, selection)
+        except Exception as exc:
+            self._show_error(
+                "无法应用发送节点选择",
+                str(exc),
+                f"{type(exc).__name__}: {exc}",
+            )
+            return
+        changed = selection != inspection.sender_selection
+        if changed and self._result is not None:
+            self._reset_current_results()
+            self._append_log(
+                "发送节点选择已修改；旧优化结果已失效并从当前界面清除，请重新运行。"
+            )
+        self._inspection = updated
+        self._sender_selection_cache = updated.sender_selection
+        self.input_panel.set_inspection(updated)
+        self.settings_panel.set_inspection(updated)
+        target = self._inspection_target_state(updated)
+        if self._state.state is not target and self._state.can_transition(target):
+            self._state.transition(target)
+        self._append_log(
+            f"发送节点筛选已确认：处理 {len(updated.sender_selection_summaries)} 个 DBC，"
+            f"最终可优化网段 {len(updated.optimizable_networks)} 个。"
+        )
+        self._refresh_controls()
+
+    @staticmethod
+    def _inspection_target_state(inspection: WorkspaceInspection) -> WorkflowState:
+        if inspection.can_select_senders and not inspection.sender_selection_ready:
+            return WorkflowState.AWAITING_SENDER_SELECTION
+        return WorkflowState.READY if inspection.can_optimize else WorkflowState.INCOMPLETE
+
     def _refresh_controls(self) -> None:
         active = self.task_active or self._state.state in {
             WorkflowState.IMPORTING,
@@ -534,9 +619,28 @@ class MainWindow(QMainWindow):
             self._backend_availability.can_optimize
             and self._inspection is not None
             and self._inspection.can_optimize
+            and self.settings_panel.can_build_request()
         )
-        self.settings_panel.setEnabled(not active and ready)
+        settings_available = (
+            self._inspection is not None
+            and (self._inspection.can_optimize or self._inspection.can_select_senders)
+        )
+        self.settings_panel.setEnabled(not active and settings_available)
         self.progress_panel.set_state(self._state.state, ready_to_run=ready and not active)
+        if (
+            self._inspection is not None
+            and not self._inspection.sender_selection_ready
+            and self._inspection.can_select_senders
+        ):
+            reason = "请先完成 DBC 本机发送节点选择。"
+            self.progress_panel.set_unavailable_reason(reason)
+            self.progress_panel.run_button.setToolTip(reason)
+        elif self._inspection is not None and self._inspection.can_optimize and not ready:
+            reason = "请检查批量优化参数。"
+            self.progress_panel.set_unavailable_reason(reason)
+            self.progress_panel.run_button.setToolTip(reason)
+        else:
+            self.progress_panel.run_button.setToolTip("")
         if self._state.state is WorkflowState.INCOMPLETE and self._inspection is not None:
             if self._inspection.missing_required:
                 missing = "、".join(

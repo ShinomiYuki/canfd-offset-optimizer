@@ -273,15 +273,15 @@ def test_single_unoptimizable_dbc_shows_precise_blocking_reason(
     window.import_sources((dbc,))
     qtbot.waitUntil(
         lambda: not window.task_active
-        and window.workflow_state is WorkflowState.INCOMPLETE,
+        and window.workflow_state is WorkflowState.AWAITING_SENDER_SELECTION,
         timeout=5_000,
     )
 
     assert window.inspection is not None
     assert window.inspection.missing_required == ()
-    assert not window.inspection.optimizable_networks
-    assert "没有可优化" in window.input_panel.required_label.text()
-    assert "DBC 必须包含周期 CAN FD TX" in window.progress_panel.status_label.text()
+    assert not window.inspection.sender_selection_ready
+    assert "待选择 DBC 本机发送节点" in window.input_panel.required_label.text()
+    assert window.progress_panel.status_label.text() == "请先完成 DBC 本机发送节点选择。"
     assert not window.progress_panel.run_button.isEnabled()
 
 

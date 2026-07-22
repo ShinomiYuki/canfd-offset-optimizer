@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QAbstractItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -17,9 +18,12 @@ from PySide6.QtWidgets import (
 
 from ..view_models import (
     ImportDetailsTableModel,
+    MessageEligibilityFilterProxy,
+    MessageEligibilityTableModel,
     NetworkDetailsTableModel,
     RouteExclusionFilterProxy,
     RouteExclusionTableModel,
+    SenderSelectionSummaryTableModel,
 )
 
 
@@ -31,6 +35,8 @@ class ProjectDetailsDialog(QDialog):
         network_model: NetworkDetailsTableModel,
         import_model: ImportDetailsTableModel,
         routing_model: RouteExclusionTableModel,
+        sender_summary_model: SenderSelectionSummaryTableModel,
+        message_eligibility_model: MessageEligibilityTableModel,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -57,6 +63,40 @@ class ProjectDetailsDialog(QDialog):
                 str(self.routing_filter.currentData())
             )
         )
+        self.sender_summary_table = self._table(sender_summary_model)
+        self.message_eligibility_proxy = MessageEligibilityFilterProxy(
+            message_eligibility_model
+        )
+        self.message_eligibility_table = self._table(
+            self.message_eligibility_proxy
+        )
+        self.message_filter = QComboBox()
+        for label, value in (
+            ("全部", "all"),
+            ("参与优化", "final"),
+            ("其他 ECU 报文", "unselected"),
+            ("路由报文", "routing"),
+            ("非周期报文", "non_periodic"),
+            ("异常报文", "error"),
+        ):
+            self.message_filter.addItem(label, value)
+        self.message_filter.currentIndexChanged.connect(
+            lambda _index: self.message_eligibility_proxy.set_filter_name(
+                str(self.message_filter.currentData())
+            )
+        )
+        sender_page = QWidget()
+        sender_layout = QVBoxLayout(sender_page)
+        sender_layout.addWidget(QLabel("DBC 级发送节点筛选摘要"))
+        sender_layout.addWidget(self.sender_summary_table, 1)
+        sender_filter_layout = QHBoxLayout()
+        sender_filter_layout.addWidget(QLabel("报文筛选："))
+        sender_filter_layout.addWidget(self.message_filter)
+        sender_filter_layout.addStretch(1)
+        sender_layout.addLayout(sender_filter_layout)
+        sender_layout.addWidget(QLabel("报文级资格与排除原因"))
+        sender_layout.addWidget(self.message_eligibility_table, 2)
+
         routing_page = QWidget()
         routing_layout = QVBoxLayout(routing_page)
         filter_layout = QHBoxLayout()
@@ -67,6 +107,7 @@ class ProjectDetailsDialog(QDialog):
         routing_layout.addWidget(self.routing_table)
         self.tabs.addTab(self.network_table, "网段详情")
         self.tabs.addTab(self.import_table, "导入文件详情")
+        self.tabs.addTab(sender_page, "发送节点筛选")
         self.tabs.addTab(routing_page, "路由报文排除")
         self.weight_strategy_label = QLabel(
             "权重策略：按物理网段独立应用\n"
@@ -88,13 +129,11 @@ class ProjectDetailsDialog(QDialog):
         self.network_table.resizeColumnsToContents()
         self.import_table.resizeColumnsToContents()
         self.routing_table.resizeColumnsToContents()
+        self.sender_summary_table.resizeColumnsToContents()
+        self.message_eligibility_table.resizeColumnsToContents()
 
     @staticmethod
-    def _table(
-        model: NetworkDetailsTableModel
-        | ImportDetailsTableModel
-        | RouteExclusionFilterProxy,
-    ) -> QTableView:
+    def _table(model: QAbstractItemModel) -> QTableView:
         table = QTableView()
         table.setModel(model)
         table.setAlternatingRowColors(True)

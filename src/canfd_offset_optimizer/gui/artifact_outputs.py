@@ -142,6 +142,21 @@ def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> P
         "final_optimized_message_count": (
             request.inspection.final_eligible_message_count
         ),
+        "sender_node_selection": {
+            "confirmed": request.sender_selection.confirmed,
+            "dbc_revision": request.sender_selection.dbc_revision,
+            "dbc_selections": [
+                {
+                    "dbc_id": summary.dbc_id,
+                    "dbc_file": summary.dbc_file,
+                    "network_id": summary.network_id,
+                    "network_name": summary.network_name,
+                    "selected_transmitters": list(summary.selected_transmitters),
+                    "excluded_by_user": summary.excluded_by_user,
+                }
+                for summary in request.inspection.sender_selection_summaries
+            ],
+        },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -196,6 +211,59 @@ def write_routing_exclusion_csv(
                     "；".join(filter(None, (record.note, issues))),
                 )
             )
+    return path
+
+
+def write_message_eligibility_csv(
+    request: GuiBatchOptimizationRequest, path: Path
+) -> Path:
+    """Persist the complete per-message transmitter/routing eligibility audit."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(
+            (
+                "dbc_id",
+                "dbc_file",
+                "network_id",
+                "network_name",
+                "can_id",
+                "message_name",
+                "transmitter_nodes",
+                "selected_transmitter_match",
+                "periodic_status",
+                "routing_match",
+                "final_status",
+                "exclusion_reason",
+            )
+        )
+        for summary in request.inspection.sender_selection_summaries:
+            for record in summary.messages:
+                writer.writerow(
+                    (
+                        record.dbc_id,
+                        record.dbc_file,
+                        record.network_id,
+                        record.network_name,
+                        (
+                            f"0x{record.can_id:X}"
+                            if record.can_id is not None
+                            else ""
+                        ),
+                        record.message_name,
+                        "|".join(record.transmitter_nodes),
+                        str(record.selected_transmitter_match).lower(),
+                        (
+                            "valid_periodic"
+                            if record.cycle_time_us is not None
+                            else "non_periodic"
+                        ),
+                        str(record.routing_match).lower(),
+                        record.final_status.value,
+                        record.exclusion_reason,
+                    )
+                )
     return path
 
 

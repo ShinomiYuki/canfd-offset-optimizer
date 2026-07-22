@@ -93,10 +93,34 @@ user_input/<timestamp>_<project>/
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。
 `..._ADAS BUS_Matrix_...` 一类 DBC 文件名会显示并匹配为 `ADAS_BUS`，完整文件名仍只作为来源信息。
 
+
+### 必须先选择 DBC 本机发送节点
+
+导入和解析完成后，主界面进入“待选择发送节点”，此时“开始全部网段优化”保持禁用，并提示
+“请先完成 DBC 本机发送节点选择。”点击批量设置中的“选择发送节点”打开独立窗口：
+
+1. 左侧逐个选择 DBC；
+2. 右侧勾选该 DBC 中代表本机 ECU 的一个或多个发送节点；
+3. 如果某个 DBC 只用于参考，则明确勾选“该 DBC 不参与本次优化”；
+4. 所有 DBC 都处理完成后点击“应用选择”。
+
+程序不会根据 `FLZCU`、`GW`、`VCU` 或文件名自动猜测本机节点。节点名采用精确匹配；
+“在其他 DBC 中选择同名节点”只有用户主动点击后才传播完全相同的名称。取消窗口不会应用草稿。
+未知/空发送节点和 `Vector__XXX` 会显示为不可选择的审计项。
+
+预览依次显示 DBC 总报文、所选节点发送数、基础合资格数、其他 ECU 排除数、路由排除数和最终
+参与优化数。只有确认选择、输入合法且至少一个网段存在最终合资格报文时才能开始。所有 DBC
+明确排除、所选节点没有周期候选或候选全部被路由表排除时仍不能运行。
+
+选择按工作区相对路径和文件 SHA-256 形成的 `dbc_id` 保存。重新导入时，相同内容可安全保留；
+新增或内容变化的 DBC 回到未处理，不能仅凭同名文件复用。运行完成后修改选择会立即清空当前旧
+结果并要求重新优化，避免新配置继续显示旧 Offset 或负载曲线。
+
 ## 资格判定与批量状态
 
-基础资格由核心 DBC parser 决定。路由表只会从这批原本符合资格的周期 TX 报文中执行排除，
-匹配成功的 `routing_excluded` 报文在创建搜索状态和调用 GCLS 前即被移除。每个 DBC 都会在工程汇总中
+正式资格顺序为“用户所选本机发送节点 → 核心基础资格 → 路由表目标侧排除”。只有发送节点
+与当前 DBC 选择集合有交集的报文才交给核心继续检查；路由表再从这批本机基础合资格周期 TX 中
+执行排除。匹配成功的 `routing_excluded` 报文在创建搜索状态和调用 GCLS 前即被移除。每个 DBC 都会在工程汇总中
 保留一行：可优化的 CAN FD 或 Classic CAN 网段进入 GCLS；没有可优化周期 TX、同一物理
 网段混合两种协议、全部基础资格报文均被路由排除或其他核心解析不支持的网段标记为
 `skipped`，并显示明确原因。
@@ -134,6 +158,7 @@ user_output/<YYYYMMDD_HHMMSS_ffffff>/
 │   ├── networks_summary.csv
 │   ├── run_config.json
 │   ├── routing_exclusion_summary.csv
+│   ├── message_eligibility.csv
 │   └── <network>/offsets.csv
 └── dbc/
     └── <原 DBC 文件名>.dbc
@@ -141,8 +166,10 @@ user_output/<YYYYMMDD_HHMMSS_ffffff>/
 
 `results/networks_summary.csv` 汇总所有网段（包括失败、跳过和取消）；成功网段的 Offset 明细放在
 各自子目录。`routing_exclusion_summary.csv` 保留原始目标网段、规范化 `network_id`、规范化及原始 CAN ID、Excel/DBC 报文名、
-匹配状态、排除状态、来源文件、Sheet、行号和诊断。`run_config.json` 记录路由表、记录、匹配、
-未找到、歧义、重复、实际排除和最终参与优化数量。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
+匹配状态、排除状态、来源文件、Sheet、行号和诊断。`message_eligibility.csv` 逐条记录 DBC、
+网段、CAN ID、报文名、全部 transmitter、所选节点命中、周期、路由命中、最终状态和排除原因。
+`run_config.json` 除路由统计外，还在 `sender_node_selection` 中记录 dbc_id、文件、网段、所选节点、
+明确排除和 revision。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段默认
 0～2000 ms 的重复稳态负载曲线，以及不重复的单个稳态窗口拥挤热力图。
 
 `dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。核心 parser 会把 CAN FD DBC 的

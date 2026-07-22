@@ -16,8 +16,8 @@ class QuickStartPage(QScrollArea):
         title = QLabel("快速开始")
         title.setStyleSheet("font-size: 20px; font-weight: bold;")
         intro = QLabel(
-            "三步完成：① 左侧导入工程目录；② 检查网段和参数；"
-            "③ 点击“开始全部网段优化”，再从结果概览选择网段查看图表。"
+            "四步完成：① 左侧导入工程目录；② 为每个 DBC 选择本机发送节点或明确排除；"
+            "③ 检查参数并点击“开始全部网段优化”；④ 从结果概览选择网段查看图表。"
         )
         intro.setWordWrap(True)
         layout.addWidget(title)
@@ -33,7 +33,10 @@ class QuickStartPage(QScrollArea):
                 "不能由当前 ECU Offset 调度的报文；直接与其他工程文件一起拖入即可。"
                 "标准网关配置表只读取“直接报文路由”页的目标侧；旧版完整通信路由表继续读取 "
                 "Routing(FLZCU) 左域页并展开已勾选的 CAN/CAN FD 目标网段。"
-                "建议直接选择包含工程文件的总目录。",
+                "建议直接选择包含工程文件的总目录。<br>"
+                "<b>本机发送节点</b>：导入后必须在独立窗口逐个 DBC 明确勾选。程序不会按 ECU 名称"
+                "自动猜测；其他 ECU 的 Matrix 报文会在核心请求和 GCLS 之前排除。没有本机节点的"
+                "参考 DBC 应明确选择“不参与本次优化”。",
             )
         )
         layout.addWidget(
@@ -72,6 +75,8 @@ class QuickStartPage(QScrollArea):
                 "<b>logs/</b> 保存批次和各网段日志；<b>plots/</b> 保存每个成功网段的负载图与热力图；"
                 "<b>results/</b> 保存全网段汇总 CSV 和各网段 Offset CSV；<br>"
                 "其中 <b>routing_exclusion_summary.csv</b> 保存路由表逐行匹配与排除审计；"
+                "<b>message_eligibility.csv</b> 说明每条报文为何进入或未进入优化；"
+                "<b>run_config.json</b> 保存本次每个 DBC 的发送节点选择；"
                 "<b>dbc/</b> 保存写入优化后 Offset 的 DBC 副本。批次目录只使用时间戳，原始用户 "
                 "DBC 不会被修改；若 DBC 写回失败，CSV、图表和 GUI 优化结果仍会保留并显示警告。",
             )

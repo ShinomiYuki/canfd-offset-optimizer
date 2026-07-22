@@ -26,8 +26,10 @@ from ..contracts import (
 )
 from ..view_models import (
     ImportDetailsTableModel,
+    MessageEligibilityTableModel,
     NetworkDetailsTableModel,
     RouteExclusionTableModel,
+    SenderSelectionSummaryTableModel,
 )
 from .project_details_dialog import ProjectDetailsDialog
 
@@ -91,10 +93,14 @@ class InputPanel(QGroupBox):
         self.network_details_model = NetworkDetailsTableModel()
         self.import_details_model = ImportDetailsTableModel()
         self.routing_details_model = RouteExclusionTableModel()
+        self.sender_summary_model = SenderSelectionSummaryTableModel()
+        self.message_eligibility_model = MessageEligibilityTableModel()
         self.details_dialog = ProjectDetailsDialog(
             self.network_details_model,
             self.import_details_model,
             self.routing_details_model,
+            self.sender_summary_model,
+            self.message_eligibility_model,
             self,
         )
         self.drop_area = ImportDropArea()
@@ -170,15 +176,19 @@ class InputPanel(QGroupBox):
         self.set_session(inspection.session)
         self.network_details_model.set_inspection(inspection)
         self.routing_details_model.set_inspection(inspection)
+        self.sender_summary_model.set_inspection(inspection)
+        self.message_eligibility_model.set_inspection(inspection)
         missing = [self._KIND_LABELS[kind] for kind in inspection.missing_required]
         if missing:
             self.required_label.setText(f"缺少必需输入：{'、'.join(missing)}")
         elif inspection.errors:
             self.required_label.setText("工程冲突：" + "；".join(inspection.errors))
+        elif not inspection.sender_selection_ready:
+            self.required_label.setText("输入齐全，待选择 DBC 本机发送节点")
         elif not inspection.optimizable_networks:
-            self.required_label.setText("输入齐全，但没有可优化的周期 CAN FD TX 网段")
+            self.required_label.setText("输入齐全，但没有最终合资格的本机周期 TX 网段")
         else:
-            self.required_label.setText("必需输入齐全")
+            self.required_label.setText("必需输入齐全，发送节点筛选已确认")
         has_arxml = bool(inspection.session.records_of_kind(InputKind.ARXML))
         self.optional_label.setText("可选输入：已发现 ARXML" if has_arxml else "可选输入：未发现 ARXML")
         routing = inspection.routing_exclusion
@@ -191,16 +201,24 @@ class InputPanel(QGroupBox):
         else:
             self.routing_label.setText("路由报文表：未提供")
         discovered = len(inspection.networks)
-        optimizable = len(inspection.optimizable_networks)
-        self.networks_label.setText(
-            f"发现网段：{discovered} / 可优化：{optimizable} / 已跳过：{discovered - optimizable}"
-        )
+        if inspection.sender_selection_ready:
+            optimizable = len(inspection.optimizable_networks)
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：{optimizable} / "
+                f"已跳过：{discovered - optimizable}"
+            )
+        else:
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：待发送节点筛选 / 已跳过：—"
+            )
 
     def clear_display(self) -> None:
         self._has_session = False
         self.import_details_model.set_session(None)
         self.network_details_model.set_inspection(None)
         self.routing_details_model.set_inspection(None)
+        self.sender_summary_model.set_inspection(None)
+        self.message_eligibility_model.set_inspection(None)
         self.details_dialog.hide()
         self.session_label.setText("尚未导入工程")
         self.session_label.setToolTip("")

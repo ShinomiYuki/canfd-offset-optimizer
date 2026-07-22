@@ -69,6 +69,26 @@ class RouteRecordIssue(str, Enum):
     DUPLICATE_CONFLICT_WARNING = "duplicate_conflict_warning"
 
 
+class SenderSelectionDbcStatus(str, Enum):
+    UNPROCESSED = "unprocessed"
+    SELECTED = "selected"
+    EXCLUDED_BY_USER = "excluded_by_user"
+    NO_IDENTIFIABLE_TRANSMITTER = "no_identifiable_transmitter"
+    INPUT_ERROR = "input_error"
+
+
+class MessageEligibilityStatus(str, Enum):
+    FINAL_ELIGIBLE = "final_eligible"
+    BASE_ELIGIBLE = "base_eligible"
+    EXCLUDED_UNSELECTED_TRANSMITTER = "excluded_unselected_transmitter"
+    EXCLUDED_BY_USER = "excluded_by_user"
+    NON_PERIODIC = "non_periodic"
+    UNSUPPORTED_SEND_TYPE = "unsupported_send_type"
+    ROUTING_EXCLUDED = "routing_excluded"
+    NO_VALID_TRANSMITTER = "no_valid_transmitter"
+    INPUT_ERROR = "input_error"
+
+
 CLASSIC_WEIGHT_MODEL = "payload_bytes_approximation"
 
 
@@ -305,6 +325,158 @@ class RoutingExclusionReport:
 
 
 @dataclass(frozen=True, slots=True)
+class SenderNodeStats:
+    node_name: str
+    message_count: int
+    valid_periodic_count: int
+    classic_can_count: int
+    can_fd_count: int
+    base_candidate_count: int
+    note: str = ""
+    selectable: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.node_name.strip():
+            raise ValueError("sender node name must not be empty")
+        counts = (
+            self.message_count,
+            self.valid_periodic_count,
+            self.classic_can_count,
+            self.can_fd_count,
+            self.base_candidate_count,
+        )
+        if min(counts) < 0 or self.classic_can_count + self.can_fd_count != self.message_count:
+            raise ValueError("sender node counts are inconsistent")
+
+
+@dataclass(frozen=True, slots=True)
+class MessageEligibilityRecord:
+    dbc_id: str
+    dbc_file: str
+    network_id: str
+    network_name: str
+    can_id: int | None
+    is_extended: bool
+    message_name: str
+    transmitter_nodes: tuple[str, ...]
+    selected_transmitter_match: bool
+    cycle_time_us: int | None
+    frame_protocol: FrameProtocol | None
+    base_eligible: bool
+    routing_match: bool
+    final_status: MessageEligibilityStatus
+    exclusion_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in (self.dbc_id, self.dbc_file, self.network_id, self.message_name)):
+            raise ValueError("message eligibility identity must not be empty")
+        if self.can_id is not None and not 0 <= self.can_id <= 0x1FFFFFFF:
+            raise ValueError("message eligibility CAN ID is invalid")
+        normalized = tuple(name.strip() for name in self.transmitter_nodes)
+        if any(not name for name in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("transmitter nodes must be unique non-empty names")
+        object.__setattr__(self, "transmitter_nodes", normalized)
+        if self.cycle_time_us is not None and self.cycle_time_us <= 0:
+            raise ValueError("cycle time must be positive when present")
+
+
+@dataclass(frozen=True, slots=True)
+class DbcSenderSelectionSummary:
+    dbc_id: str
+    dbc_file: str
+    network_id: str
+    network_name: str
+    source_workspace_path: Path
+    sha256: str
+    node_stats: tuple[SenderNodeStats, ...]
+    messages: tuple[MessageEligibilityRecord, ...]
+    status: SenderSelectionDbcStatus = SenderSelectionDbcStatus.UNPROCESSED
+    selected_transmitters: tuple[str, ...] = ()
+    excluded_by_user: bool = False
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in (self.dbc_id, self.dbc_file, self.network_id, self.sha256)):
+            raise ValueError("DBC sender selection identity must not be empty")
+        if self.source_workspace_path.is_absolute():
+            raise ValueError("DBC sender selection path must be workspace-relative")
+        if len(self.sha256) != 64:
+            raise ValueError("DBC sender selection SHA-256 is invalid")
+        names = tuple(item.node_name for item in self.node_stats)
+        if len(set(names)) != len(names):
+            raise ValueError("DBC sender node names must be unique")
+        selected = tuple(name.strip() for name in self.selected_transmitters)
+        if any(name not in names for name in selected) or len(set(selected)) != len(selected):
+            raise ValueError("selected transmitters must exist in the DBC inventory")
+        object.__setattr__(self, "selected_transmitters", selected)
+        if self.excluded_by_user and selected:
+            raise ValueError("excluded DBC must not retain selected transmitters")
+
+    @property
+    def message_count(self) -> int:
+        return len(self.messages)
+
+    @property
+    def selected_sender_message_count(self) -> int:
+        return sum(record.selected_transmitter_match for record in self.messages)
+
+    @property
+    def base_eligible_count(self) -> int:
+        return sum(
+            record.base_eligible
+            and record.selected_transmitter_match
+            and record.final_status is not MessageEligibilityStatus.INPUT_ERROR
+            for record in self.messages
+        )
+
+    @property
+    def unselected_transmitter_count(self) -> int:
+        return sum(
+            record.final_status is MessageEligibilityStatus.EXCLUDED_UNSELECTED_TRANSMITTER
+            for record in self.messages
+        )
+
+    @property
+    def routing_excluded_count(self) -> int:
+        return sum(record.final_status is MessageEligibilityStatus.ROUTING_EXCLUDED for record in self.messages)
+
+    @property
+    def final_eligible_count(self) -> int:
+        return sum(record.final_status is MessageEligibilityStatus.FINAL_ELIGIBLE for record in self.messages)
+
+
+@dataclass(frozen=True, slots=True)
+class SenderNodeSelectionConfig:
+    selected_transmitters_by_dbc: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    excluded_dbc_ids: frozenset[str] = frozenset()
+    confirmed: bool = False
+    dbc_revision: str = ""
+
+    def __post_init__(self) -> None:
+        normalized: dict[str, frozenset[str]] = {}
+        for dbc_id, names in self.selected_transmitters_by_dbc.items():
+            key = dbc_id.strip()
+            values = frozenset(name.strip() for name in names if name.strip())
+            if not key or not values:
+                raise ValueError("sender selection entries require a DBC ID and node names")
+            normalized[key] = values
+        excluded = frozenset(value.strip() for value in self.excluded_dbc_ids if value.strip())
+        if set(normalized).intersection(excluded):
+            raise ValueError("a DBC cannot be both selected and excluded")
+        if self.confirmed and not self.dbc_revision.strip():
+            raise ValueError("confirmed sender selection requires a DBC revision")
+        object.__setattr__(self, "selected_transmitters_by_dbc", MappingProxyType(normalized))
+        object.__setattr__(self, "excluded_dbc_ids", excluded)
+
+    def selected_for(self, dbc_id: str) -> frozenset[str]:
+        return self.selected_transmitters_by_dbc.get(dbc_id, frozenset())
+
+    def is_complete_for(self, dbc_ids: frozenset[str]) -> bool:
+        handled = frozenset(self.selected_transmitters_by_dbc).union(self.excluded_dbc_ids)
+        return handled == dbc_ids
+
+
+@dataclass(frozen=True, slots=True)
 class NetworkSummary:
     """One discovered network with stable identity and explicit source metadata."""
 
@@ -324,6 +496,12 @@ class NetworkSummary:
     final_eligible_message_count: int | None = None
     warnings: tuple[str, ...] = ()
     unoptimizable_reason: str | None = None
+    dbc_id: str | None = None
+    dbc_message_count: int = 0
+    selected_transmitters: tuple[str, ...] = ()
+    selected_transmitter_message_count: int = 0
+    unselected_transmitter_excluded_count: int = 0
+    excluded_by_user: bool = False
 
     def __post_init__(self) -> None:
         identity = (self.network_id, self.network_name, self.display_name, self.source_file)
@@ -333,6 +511,17 @@ class NetworkSummary:
             raise ValueError("network source_workspace_path must be relative")
         if self.message_count < 0:
             raise ValueError("network message_count must be non-negative")
+        sender_counts = (
+            self.dbc_message_count,
+            self.selected_transmitter_message_count,
+            self.unselected_transmitter_excluded_count,
+        )
+        if min(sender_counts) < 0:
+            raise ValueError("network sender selection counts must be non-negative")
+        if self.dbc_id is not None and not self.dbc_id.strip():
+            raise ValueError("network dbc_id must not be blank")
+        if len(set(self.selected_transmitters)) != len(self.selected_transmitters):
+            raise ValueError("selected transmitter names must be unique")
         base_count = (
             self.message_count
             if self.base_eligible_message_count is None
@@ -394,6 +583,11 @@ class WorkspaceInspection:
     routing_exclusion: RoutingExclusionReport = field(
         default_factory=RoutingExclusionReport
     )
+    sender_selection: SenderNodeSelectionConfig = field(
+        default_factory=SenderNodeSelectionConfig
+    )
+    sender_selection_summaries: tuple[DbcSenderSelectionSummary, ...] = ()
+    dbc_revision: str = ""
 
     def __post_init__(self) -> None:
         network_ids = tuple(network.network_id for network in self.networks)
@@ -401,10 +595,56 @@ class WorkspaceInspection:
             raise ValueError("inspection network IDs must be unique")
         if len(set(self.missing_required)) != len(self.missing_required):
             raise ValueError("missing input kinds must be unique")
+        summary_ids = tuple(summary.dbc_id for summary in self.sender_selection_summaries)
+        if len(set(summary_ids)) != len(summary_ids):
+            raise ValueError("sender selection DBC IDs must be unique")
+        if self.sender_selection_summaries and not self.dbc_revision.strip():
+            raise ValueError("sender selection inventories require a DBC revision")
+        if self.sender_selection_summaries:
+            network_dbc_ids = frozenset(
+                network.dbc_id for network in self.networks if network.dbc_id is not None
+            )
+            if network_dbc_ids != frozenset(summary_ids):
+                raise ValueError("sender selection inventories must match discovered DBCs")
 
     @property
     def can_optimize(self) -> bool:
-        return bool(self.optimizable_networks) and not self.missing_required and not self.errors
+        return (
+            bool(self.optimizable_networks)
+            and not self.missing_required
+            and not self.errors
+            and self.sender_selection_ready
+        )
+
+    @property
+    def can_select_senders(self) -> bool:
+        return bool(self.sender_selection_summaries) and not self.missing_required and not self.errors
+
+    @property
+    def sender_selection_ready(self) -> bool:
+        if not self.sender_selection_summaries:
+            return True
+        dbc_ids = frozenset(item.dbc_id for item in self.sender_selection_summaries)
+        if not (
+            self.sender_selection.confirmed
+            and self.sender_selection.dbc_revision == self.dbc_revision
+            and self.sender_selection.is_complete_for(dbc_ids)
+        ):
+            return False
+        return all(
+            (
+                summary.dbc_id in self.sender_selection.excluded_dbc_ids
+                and summary.excluded_by_user
+                and not summary.selected_transmitters
+            )
+            or (
+                summary.dbc_id not in self.sender_selection.excluded_dbc_ids
+                and frozenset(summary.selected_transmitters)
+                == self.sender_selection.selected_for(summary.dbc_id)
+                and bool(summary.selected_transmitters)
+            )
+            for summary in self.sender_selection_summaries
+        )
 
     @property
     def optimizable_networks(self) -> tuple[NetworkSummary, ...]:
@@ -464,6 +704,9 @@ class GuiBatchOptimizationRequest:
     output_root: Path
     classic_can_weight: WeightMode = WeightMode.PAYLOAD_BYTES
     offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
+    sender_selection: SenderNodeSelectionConfig = field(
+        default_factory=SenderNodeSelectionConfig
+    )
 
     def __post_init__(self) -> None:
         if not self.inspection.can_optimize:
@@ -484,6 +727,11 @@ class GuiBatchOptimizationRequest:
             raise ValueError("enable_triple_search must be boolean")
         if not isinstance(self.offset_search, OffsetSearchConfig):
             raise ValueError("offset_search must be an OffsetSearchConfig")
+        if self.inspection.sender_selection_summaries:
+            if not self.sender_selection.confirmed:
+                raise ValueError("DBC sender node selection is not confirmed")
+            if self.sender_selection != self.inspection.sender_selection:
+                raise ValueError("request sender selection does not match the inspection")
         if any(
             self.can_fd_weight not in network.available_weight_modes
             for network in self.inspection.optimizable_networks
@@ -909,6 +1157,13 @@ class OptimizationBackend(Protocol):
         cancellation_token: CancellationToken,
     ) -> WorkspaceInspection:
         """Inspect only workspace copies and discover every network."""
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
+    ) -> WorkspaceInspection:
+        """Confirm local transmitter selections and derive final eligibility."""
 
     def optimize_all_networks(
         self,

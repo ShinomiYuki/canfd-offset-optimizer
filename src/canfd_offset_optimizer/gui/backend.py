@@ -15,6 +15,7 @@ from .contracts import (
     OptimizationCancelled,
     ProgressCallback,
     ProgressUpdate,
+    SenderNodeSelectionConfig,
     WorkspaceInspection,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "OptimizationCancelled",
     "ProgressCallback",
     "ProgressUpdate",
+    "SenderNodeSelectionConfig",
     "WorkspaceInspection",
 ]

@@ -66,6 +66,7 @@ def load_project(
     channel_override: str | None = None,
     objective_mode_override: ObjectiveMode | None = None,
     offset_search_override: OffsetSearchConfig | None = None,
+    selected_transmitters: frozenset[str] | None = None,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
@@ -85,6 +86,7 @@ def load_project(
     dbc = parse_dbc(
         dbc_path,
         allowed_offsets_us=config.optimization.allowed_offsets_us,
+        selected_transmitters=selected_transmitters,
     )
     warnings = list(dbc.warnings)
     frame_protocol = dbc.messages[0].frame_protocol

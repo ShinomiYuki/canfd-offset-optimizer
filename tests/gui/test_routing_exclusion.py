@@ -17,6 +17,7 @@ from canfd_offset_optimizer.gui.contracts import (
     OptimizationMode,
     RestartMode,
     RestartSettings,
+    SenderNodeSelectionConfig,
     RouteExclusionStatus,
     RouteMatchStatus,
     RouteRecordIssue,
@@ -425,6 +426,23 @@ def _project_with_offsets(root: Path, networks: tuple[str, ...]) -> Path:
     return root
 
 
+
+def _confirm_all_sender_nodes(
+    backend: RealBackend, inspection
+):
+    selected = {
+        summary.dbc_id: frozenset(
+            item.node_name for item in summary.node_stats if item.selectable
+        )
+        for summary in inspection.sender_selection_summaries
+    }
+    config = SenderNodeSelectionConfig(
+        selected_transmitters_by_dbc=selected,
+        confirmed=True,
+        dbc_revision=inspection.dbc_revision,
+    )
+    return backend.apply_sender_selection(inspection, config)
+
 def _request(inspection, output_root: Path) -> GuiBatchOptimizationRequest:
     return GuiBatchOptimizationRequest(
         inspection=inspection,
@@ -440,6 +458,7 @@ def _request(inspection, output_root: Path) -> GuiBatchOptimizationRequest:
         candidate_pool_size=1,
         enable_triple_search=False,
         output_root=output_root,
+        sender_selection=inspection.sender_selection,
     )
 
 
@@ -464,6 +483,7 @@ def test_real_backend_accepts_standard_gateway_table(tmp_path: Path) -> None:
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
 
     by_name = {network.network_name: network for network in inspection.networks}
     assert inspection.can_optimize
@@ -518,6 +538,7 @@ def test_matrix_dbc_name_maps_standard_route_to_current_network(tmp_path: Path) 
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
 
     assert not inspection.errors
     assert len(inspection.networks) == 1
@@ -540,6 +561,7 @@ def test_real_backend_excludes_routes_before_gcls_and_keeps_same_id_other_networ
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
 
     by_name = {network.network_name: network for network in inspection.networks}
     assert session.records_of_kind(InputKind.ROUTING_TABLE)
@@ -620,11 +642,12 @@ def test_all_routes_in_one_network_skip_only_that_network(tmp_path: Path) -> Non
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
     by_name = {network.network_name: network for network in inspection.networks}
 
     assert not by_name["IC"].is_optimizable
     assert by_name["IC"].unoptimizable_reason == (
-        "跳过：所有可优化周期 TX 报文均为路由报文"
+        "所选本机节点的合资格周期 TX 均被路由表排除"
     )
     assert by_name["PT"].is_optimizable
     batch = backend.optimize_all_networks(
@@ -646,6 +669,7 @@ def test_invalid_routing_schema_blocks_inspection(tmp_path: Path) -> None:
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
 
     assert not inspection.can_optimize
     assert any("路由报文排除表解析失败" in error for error in inspection.errors)
@@ -657,6 +681,7 @@ def test_no_routing_table_preserves_existing_optimization(tmp_path: Path) -> Non
     token = CancellationToken()
     session = backend.import_inputs((source,), lambda _update: None, token)
     inspection = backend.inspect_workspace(session, lambda _update: None, token)
+    inspection = _confirm_all_sender_nodes(backend, inspection)
 
     assert inspection.routing_exclusion.table_count == 0
     assert inspection.routing_excluded_message_count == 0
@@ -710,7 +735,7 @@ def test_gui_summary_and_details_trace_source_sheet_and_row(
     assert model.data(model.index(0, 6)) == "routes.xlsx"
     assert model.data(model.index(0, 7)) == "Audit"
     assert model.data(model.index(0, 8)) == "2"
-    assert panel.details_dialog.tabs.tabText(2) == "路由报文排除"
+    assert panel.details_dialog.tabs.tabText(3) == "路由报文排除"
     panel.details_dialog.routing_proxy.set_filter_name("excluded")
     assert panel.details_dialog.routing_proxy.rowCount() == 1
     panel.details_dialog.routing_proxy.set_filter_name("not_found")

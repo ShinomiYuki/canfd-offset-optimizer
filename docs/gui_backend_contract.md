@@ -3,8 +3,9 @@
 ## 1. 接入状态
 
 当前 `app.py` 默认注入 `RealBackend`。真实 adapter 实现
-`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 允许接触核心
-parser/loader/optimizer 类型，并立即转换为 GUI 不可变 DTO；窗口、worker 和 widgets 不得导入核心类型。
+`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 与纯数据资格服务
+`sender_selection.py` 允许接触核心 parser/model 类型，并立即转换为 GUI 不可变 DTO；窗口、worker 和
+widgets 不得直接导入核心类型。
 
 ## 2. 调用协议
 
@@ -22,6 +23,12 @@ class OptimizationBackend(Protocol):
         session: ImportSession,
         progress_callback: ProgressCallback,
         cancellation_token: CancellationToken,
+    ) -> WorkspaceInspection: ...
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
     ) -> WorkspaceInspection: ...
 
     def optimize_all_networks(
@@ -50,7 +57,9 @@ Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `
 - 缺失的必需输入；
 - 阻塞错误和非阻塞 warnings；
 - 每个网段的帧协议、具体可用权重和自动/固定权重能力。
-- 路由报文表逐行匹配报告，以及每个网段的基础资格数、路由排除数和最终资格数。
+- 路由报文表逐行匹配报告，以及每个网段的基础资格数、路由排除数和最终资格数；
+- 每个 DBC 的稳定 `dbc_id`、内容 SHA-256、发送节点清单、逐报文资格审计和 DBC 集合 revision；
+- 未确认的 `SenderNodeSelectionConfig`。首次导入不得自动选择任何节点，也不得把发现网段数当作可优化网段数。
 
 每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
 `network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
@@ -64,6 +73,32 @@ DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导
 核心 parser 发现 Controller `SHORT-NAME`，再以 DBC 来源签名进行唯一关联；匹配歧义时不得猜测，
 对应 CAN FD 网段只开放 `payload_bytes`。Classic CAN 固定使用
 `payload_bytes_approximation`，不参与 CAN FD 权重选择。GUI 原样显示 `DA` 等网段名，不扩写。
+
+
+## 4.1 DBC 本机发送节点选择契约
+
+每个 DBC 必须按 `dbc_id = hash(工作区相对路径 + 文件 SHA-256)` 独立保存选择。正式配置对象为
+`SenderNodeSelectionConfig`，包含 `selected_transmitters_by_dbc`、`excluded_dbc_ids`、`confirmed`
+和 `dbc_revision`。每个 DBC 必须选择至少一个具体发送节点，或明确标记“该 DBC 不参与本次优化”。
+节点名仅去除首尾空白并精确匹配；不做 contains、大小写猜测或 ECU 名称硬编码。`Vector__XXX`、
+空节点和未知节点进入审计，但不能作为本机节点选择。
+
+多 transmitter 报文按集合交集判定，只要报文发送节点与当前 DBC 的选择集合有交集就命中，且同一
+报文只计数一次。正式顺序固定为：
+
+```text
+selected transmitter intersection
+    → core base eligibility
+    → routing target network + CAN ID exclusion
+    → OptimizationRequest / GCLS
+```
+
+`RealBackend` 将 `selected_transmitters` 传给 `load_project`/`parse_dbc`，随后才重建路由排除后的
+`NetworkModel`。因此其他 ECU 的 Matrix 报文不可能进入 OptimizationRequest、GCLS、assignment、
+负载曲线或 DBC replacement。检查阶段可以预先解析路由表并保存匹配标记，但正式候选应用顺序不变。
+
+DBC 集合或内容变化后通过 revision 重新协调：只有 `dbc_id` 完全一致的条目可保留；新增或 hash
+变化的 DBC 回到未处理，只要存在未处理项就撤销 confirmed。不得仅按文件名复用选择。
 
 ## 5. 批量请求与结果
 
@@ -98,7 +133,9 @@ mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligib
 批次根目录名必须是纯微秒时间戳。`results/networks_summary.csv` 汇总所有网段，成功网段创建 Offset
 明细和图表并尝试生成 DBC 副本，
 失败、跳过和取消网段仍必须写独立日志。`results/routing_exclusion_summary.csv` 保留每个 Excel
-来源行；`run_config.json` 保存项目级路由统计；网段 CSV/日志保存
+来源行；`results/message_eligibility.csv` 保存每条 DBC 报文的发送节点、所选节点命中、周期、路由
+命中、最终状态和排除原因；`run_config.json.sender_node_selection` 保存确认状态、revision 及每个
+DBC 的选择/明确排除。网段 CSV/日志保存
 `base_eligible_message_count`、`routing_excluded_count`、`final_eligible_message_count`。
 
 指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
@@ -134,5 +171,6 @@ mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligib
    成功项仍必须携带完整 `GuiOptimizationResult`，通过
    `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
    basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
-8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是唯一受审计的直接适配边界；
-   后续公共 service 就绪后应替换此处导入，不影响 GUI contracts/widgets。
+8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是受审计的优化适配边界；
+   `sender_selection.py` 仅负责 DBC 发送节点清单、资格预览与 revision 校验。后续公共 service 就绪后
+   应替换这两处核心导入，不影响 GUI contracts/widgets。

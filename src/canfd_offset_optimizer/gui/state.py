@@ -9,6 +9,7 @@ class WorkflowState(str, Enum):
     IDLE = "idle"
     IMPORTING = "importing"
     INSPECTING = "inspecting"
+    AWAITING_SENDER_SELECTION = "awaiting_sender_selection"
     INCOMPLETE = "incomplete"
     READY = "ready"
     RUNNING = "running"
@@ -20,7 +21,13 @@ class WorkflowState(str, Enum):
 
 
 _TERMINAL_RESTARTS = frozenset(
-    {WorkflowState.IMPORTING, WorkflowState.READY, WorkflowState.RUNNING}
+    {
+        WorkflowState.IMPORTING,
+        WorkflowState.AWAITING_SENDER_SELECTION,
+        WorkflowState.INCOMPLETE,
+        WorkflowState.READY,
+        WorkflowState.RUNNING,
+    }
 )
 _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.IDLE: frozenset({WorkflowState.IMPORTING}),
@@ -35,14 +42,35 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.INSPECTING: frozenset(
         {
             WorkflowState.READY,
+            WorkflowState.AWAITING_SENDER_SELECTION,
             WorkflowState.INCOMPLETE,
             WorkflowState.CANCELLING,
             WorkflowState.FAILED,
             WorkflowState.CANCELLED,
         }
     ),
-    WorkflowState.INCOMPLETE: frozenset({WorkflowState.IMPORTING}),
-    WorkflowState.READY: frozenset({WorkflowState.IMPORTING, WorkflowState.RUNNING}),
+    WorkflowState.AWAITING_SENDER_SELECTION: frozenset(
+        {
+            WorkflowState.IMPORTING,
+            WorkflowState.READY,
+            WorkflowState.INCOMPLETE,
+        }
+    ),
+    WorkflowState.INCOMPLETE: frozenset(
+        {
+            WorkflowState.IMPORTING,
+            WorkflowState.AWAITING_SENDER_SELECTION,
+            WorkflowState.READY,
+        }
+    ),
+    WorkflowState.READY: frozenset(
+        {
+            WorkflowState.IMPORTING,
+            WorkflowState.AWAITING_SENDER_SELECTION,
+            WorkflowState.INCOMPLETE,
+            WorkflowState.RUNNING,
+        }
+    ),
     WorkflowState.RUNNING: frozenset(
         {
             WorkflowState.CANCELLING,

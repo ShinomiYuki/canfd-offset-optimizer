@@ -45,6 +45,7 @@ from .contracts import (
     ProgressPhase,
     ProgressUpdate,
     RestartMode,
+    SenderNodeSelectionConfig,
     WeightMode,
     WorkspaceInspection,
 )
@@ -352,6 +353,18 @@ class FixtureBackend:
             warnings=warnings,
             errors=tuple(errors),
         )
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
+    ) -> WorkspaceInspection:
+        """Fixture inventories are intentionally absent; preserve legacy GUI fixtures."""
+        if inspection.sender_selection_summaries:
+            raise BackendError("FixtureBackend 不模拟正式 DBC 发送节点资格。")
+        if selection.selected_transmitters_by_dbc or selection.excluded_dbc_ids:
+            raise BackendError("FixtureBackend 没有可应用的 DBC 发送节点清单。")
+        return inspection
 
     def optimize_all_networks(
         self,

@@ -72,18 +72,19 @@ def test_main_window_uses_count_summary_and_shared_live_details_models(
         "Classic CAN：固定为 Payload 长度近似（payload_bytes）\n"
         "CAN FD：使用批量优化设置中的 CAN FD 权重"
     )
-    assert dialog.tabs.count() == 3
-    assert [dialog.tabs.tabText(index) for index in range(2)] == [
+    assert dialog.tabs.count() == 4
+    assert [dialog.tabs.tabText(index) for index in range(4)] == [
         "网段详情",
         "导入文件详情",
+        "发送节点筛选",
+        "路由报文排除",
     ]
-    assert dialog.tabs.tabText(2) == "路由报文排除"
     assert dialog.network_table.model() is window.input_panel.network_details_model
     assert dialog.import_table.model() is window.input_panel.import_details_model
     assert dialog.network_table.model().rowCount() == 3
     assert window.import_session is not None
     assert dialog.import_table.model().rowCount() == len(window.import_session.records)
-    assert dialog.network_table.model().columnCount() == 9
+    assert dialog.network_table.model().columnCount() == 13
     assert dialog.import_table.model().columnCount() == 6
     assert dialog.import_table.model().index(0, 4).data() != "—"
     dialog.hide()
