@@ -605,6 +605,30 @@ def test_real_backend_excludes_routes_before_gcls_and_keeps_same_id_other_networ
         "Msg391",
         "Msg460Ext",
     }
+    ic_result = results["IC"].result
+    pt_result = results["PT"].result
+    assert ic_result is not None and ic_result.steady_heatmap is not None
+    assert pt_result is not None and pt_result.steady_heatmap is not None
+    ic_heatmap_names = {
+        message.message_name
+        for slots in (
+            ic_result.steady_heatmap.original_slots,
+            ic_result.steady_heatmap.optimized_slots,
+        )
+        for slot in slots
+        for message in slot.messages
+    }
+    pt_heatmap_names = {
+        message.message_name
+        for slots in (
+            pt_result.steady_heatmap.original_slots,
+            pt_result.steady_heatmap.optimized_slots,
+        )
+        for slot in slots
+        for message in slot.messages
+    }
+    assert ic_heatmap_names == {"Msg391"}
+    assert pt_heatmap_names == {"Msg391", "Msg460Ext"}
     assert ("Msg391",) in captured
     assert dbc_replacements["CAR_VCU_IC Message.dbc"] == ("Msg391",)
 

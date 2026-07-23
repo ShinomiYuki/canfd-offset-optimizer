@@ -20,6 +20,7 @@ def _result_with_100_steady_slots(batch_result: BatchOptimizationResult):
         base,
         steady_loads_before=tuple(range(100)),
         steady_loads_after=tuple(1_000 + index for index in range(100)),
+        steady_heatmap=None,
     )
 
 

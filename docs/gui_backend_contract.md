@@ -3,9 +3,9 @@
 ## 1. 接入状态
 
 当前 `app.py` 默认注入 `RealBackend`。真实 adapter 实现
-`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 与纯数据资格服务
-`sender_selection.py` 允许接触核心 parser/model 类型，并立即转换为 GUI 不可变 DTO；窗口、worker 和
-widgets 不得直接导入核心类型。
+`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 与纯数据服务
+`sender_selection.py`、`heatmap_details.py` 允许接触核心 parser/model/SlotMap 类型，并立即转换为
+GUI 不可变 DTO；窗口、worker 和 widgets 不得直接导入核心类型。
 
 ## 2. 调用协议
 
@@ -139,8 +139,15 @@ DBC 的选择/明确排除。网段 CSV/日志保存
 `base_eligible_message_count`、`routing_excluded_count`、`final_eligible_message_count`。
 
 指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
+`GuiOptimizationResult.steady_heatmap/startup_heatmap` 进一步提供原始与优化后共享时间轴的只读
+`HeatmapWindowDetail`。每个 `HeatmapSlotDetail` 包含 slot index、起止时间、核心累计负载、核心
+释放计数和 `HeatmapMessageDetail` 成员；成员包含报文名、完整 CAN ID、帧格式、周期及该状态的
+Offset。`heatmap_details.py` 仅使用已经过滤完成的 `NetworkModel`、核心预计算 `SlotMap` 和两组
+assignment 构造成员索引，并对照核心 load/count 数组校验，不复制负载权重或释放公式。
+
 批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
-也不得用最后完成的结果填充其他网段。
+也不得用最后完成的结果填充其他网段。Qt Widget 只消费上述 DTO/ViewModel，禁止从颜色或负载值
+反推帧数与成员。
 
 ## 6. 进度、取消与错误
 
@@ -162,7 +169,9 @@ DBC 的选择/明确排除。网段 CSV/日志保存
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
 5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
 6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线可重复 DTO 稳态数组；热力图必须使用
-   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。
+   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。GUI 热力图
+   使用固定可读单格宽度和水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
+   平台单图限制的宽度失败关闭、显示明确错误。
 7. DBC 输出必须从导入工作区副本生成。已有 Offset 只允许字节级替换数字 token；继承
    `BA_DEF_DEF_` 默认值的参与优化报文可补充显式 `BA_` 赋值，但属性必须已声明为 `BO_`。
    同一报文最高优先级 Offset 属性存在多条同值声明时，必须保留全部声明并同步替换所有数字
@@ -172,5 +181,5 @@ DBC 的选择/明确排除。网段 CSV/日志保存
    `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
    basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
 8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是受审计的优化适配边界；
-   `sender_selection.py` 仅负责 DBC 发送节点清单、资格预览与 revision 校验。后续公共 service 就绪后
-   应替换这两处核心导入，不影响 GUI contracts/widgets。
+   `sender_selection.py` 仅负责 DBC 发送节点资格，`heatmap_details.py` 仅把正式 SlotMap 命中转换为
+   只读时隙成员 DTO。后续公共 service 就绪后应替换这些核心导入，不影响 GUI contracts/widgets。

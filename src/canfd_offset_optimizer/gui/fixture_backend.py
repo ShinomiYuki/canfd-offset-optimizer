@@ -30,6 +30,9 @@ from .contracts import (
     FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
+    HeatmapMessageDetail,
+    HeatmapSlotDetail,
+    HeatmapWindowDetail,
     ImportRecord,
     ImportRecordStatus,
     ImportSession,
@@ -551,6 +554,21 @@ class FixtureBackend:
             startup_counts_before,
             startup_counts_after,
         ) = self._load_counts(profile)
+        assignments = self._assignments(network, profile)
+        steady_heatmap = self._fixture_heatmap(
+            assignments,
+            steady_before,
+            steady_after,
+            steady_counts_before,
+            steady_counts_after,
+        )
+        startup_heatmap = self._fixture_heatmap(
+            assignments,
+            startup_before,
+            startup_after,
+            startup_counts_before,
+            startup_counts_after,
+        )
         result = GuiOptimizationResult(
             network_id=network.network_id,
             network_name=network.network_name,
@@ -560,7 +578,7 @@ class FixtureBackend:
             mode=request.mode,
             original_metrics=before,
             optimized_metrics=after,
-            assignments=self._assignments(network, profile),
+            assignments=assignments,
             actual_attempts=attempts,
             stop_reason=(
                 "fixed_limit"
@@ -579,6 +597,8 @@ class FixtureBackend:
             steady_counts_after=steady_counts_after,
             startup_counts_before=startup_counts_before,
             startup_counts_after=startup_counts_after,
+            steady_heatmap=steady_heatmap,
+            startup_heatmap=startup_heatmap,
             logs=(
                 f"开始网段 {network.network_name}（Mock 后端）",
                 f"network_id={network.network_id}",
@@ -995,6 +1015,53 @@ class FixtureBackend:
         )
 
     @staticmethod
+    def _fixture_heatmap(
+        assignments: tuple[OffsetAssignmentRow, ...],
+        before_loads: tuple[int, ...],
+        after_loads: tuple[int, ...],
+        before_counts: tuple[int, ...],
+        after_counts: tuple[int, ...],
+    ) -> HeatmapWindowDetail:
+        slot_width_us = 5_000
+
+        def build(
+            loads: tuple[int, ...], counts: tuple[int, ...], *, optimized: bool
+        ) -> tuple[HeatmapSlotDetail, ...]:
+            slots: list[HeatmapSlotDetail] = []
+            for index, (load, count) in enumerate(zip(loads, counts, strict=True)):
+                members = tuple(
+                    HeatmapMessageDetail(
+                        assignment.message_name,
+                        assignment.can_id,
+                        assignment.can_id > 0x7FF,
+                        assignment.cycle_time_us,
+                        (
+                            assignment.optimized_offset_us
+                            if optimized
+                            else assignment.original_offset_us
+                        ),
+                    )
+                    for assignment in assignments[:count]
+                )
+                slots.append(
+                    HeatmapSlotDetail(
+                        index,
+                        index * slot_width_us,
+                        (index + 1) * slot_width_us,
+                        count,
+                        load,
+                        members,
+                    )
+                )
+            return tuple(slots)
+
+        return HeatmapWindowDetail(
+            slot_width_us,
+            build(before_loads, before_counts, optimized=False),
+            build(after_loads, after_counts, optimized=True),
+        )
+
+    @staticmethod
     def _matches_network(network: NetworkSummary, configured: frozenset[str]) -> bool:
         return bool(
             {network.network_id, network.network_name, network.display_name} & configured
@@ -1024,7 +1091,7 @@ class FixtureBackend:
         profile: int,
     ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
         before_pattern = (0, 1, 2, 3, 5, 2, 1, 4, 0, 2)
-        after_pattern = (0, 1, 2, 2, 3, 2, 1, 2, 0, 1)
+        after_pattern = (0, 1, 2, 2, 4, 2, 1, 5, 0, 1)
         return (
             tuple(before_pattern[(index + profile) % len(before_pattern)] for index in range(100)),
             tuple(after_pattern[(index + profile) % len(after_pattern)] for index in range(100)),

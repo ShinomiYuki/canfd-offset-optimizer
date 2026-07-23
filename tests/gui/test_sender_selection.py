@@ -236,6 +236,18 @@ def test_real_backend_never_sends_other_ecu_messages_to_gcls_or_assignment(
     assignment_names = {row.message_name for row in item.result.assignments}
     assert assignment_names == {"Msg391", "SharedPeriodic"}
     assert "Msg460Ext" not in assignment_names
+    assert item.result.steady_heatmap is not None
+    heatmap_names = {
+        message.message_name
+        for slots in (
+            item.result.steady_heatmap.original_slots,
+            item.result.steady_heatmap.optimized_slots,
+        )
+        for slot in slots
+        for message in slot.messages
+    }
+    assert heatmap_names == assignment_names
+    assert "Msg460Ext" not in heatmap_names
     audit_path = result.output_directory / "results" / "message_eligibility.csv"
     config_path = result.output_directory / "results" / "run_config.json"
     assert audit_path.is_file()

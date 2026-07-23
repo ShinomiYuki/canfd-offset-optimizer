@@ -740,6 +740,6 @@ class MainWindow(QMainWindow):
         self._append_log(f"{action_name}失败：{exc}")
         self._show_error(
             f"{action_name}失败",
-            f"无法完成{action_name}，请检查输出路径、权限和系统关联设置。",
+            f"无法完成{action_name}：{exc}",
             f"{type(exc).__name__}: {exc}",
         )

@@ -84,6 +84,7 @@ from .formatting import (
     export_assignments_csv,
     export_batch_summary_csv,
 )
+from .heatmap_details import build_heatmap_window_detail
 from .output_paths import (
     create_timestamped_batch_directory,
     dbc_output_destination,
@@ -698,6 +699,34 @@ class RealBackend(WorkspaceImporter):
                 "core OptimizationResult.assignments",
                 request.offset_search.candidate_offsets_us,
             )
+        original_offsets = {row.message_name: row.original_offset_us for row in rows}
+        optimized_offsets = {row.message_name: row.optimized_offset_us for row in rows}
+        steady_heatmap = build_heatmap_window_detail(
+            loaded.network.messages,
+            loaded.slot_map,
+            original_offsets,
+            optimized_offsets,
+            initial_state.steady_slot_loads,
+            core_result.steady_slot_loads,
+            initial_state.steady_slot_counts,
+            core_result.steady_slot_counts,
+            startup=False,
+            original_messages=initial_state.messages,
+            original_slot_map=initial_state.slot_map,
+        )
+        startup_heatmap = build_heatmap_window_detail(
+            loaded.network.messages,
+            loaded.slot_map,
+            original_offsets,
+            optimized_offsets,
+            initial_state.startup_slot_loads,
+            core_result.startup_slot_loads,
+            initial_state.startup_slot_counts,
+            core_result.startup_slot_counts,
+            startup=True,
+            original_messages=initial_state.messages,
+            original_slot_map=initial_state.slot_map,
+        )
         layout = create_output_layout(batch_output)
         stem = short_output_stem(network.display_name)
         network_output = layout.results / stem
@@ -732,6 +761,8 @@ class RealBackend(WorkspaceImporter):
             steady_counts_after=self._copy_int_tuple(core_result.steady_slot_counts),
             startup_counts_before=self._copy_int_tuple(initial_state.startup_slot_counts),
             startup_counts_after=self._copy_int_tuple(core_result.startup_slot_counts),
+            steady_heatmap=steady_heatmap,
+            startup_heatmap=startup_heatmap,
             logs=(
                 "数据源：core load_project + run_gcls",
                 "负载口径：可优化报文负载曲线（路由报文已在 GCLS 前排除）",

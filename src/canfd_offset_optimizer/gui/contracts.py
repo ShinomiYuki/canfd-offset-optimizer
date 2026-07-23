@@ -839,6 +839,89 @@ class OffsetAssignmentRow:
 
 
 @dataclass(frozen=True, slots=True)
+class HeatmapMessageDetail:
+    """One real message release contributing to a displayed heatmap slot."""
+
+    message_name: str
+    can_id: int
+    is_extended: bool
+    cycle_time_us: int
+    offset_us: int
+
+    def __post_init__(self) -> None:
+        if not self.message_name.strip():
+            raise ValueError("heatmap message name must not be empty")
+        maximum = 0x1FFFFFFF if self.is_extended else 0x7FF
+        if not 0 <= self.can_id <= maximum:
+            raise ValueError("heatmap message CAN ID is invalid")
+        if self.cycle_time_us <= 0 or self.offset_us < 0:
+            raise ValueError("heatmap message period/Offset is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class HeatmapSlotDetail:
+    """Read-only core-derived membership and aggregate values for one slot."""
+
+    slot_index: int
+    start_us: int
+    end_us: int
+    frame_count: int
+    total_load: int
+    messages: tuple[HeatmapMessageDetail, ...]
+
+    def __post_init__(self) -> None:
+        if self.slot_index < 0 or self.start_us < 0 or self.end_us <= self.start_us:
+            raise ValueError("heatmap slot coordinates are invalid")
+        if self.frame_count < 0 or self.total_load < 0:
+            raise ValueError("heatmap slot count/load must be non-negative")
+        if len(self.messages) != self.frame_count:
+            raise ValueError("heatmap slot members must match frame_count")
+
+    @property
+    def start_ms(self) -> float:
+        return self.start_us / 1_000
+
+    @property
+    def end_ms(self) -> float:
+        return self.end_us / 1_000
+
+
+@dataclass(frozen=True, slots=True)
+class HeatmapWindowDetail:
+    """Original and optimized slot details sharing one exact time axis."""
+
+    slot_width_us: int
+    original_slots: tuple[HeatmapSlotDetail, ...]
+    optimized_slots: tuple[HeatmapSlotDetail, ...]
+
+    def __post_init__(self) -> None:
+        if self.slot_width_us <= 0:
+            raise ValueError("heatmap slot width must be positive")
+        if not self.original_slots or not self.optimized_slots:
+            raise ValueError("heatmap window must contain both states")
+        if len(self.original_slots) != len(self.optimized_slots):
+            raise ValueError("heatmap states must share one time axis")
+        for expected, (original, optimized) in enumerate(
+            zip(self.original_slots, self.optimized_slots, strict=True)
+        ):
+            expected_start = expected * self.slot_width_us
+            expected_end = expected_start + self.slot_width_us
+            if (
+                original.slot_index != expected
+                or optimized.slot_index != expected
+                or original.start_us != expected_start
+                or optimized.start_us != expected_start
+                or original.end_us != expected_end
+                or optimized.end_us != expected_end
+            ):
+                raise ValueError("heatmap slot axes are not contiguous and shared")
+
+    @property
+    def slot_count(self) -> int:
+        return len(self.original_slots)
+
+
+@dataclass(frozen=True, slots=True)
 class GuiOptimizationResult:
     """Complete immutable result for one network."""
 
@@ -870,6 +953,8 @@ class GuiOptimizationResult:
     classic_weight_model: str | None = None
     offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
     dbc_write_error: str | None = None
+    steady_heatmap: HeatmapWindowDetail | None = None
+    startup_heatmap: HeatmapWindowDetail | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
@@ -930,6 +1015,46 @@ class GuiOptimizationResult:
             )
         ):
             raise ValueError("congestion count arrays must align with load arrays")
+        self._validate_heatmap_window(
+            self.steady_heatmap,
+            self.steady_loads_before,
+            self.steady_loads_after,
+            self.steady_counts_before,
+            self.steady_counts_after,
+            "steady",
+        )
+        self._validate_heatmap_window(
+            self.startup_heatmap,
+            self.startup_loads_before,
+            self.startup_loads_after,
+            self.startup_counts_before,
+            self.startup_counts_after,
+            "startup",
+        )
+
+    @staticmethod
+    def _validate_heatmap_window(
+        detail: HeatmapWindowDetail | None,
+        before_loads: tuple[int, ...],
+        after_loads: tuple[int, ...],
+        before_counts: tuple[int, ...],
+        after_counts: tuple[int, ...],
+        label: str,
+    ) -> None:
+        if detail is None:
+            return
+        if detail.slot_count != len(before_loads):
+            raise ValueError(f"{label} heatmap details must align with result arrays")
+        original = tuple(
+            (slot.total_load, slot.frame_count) for slot in detail.original_slots
+        )
+        optimized = tuple(
+            (slot.total_load, slot.frame_count) for slot in detail.optimized_slots
+        )
+        if original != tuple(zip(before_loads, before_counts, strict=True)):
+            raise ValueError(f"{label} original heatmap details disagree with core arrays")
+        if optimized != tuple(zip(after_loads, after_counts, strict=True)):
+            raise ValueError(f"{label} optimized heatmap details disagree with core arrays")
 
     @property
     def original_steady_load(self) -> tuple[int, ...]:
