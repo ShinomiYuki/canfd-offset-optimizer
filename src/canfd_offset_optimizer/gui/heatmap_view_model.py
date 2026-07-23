@@ -145,7 +145,7 @@ def build_heatmap_view_model(
         after_loads = result.optimized_startup_load
         before_counts = result.original_startup_count
         after_counts = result.optimized_startup_count
-    slot_width_us = detail.slot_width_us if detail is not None else 5_000
+    slot_width_us = result.load_window_metadata.slot_width_us
     original = _state_cells(
         HeatmapState.ORIGINAL,
         detail,

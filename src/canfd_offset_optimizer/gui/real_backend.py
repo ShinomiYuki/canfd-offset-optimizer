@@ -771,6 +771,17 @@ class RealBackend(WorkspaceImporter):
                 f"final_eligible_message_count={self._final_count(network)}",
                 f"arxml_channel={channel_override or 'not_used'}",
                 f"weight_mode={actual_weight.value}",
+                f"slot_width_us={steady_heatmap.slot_width_us}",
+                f"steady_slot_count={steady_heatmap.slot_count}",
+                (
+                    "steady_hyperperiod_us="
+                    f"{steady_heatmap.slot_count * steady_heatmap.slot_width_us}"
+                ),
+                f"startup_slot_count={startup_heatmap.slot_count}",
+                (
+                    "startup_duration_us="
+                    f"{startup_heatmap.slot_count * startup_heatmap.slot_width_us}"
+                ),
                 f"offset_min_ms={request.offset_search.min_offset_ms}",
                 f"offset_max_ms={request.offset_search.max_offset_ms}",
                 f"offset_step_ms={request.offset_search.offset_step_ms}",
@@ -799,6 +810,7 @@ class RealBackend(WorkspaceImporter):
             frame_protocol=network.frame_protocol,
             classic_weight_model=network.classic_weight_model,
             offset_search=request.offset_search,
+            slot_width_us=steady_heatmap.slot_width_us,
         )
         progress_callback(
             ProgressUpdate(

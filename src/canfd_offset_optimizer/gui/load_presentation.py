@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 
-SLOT_WIDTH_MS = 5
-STEADY_HYPERPERIOD_MS = 500
-DISPLAY_DURATIONS_MS = (500, 1_000, 2_000, 5_000)
-DEFAULT_DISPLAY_DURATION_MS = 2_000
+STEADY_REPEAT_COUNTS = (1, 2, 4, 10)
+DEFAULT_STEADY_REPEAT_COUNT = 4
 CONGESTION_COLORS = (
     "#FFFFFF",
     "#B7E4C7",
@@ -28,12 +26,10 @@ def congestion_level(release_count: int) -> int:
     return 5
 
 
-def steady_repeat_count(display_duration_ms: int) -> int:
-    if display_duration_ms not in DISPLAY_DURATIONS_MS:
-        raise ValueError("unsupported steady display duration")
-    if display_duration_ms % STEADY_HYPERPERIOD_MS:
-        raise ValueError("steady display duration must be a 500 ms multiple")
-    return display_duration_ms // STEADY_HYPERPERIOD_MS
+def validate_steady_repeat_count(repeat_count: int) -> int:
+    if repeat_count not in STEADY_REPEAT_COUNTS:
+        raise ValueError("unsupported steady repeat count")
+    return repeat_count
 
 
 def repeat_for_display(values: tuple[int, ...], repeat_count: int) -> tuple[int, ...]:
@@ -44,5 +40,11 @@ def repeat_for_display(values: tuple[int, ...], repeat_count: int) -> tuple[int,
     return tuple(value for _ in range(repeat_count) for value in values)
 
 
-def time_coordinates(sample_count: int) -> tuple[int, ...]:
-    return tuple(index * SLOT_WIDTH_MS for index in range(sample_count))
+def time_coordinates(
+    sample_count: int, slot_width_ms: float
+) -> tuple[float, ...]:
+    if sample_count < 0:
+        raise ValueError("sample_count must be non-negative")
+    if slot_width_ms <= 0:
+        raise ValueError("slot_width_ms must be positive")
+    return tuple(index * slot_width_ms for index in range(sample_count))

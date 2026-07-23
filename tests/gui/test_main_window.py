@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sys
+
+import pytest
 
 from canfd_offset_optimizer.gui.contracts import (
     BatchOptimizationResult,
@@ -9,6 +12,7 @@ from canfd_offset_optimizer.gui.contracts import (
     GuiBatchOptimizationRequest,
     ImportSession,
     ProgressCallback,
+    WeightMode,
     WorkspaceInspection,
 )
 from canfd_offset_optimizer.gui.main_window import MainWindow
@@ -60,6 +64,53 @@ def import_until_ready(qtbot, window: MainWindow, sources: tuple[Path, ...]) -> 
         lambda: not window.task_active and window.workflow_state is WorkflowState.READY,
         timeout=5_000,
     )
+
+
+def _batch_with_real_hyperperiod_shapes(
+    batch_result: BatchOptimizationResult, weight_mode: WeightMode
+) -> tuple[BatchOptimizationResult, dict[str, int]]:
+    base_item = batch_result.network_results[0]
+    base = base_item.result
+    assert base is not None
+    slot_counts = {
+        "BD": 100,
+        "IC": 400,
+        "GL": 200,
+        "DK": 200,
+        "PT": 20,
+        "SU": 20,
+    }
+    items = []
+    for name, slot_count in slot_counts.items():
+        network_id = f"net-real-shape-{name.lower()}"
+        detail = replace(
+            base,
+            network_id=network_id,
+            network_name=name,
+            display_name=name,
+            source_file=f"{name}.dbc",
+            weight_mode=weight_mode,
+            steady_loads_before=tuple(range(slot_count)),
+            steady_loads_after=tuple(
+                1_000 + index for index in range(slot_count)
+            ),
+            steady_counts_before=(0,) * slot_count,
+            steady_counts_after=(0,) * slot_count,
+            steady_heatmap=None,
+            slot_width_us=5_000,
+        )
+        items.append(
+            replace(
+                base_item,
+                network_id=network_id,
+                network_name=name,
+                display_name=name,
+                source_file=f"{name}.dbc",
+                weight_mode=weight_mode,
+                result=detail,
+            )
+        )
+    return replace(batch_result, network_results=tuple(items)), slot_counts
 
 
 def test_unified_import_automatically_inspects_and_enables_batch(
@@ -208,6 +259,149 @@ def test_dbc_write_warning_keeps_gui_result_browsable(
     assert "DBC输出：失败（优化结果及其他输出已保留）" in window.log_view.toPlainText()
     assert "FileNotFoundError: path too long" in window.log_view.toPlainText()
     assert "DBC写回失败 1" in window.summary_panel.count_label.text()
+
+
+@pytest.mark.parametrize(
+    "weight_mode",
+    (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES),
+)
+def test_real_hyperperiod_shapes_keep_every_result_page_on_one_network(
+    qtbot,
+    batch_result: BatchOptimizationResult,
+    workspace_root: Path,
+    weight_mode: WeightMode,
+) -> None:
+    batch, slot_counts = _batch_with_real_hyperperiod_shapes(
+        batch_result, weight_mode
+    )
+    window = MainWindow(
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
+        dialog_handler=lambda *_args: None,
+    )
+    qtbot.addWidget(window)
+    window._apply_batch_result(batch)
+
+    sequence = ("BD", "IC", "GL", "DK", "PT", "SU", "IC", "BD")
+    by_name = {item.network_name: item for item in batch.network_results}
+    for heatmap_window in (0, 1):
+        window.load_heatmap.window_combo.setCurrentIndex(heatmap_window)
+        for _ in range(2):
+            for name in sequence:
+                item = by_name[name]
+                assert item.result is not None
+                combo_index = window.load_heatmap.network_combo.findData(
+                    item.network_id
+                )
+                window.load_heatmap.network_combo.setCurrentIndex(combo_index)
+                qtbot.waitUntil(
+                    lambda network_id=item.network_id: (
+                        window.selected_network_id == network_id
+                    )
+                )
+
+                assert (
+                    window.assignment_table.current_network_id
+                    == item.network_id
+                )
+                assert window.load_chart.current_network_id == item.network_id
+                assert window.load_heatmap.current_network_id == item.network_id
+                assert window.load_heatmap.view_model is not None
+                assert (
+                    window.load_heatmap.view_model.network_id
+                    == item.network_id
+                )
+                expected_heatmap_slots = (
+                    slot_counts[name]
+                    if heatmap_window == 0
+                    else len(item.result.original_startup_load)
+                )
+                assert (
+                    window.load_heatmap.view_model.slot_count
+                    == expected_heatmap_slots
+                )
+                assert len(window.load_chart.canvas.before_series) == (
+                    slot_counts[name] * 4
+                )
+                assert window.load_chart.canvas.display_duration_ms == (
+                    slot_counts[name] * 5 * 4
+                )
+                assert item.network_id in window.log_view.toPlainText()
+                assert (
+                    window.details_network_label.text()
+                    == f"当前网段：{name}"
+                )
+
+    window.load_chart.window_combo.setCurrentIndex(1)
+    for name in sequence:
+        item = by_name[name]
+        assert item.result is not None
+        window.load_heatmap.network_combo.setCurrentIndex(
+            window.load_heatmap.network_combo.findData(item.network_id)
+        )
+        qtbot.waitUntil(
+            lambda network_id=item.network_id: (
+                window.selected_network_id == network_id
+            )
+        )
+        assert (
+            window.load_chart.canvas.before_series
+            == item.result.original_startup_load
+        )
+        assert window.load_chart.canvas.display_duration_ms == (
+            item.result.load_window_metadata.startup_duration_ms
+        )
+
+
+def test_one_panel_failure_does_not_abort_network_selection_or_leak_qt_exception(
+    qtbot,
+    batch_result: BatchOptimizationResult,
+    workspace_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = MainWindow(
+        FixtureBackend(workspace_root=workspace_root, delay_seconds=0),
+        dialog_handler=lambda *_args: None,
+    )
+    qtbot.addWidget(window)
+    window._apply_batch_result(batch_result)
+    target = batch_result.network_results[1]
+    assert target.result is not None
+    leaked: list[tuple[type[BaseException], BaseException]] = []
+
+    def exception_hook(
+        exception_type: type[BaseException],
+        value: BaseException,
+        traceback_object: object,
+    ) -> None:
+        del traceback_object
+        leaked.append((exception_type, value))
+
+    def fail_chart(_result: object) -> None:
+        raise ValueError("injected chart presentation failure")
+
+    monkeypatch.setattr(sys, "excepthook", exception_hook)
+    monkeypatch.setattr(window.load_chart, "set_result", fail_chart)
+
+    index = window.load_heatmap.network_combo.findData(target.network_id)
+    window.load_heatmap.network_combo.setCurrentIndex(index)
+    qtbot.waitUntil(lambda: window.selected_network_id == target.network_id)
+
+    assert leaked == []
+    assert window.assignment_table.current_network_id == target.network_id
+    assert window.load_chart.current_network_id == target.network_id
+    assert window.load_heatmap.current_network_id == target.network_id
+    assert window.load_heatmap.view_model is not None
+    assert window.load_heatmap.view_model.network_id == target.network_id
+    assert window.details_network_label.text() == (
+        f"当前网段：{target.display_name}"
+    )
+    assert "负载曲线展示失败：ValueError" in (
+        window.load_chart.chart_title_label.text()
+    )
+    log = window.log_view.toPlainText()
+    assert target.network_id in log
+    assert "injected chart presentation failure" in log
+    assert "Traceback (most recent call last)" in log
 
 
 def test_missing_dbc_is_explicit_while_default_config_is_automatic(

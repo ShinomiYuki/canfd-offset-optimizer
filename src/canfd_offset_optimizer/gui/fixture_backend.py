@@ -604,12 +604,20 @@ class FixtureBackend:
                 f"network_id={network.network_id}",
                 f"来源 DBC：{network.source_file}",
                 f"完成 {attempts} attempts",
+                f"slot_width_us={steady_heatmap.slot_width_us}",
+                f"steady_slot_count={steady_heatmap.slot_count}",
+                (
+                    "steady_hyperperiod_us="
+                    f"{steady_heatmap.slot_count * steady_heatmap.slot_width_us}"
+                ),
+                f"startup_slot_count={startup_heatmap.slot_count}",
                 "生成网段用户产物",
             ),
             output_directory=create_output_layout(output_directory).results
             / short_output_stem(f"{network.display_name}_{network.network_id[-8:]}"),
             frame_protocol=network.frame_protocol,
             classic_weight_model=network.classic_weight_model,
+            slot_width_us=steady_heatmap.slot_width_us,
         )
         return self._write_success_outputs(result, output_directory)
 

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPaintEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QComboBox,
@@ -18,12 +19,11 @@ from PySide6.QtWidgets import (
 from ..contracts import GuiOptimizationResult
 from ..formatting import format_load_unit, format_result_weight
 from ..load_presentation import (
-    DEFAULT_DISPLAY_DURATION_MS,
-    DISPLAY_DURATIONS_MS,
-    SLOT_WIDTH_MS,
-    STEADY_HYPERPERIOD_MS,
+    DEFAULT_STEADY_REPEAT_COUNT,
+    STEADY_REPEAT_COUNTS,
     repeat_for_display,
-    steady_repeat_count,
+    time_coordinates,
+    validate_steady_repeat_count,
 )
 from ..theme import ACCENT_COLOR
 
@@ -34,9 +34,9 @@ class _CurveCanvas(QWidget):
         self.setMinimumSize(480, 260)
         self._before: tuple[int, ...] = ()
         self._after: tuple[int, ...] = ()
-        self._time_coordinates_ms: tuple[int, ...] = ()
-        self._display_duration_ms = 0
-        self._period_ms: int | None = None
+        self._time_coordinates_ms: tuple[float, ...] = ()
+        self._display_duration_ms = 0.0
+        self._period_ms: float | None = None
         self._empty_message = "请选择一个网段"
         self.setToolTip("曲线数据由 backend 结果直接提供；GUI 不重新计算负载")
 
@@ -45,25 +45,45 @@ class _CurveCanvas(QWidget):
         before: tuple[int, ...],
         after: tuple[int, ...],
         *,
-        slot_width_ms: int = SLOT_WIDTH_MS,
-        display_duration_ms: int | None = None,
-        period_ms: int | None = None,
+        slot_width_ms: float = 5.0,
+        display_duration_ms: float | None = None,
+        period_ms: float | None = None,
     ) -> None:
-        if len(before) != len(after):
+        new_before = tuple(before)
+        new_after = tuple(after)
+        if len(new_before) != len(new_after):
             raise ValueError("load curve series must have equal lengths")
-        if slot_width_ms <= 0:
+        if not isfinite(slot_width_ms) or slot_width_ms <= 0:
             raise ValueError("slot_width_ms must be positive")
-        self._before = before
-        self._after = after
-        self._time_coordinates_ms = tuple(
-            index * slot_width_ms for index in range(len(before))
-        )
-        natural_duration = len(before) * slot_width_ms
-        self._display_duration_ms = (
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+            or value < 0
+            for values in (new_before, new_after)
+            for value in values
+        ):
+            raise ValueError("load curve values must be finite and non-negative")
+        new_time_coordinates_ms = time_coordinates(len(new_before), slot_width_ms)
+        natural_duration = len(new_before) * slot_width_ms
+        new_display_duration_ms = (
             natural_duration if display_duration_ms is None else display_duration_ms
         )
-        if self._display_duration_ms < natural_duration:
+        if (
+            not isfinite(new_display_duration_ms)
+            or new_display_duration_ms < 0
+            or (new_before and new_display_duration_ms <= 0)
+        ):
+            raise ValueError("display_duration_ms must be finite and positive")
+        if new_display_duration_ms < natural_duration:
             raise ValueError("display duration cannot truncate load curve samples")
+        if period_ms is not None and (not isfinite(period_ms) or period_ms <= 0):
+            raise ValueError("period_ms must be finite and positive")
+
+        self._before = new_before
+        self._after = new_after
+        self._time_coordinates_ms = new_time_coordinates_ms
+        self._display_duration_ms = new_display_duration_ms
         self._period_ms = period_ms
         self.update()
 
@@ -119,7 +139,7 @@ class _CurveCanvas(QWidget):
             return
         painter.setPen(self.palette().text().color())
         painter.drawText(int(plot.left()), int(plot.bottom()) + 18, "0 ms")
-        end_label = f"{self._display_duration_ms} ms"
+        end_label = f"{self._display_duration_ms:g} ms"
         painter.drawText(
             int(plot.right()) - 72,
             int(plot.bottom()) + 18,
@@ -132,19 +152,19 @@ class _CurveCanvas(QWidget):
             return
         separator_pen = QPen(self.palette().mid().color(), 1, Qt.PenStyle.DotLine)
         painter.setPen(separator_pen)
-        for boundary_ms in range(
-            self._period_ms, self._display_duration_ms, self._period_ms
-        ):
+        boundary_ms = self._period_ms
+        while boundary_ms < self._display_duration_ms:
             x = plot.left() + plot.width() * boundary_ms / self._display_duration_ms
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            boundary_ms += self._period_ms
 
     @staticmethod
     def _draw_series(
         painter: QPainter,
         plot: QRectF,
         values: tuple[int, ...],
-        time_coordinates_ms: tuple[int, ...],
-        display_duration_ms: int,
+        time_coordinates_ms: tuple[float, ...],
+        display_duration_ms: float,
         pen: QPen,
         maximum: int,
     ) -> None:
@@ -170,11 +190,11 @@ class _CurveCanvas(QWidget):
         return self._after
 
     @property
-    def time_coordinates_ms(self) -> tuple[int, ...]:
+    def time_coordinates_ms(self) -> tuple[float, ...]:
         return self._time_coordinates_ms
 
     @property
-    def display_duration_ms(self) -> int:
+    def display_duration_ms(self) -> float:
         return self._display_duration_ms
 
     def set_empty_message(self, message: str) -> None:
@@ -206,9 +226,13 @@ class LoadChart(QWidget):
         self.window_combo.addItems(("稳态窗口", "启动窗口"))
         self.display_range_label = QLabel("显示范围")
         self.display_range_combo = QComboBox()
-        for duration_ms in DISPLAY_DURATIONS_MS:
-            self.display_range_combo.addItem(f"{duration_ms} ms", duration_ms)
-        default_index = self.display_range_combo.findData(DEFAULT_DISPLAY_DURATION_MS)
+        for repeat_count in STEADY_REPEAT_COUNTS:
+            self.display_range_combo.addItem(
+                f"{repeat_count} 个超周期", repeat_count
+            )
+        default_index = self.display_range_combo.findData(
+            DEFAULT_STEADY_REPEAT_COUNT
+        )
         self.display_range_combo.setCurrentIndex(default_index)
         self.display_range_label.setEnabled(False)
         self.display_range_combo.setEnabled(False)
@@ -242,6 +266,7 @@ class LoadChart(QWidget):
         self.current_network_label.setToolTip(
             f"network_id：{result.network_id}\n来源 DBC：{result.source_file}"
         )
+        self._populate_repeat_options(result)
         self._result = result
         self.weight_basis_label.setText(
             f"权重口径：{format_result_weight(result)}；负载单位：{format_load_unit(result)}"
@@ -249,6 +274,16 @@ class LoadChart(QWidget):
         self.canvas.set_empty_message("运行结果未提供负载曲线")
         self._refresh()
         self.export_button.setEnabled(True)
+
+    def set_error(self, result: GuiOptimizationResult, message: str) -> None:
+        """Bind target identity while exposing a load-chart-only display failure."""
+
+        self.clear_result(
+            message,
+            network_id=result.network_id,
+            display_name=result.display_name,
+        )
+        self.chart_title_label.setText(f"{result.display_name} / {message}")
 
     def clear_result(
         self,
@@ -283,11 +318,14 @@ class LoadChart(QWidget):
         if self.window_combo.currentIndex() == 0:
             self.display_range_label.setEnabled(True)
             self.display_range_combo.setEnabled(True)
-            display_duration_ms = self._selected_display_duration_ms()
-            repeat_count = steady_repeat_count(display_duration_ms)
+            metadata = self._result.load_window_metadata
+            repeat_count = self._selected_repeat_count()
+            hyperperiod_ms = metadata.steady_hyperperiod_ms
+            display_duration_ms = hyperperiod_ms * repeat_count
             self.chart_title_label.setText(
                 f"{self._result.display_name} / 可优化报文稳态负载，"
-                f"{STEADY_HYPERPERIOD_MS} ms 超周期重复展示 {repeat_count} 次 / "
+                f"{hyperperiod_ms:g} ms 超周期重复展示 {repeat_count} 次，"
+                f"显示范围 {display_duration_ms:g} ms / "
                 f"{self._result.source_file}"
             )
             self.canvas.set_series(
@@ -297,29 +335,48 @@ class LoadChart(QWidget):
                 repeat_for_display(
                     self._result.optimized_steady_load, repeat_count
                 ),
+                slot_width_ms=metadata.slot_width_ms,
                 display_duration_ms=display_duration_ms,
-                period_ms=STEADY_HYPERPERIOD_MS,
+                period_ms=hyperperiod_ms,
             )
         else:
             self.display_range_label.setEnabled(False)
             self.display_range_combo.setEnabled(False)
-            startup_duration_ms = (
-                len(self._result.original_startup_load) * SLOT_WIDTH_MS
-            )
+            metadata = self._result.load_window_metadata
+            startup_duration_ms = metadata.startup_duration_ms
             self.chart_title_label.setText(
                 f"{self._result.display_name} / 启动负载，核心真实范围 "
-                f"{startup_duration_ms} ms / {self._result.source_file}"
+                f"{startup_duration_ms:g} ms / {self._result.source_file}"
             )
             self.canvas.set_series(
                 self._result.original_startup_load,
                 self._result.optimized_startup_load,
+                slot_width_ms=metadata.slot_width_ms,
             )
 
-    def _selected_display_duration_ms(self) -> int:
+    def _selected_repeat_count(self) -> int:
         value = self.display_range_combo.currentData()
-        duration_ms = int(value)
-        steady_repeat_count(duration_ms)
-        return duration_ms
+        return validate_steady_repeat_count(int(value))
+
+    def _populate_repeat_options(self, result: GuiOptimizationResult) -> None:
+        selected = self.display_range_combo.currentData()
+        repeat_count = (
+            int(selected)
+            if selected in STEADY_REPEAT_COUNTS
+            else DEFAULT_STEADY_REPEAT_COUNT
+        )
+        hyperperiod_ms = result.load_window_metadata.steady_hyperperiod_ms
+        blocker = QSignalBlocker(self.display_range_combo)
+        self.display_range_combo.clear()
+        for value in STEADY_REPEAT_COUNTS:
+            duration_ms = hyperperiod_ms * value
+            self.display_range_combo.addItem(
+                f"{value} 个超周期（{duration_ms:g} ms）", value
+            )
+        self.display_range_combo.setCurrentIndex(
+            self.display_range_combo.findData(repeat_count)
+        )
+        del blocker
 
     @staticmethod
     def _repeat_for_display(

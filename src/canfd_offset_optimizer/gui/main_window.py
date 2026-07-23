@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
+import traceback
 
 from PySide6.QtCore import QThread, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices
@@ -495,6 +496,7 @@ class MainWindow(QMainWindow):
         self.details_network_label.setToolTip(
             f"network_id：{item.network_id}\n来源 DBC：{item.source_file}"
         )
+        panel_failures: list[tuple[str, str]] = []
         if item.result is None:
             self.assignment_table.clear_result(
                 "无成功结果",
@@ -512,9 +514,45 @@ class MainWindow(QMainWindow):
                 display_name=item.display_name,
             )
         else:
-            self.assignment_table.set_result(item.result)
-            self.load_chart.set_result(item.result)
-            self.load_heatmap.set_result(item.result)
+            result = item.result
+            bindings: tuple[
+                tuple[
+                    str,
+                    Callable[[GuiOptimizationResult], None],
+                    Callable[[str], None],
+                ],
+                ...,
+            ] = (
+                (
+                    "Offset 修改",
+                    self.assignment_table.set_result,
+                    lambda message: self.assignment_table.clear_result(
+                        message,
+                        network_id=result.network_id,
+                        display_name=result.display_name,
+                    ),
+                ),
+                (
+                    "负载曲线",
+                    self.load_chart.set_result,
+                    lambda message: self.load_chart.set_error(result, message),
+                ),
+                (
+                    "负载热力图",
+                    self.load_heatmap.set_result,
+                    lambda message: self.load_heatmap.clear_result(
+                        message,
+                        network_id=result.network_id,
+                        display_name=result.display_name,
+                    ),
+                ),
+            )
+            for panel_name, setter, error_setter in bindings:
+                failure = self._bind_result_panel(
+                    panel_name, result, setter, error_setter
+                )
+                if failure is not None:
+                    panel_failures.append(failure)
         details = [
             f"网段：{item.network_name}",
             f"network_id：{item.network_id}",
@@ -533,9 +571,39 @@ class MainWindow(QMainWindow):
                 details.append("DBC输出：成功")
         if item.error:
             details.append(f"错误：{item.error}")
+        for summary, technical_details in panel_failures:
+            details.extend((f"展示错误：{summary}", technical_details))
         details.extend(f"警告：{warning}" for warning in item.warnings)
         details.extend(item.logs)
         self.log_view.setPlainText("\n".join(details))
+
+    def _bind_result_panel(
+        self,
+        panel_name: str,
+        result: GuiOptimizationResult,
+        setter: Callable[[GuiOptimizationResult], None],
+        error_setter: Callable[[str], None],
+    ) -> tuple[str, str] | None:
+        """Bind one panel without letting it abort the remaining result pages."""
+
+        try:
+            setter(result)
+        except Exception as exc:  # Qt slots must not leak display failures.
+            summary = (
+                f"{panel_name}展示失败：{type(exc).__name__}: {exc}"
+            )
+            technical_details = traceback.format_exc()
+            self._global_logs.append(
+                f"{result.display_name} / {summary}\n{technical_details}"
+            )
+            try:
+                error_setter(summary)
+            except Exception:
+                technical_details += (
+                    "\n面板错误状态更新失败：\n" + traceback.format_exc()
+                )
+            return summary, technical_details
+        return None
 
     def _select_network_from_heatmap(self, network_id: str) -> None:
         if not self.summary_panel.select_network_id(network_id):

@@ -19,12 +19,10 @@ from .contracts import (
 )
 from .load_presentation import (
     CONGESTION_COLORS,
-    DEFAULT_DISPLAY_DURATION_MS,
-    SLOT_WIDTH_MS,
-    STEADY_HYPERPERIOD_MS,
-    repeat_for_display,
+    DEFAULT_STEADY_REPEAT_COUNT,
     congestion_level,
-    steady_repeat_count,
+    repeat_for_display,
+    validate_steady_repeat_count,
 )
 from .theme import ACCENT_COLOR
 
@@ -271,9 +269,11 @@ def write_load_curve_png(
     result: GuiOptimizationResult,
     path: Path,
     *,
-    display_duration_ms: int = DEFAULT_DISPLAY_DURATION_MS,
+    repeat_count: int = DEFAULT_STEADY_REPEAT_COUNT,
 ) -> Path:
-    repeat_count = steady_repeat_count(display_duration_ms)
+    repeat_count = validate_steady_repeat_count(repeat_count)
+    metadata = result.load_window_metadata
+    display_duration_us = metadata.steady_hyperperiod_us * repeat_count
     before = repeat_for_display(result.original_steady_load, repeat_count)
     after = repeat_for_display(result.optimized_steady_load, repeat_count)
     width, height = 1_200, 520
@@ -284,8 +284,9 @@ def write_load_curve_png(
     for level in range(6):
         y = top + (bottom - top) * level // 5
         canvas.line(left, y, right, y, grid)
-    for boundary in range(0, display_duration_ms + 1, STEADY_HYPERPERIOD_MS):
-        x = left + (right - left) * boundary // display_duration_ms
+    for repeat_index in range(repeat_count + 1):
+        boundary_us = repeat_index * metadata.steady_hyperperiod_us
+        x = left + (right - left) * boundary_us // display_duration_us
         canvas.line(x, top, x, bottom, grid)
     canvas.line(left, top, right, top, border)
     canvas.line(left, bottom, right, bottom, border)
@@ -294,8 +295,8 @@ def write_load_curve_png(
     maximum = max(max(before), max(after), 1)
 
     def point(index: int, value: int) -> tuple[int, int]:
-        time_ms = index * SLOT_WIDTH_MS
-        x = left + (right - left) * time_ms // display_duration_ms
+        time_us = index * metadata.slot_width_us
+        x = left + (right - left) * time_us // display_duration_us
         y = bottom - (bottom - top) * value // maximum
         return x, y
 

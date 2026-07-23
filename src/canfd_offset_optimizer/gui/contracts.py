@@ -684,7 +684,12 @@ class RestartSettings:
         if not isinstance(self.mode, RestartMode):
             raise ValueError("restart mode is unsupported")
         values = (self.fixed_attempts, self.min_attempts, self.max_attempts)
-        if any(isinstance(value, bool) or value <= 0 for value in values):
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            for value in values
+        ):
             raise ValueError("restart attempts must be positive integers")
         if self.min_attempts > self.max_attempts:
             raise ValueError("adaptive min_attempts must not exceed max_attempts")
@@ -922,6 +927,40 @@ class HeatmapWindowDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class LoadWindowMetadata:
+    """Shared presentation timing for one immutable optimization result."""
+
+    slot_width_us: int
+    steady_slot_count: int
+    startup_slot_count: int
+
+    def __post_init__(self) -> None:
+        values = (self.slot_width_us, self.steady_slot_count, self.startup_slot_count)
+        if any(isinstance(value, bool) or value <= 0 for value in values):
+            raise ValueError("load window timing values must be positive integers")
+
+    @property
+    def slot_width_ms(self) -> float:
+        return self.slot_width_us / 1_000
+
+    @property
+    def steady_hyperperiod_us(self) -> int:
+        return self.steady_slot_count * self.slot_width_us
+
+    @property
+    def steady_hyperperiod_ms(self) -> float:
+        return self.steady_hyperperiod_us / 1_000
+
+    @property
+    def startup_duration_us(self) -> int:
+        return self.startup_slot_count * self.slot_width_us
+
+    @property
+    def startup_duration_ms(self) -> float:
+        return self.startup_duration_us / 1_000
+
+
+@dataclass(frozen=True, slots=True)
 class GuiOptimizationResult:
     """Complete immutable result for one network."""
 
@@ -953,6 +992,7 @@ class GuiOptimizationResult:
     classic_weight_model: str | None = None
     offset_search: OffsetSearchConfig = field(default_factory=OffsetSearchConfig)
     dbc_write_error: str | None = None
+    slot_width_us: int = 5_000
     steady_heatmap: HeatmapWindowDetail | None = None
     startup_heatmap: HeatmapWindowDetail | None = None
 
@@ -967,6 +1007,12 @@ class GuiOptimizationResult:
             raise ValueError("result offset_search is invalid")
         if self.dbc_write_error is not None and not self.dbc_write_error.strip():
             raise ValueError("result dbc_write_error must be non-empty when present")
+        if (
+            isinstance(self.slot_width_us, bool)
+            or not isinstance(self.slot_width_us, int)
+            or self.slot_width_us <= 0
+        ):
+            raise ValueError("result slot_width_us must be a positive integer")
         if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
             if self.weight_mode is not WeightMode.PAYLOAD_BYTES:
                 raise ValueError("Classic CAN result must use payload_bytes")
@@ -1031,6 +1077,14 @@ class GuiOptimizationResult:
             self.startup_counts_after,
             "startup",
         )
+        for label, detail in (
+            ("steady", self.steady_heatmap),
+            ("startup", self.startup_heatmap),
+        ):
+            if detail is not None and detail.slot_width_us != self.slot_width_us:
+                raise ValueError(
+                    f"{label} heatmap slot width disagrees with result timing metadata"
+                )
 
     @staticmethod
     def _validate_heatmap_window(
@@ -1063,6 +1117,16 @@ class GuiOptimizationResult:
     @property
     def optimized_steady_load(self) -> tuple[int, ...]:
         return self.steady_loads_after
+
+    @property
+    def load_window_metadata(self) -> LoadWindowMetadata:
+        """Return one timing DTO shared by curves, heatmaps and exports."""
+
+        return LoadWindowMetadata(
+            self.slot_width_us,
+            len(self.steady_loads_before),
+            len(self.startup_loads_before),
+        )
 
     @property
     def original_startup_load(self) -> tuple[int, ...]:

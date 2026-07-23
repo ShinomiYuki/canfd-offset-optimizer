@@ -145,6 +145,11 @@ DBC 的选择/明确排除。网段 CSV/日志保存
 Offset。`heatmap_details.py` 仅使用已经过滤完成的 `NetworkModel`、核心预计算 `SlotMap` 和两组
 assignment 构造成员索引，并对照核心 load/count 数组校验，不复制负载权重或释放公式。
 
+`GuiOptimizationResult.load_window_metadata` 是负载曲线、热力图、明细与 PNG 共用的只读时间
+语义，包含 `slot_width_us`、稳态/启动时隙数，并明确提供真实 `steady_hyperperiod_us` 和
+`startup_duration_us`。稳态曲线按用户选择的 1、2、4 或 10 个完整真实超周期重复 DTO 数组，
+不得假定所有网段均为 500 ms；启动数组不得重复。
+
 批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
 也不得用最后完成的结果填充其他网段。Qt Widget 只消费上述 DTO/ViewModel，禁止从颜色或负载值
 反推帧数与成员。
@@ -160,6 +165,10 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
 可预期错误抛 `BackendError`；意外异常由 worker 转换为安全主消息和独立技术详情。禁止吞异常、
 返回空半成品或把工程失败伪装成全部网段失败。
 
+网络选择首先提交稳定 `network_id`，随后独立绑定 Offset、负载曲线和热力图面板。单面板展示
+异常必须记录完整 traceback、让该面板绑定目标网段并显示明确错误，同时继续刷新其他面板、日志
+和详情；禁止异常从 Qt slot 泄漏，也禁止让未失败面板静默保留上一网段。
+
 ## 7. 真实 Adapter 当前实现
 
 1. `parse_dbc` 是网段和周期 CAN TX 报文资格及 Classic/FD 协议分类的唯一来源；同一物理网段
@@ -168,7 +177,7 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
 3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
 5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
-6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线可重复 DTO 稳态数组；热力图必须使用
+6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线默认重复 4 个真实稳态超周期；热力图必须使用
    核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。GUI 热力图
    使用固定可读单格宽度和水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
    平台单图限制的宽度失败关闭、显示明确错误。
