@@ -827,6 +827,8 @@ class OffsetAssignmentRow:
     cycle_time_us: int
     original_offset_us: int
     optimized_offset_us: int
+    original_offset_attribute: str | None = "GenMsgStartDelayTime"
+    original_offset_source: str = "explicit"
 
     def __post_init__(self) -> None:
         if not self.message_name.strip():
@@ -837,6 +839,10 @@ class OffsetAssignmentRow:
             raise ValueError("cycle_time_us must be positive")
         if self.original_offset_us < 0 or self.optimized_offset_us < 0:
             raise ValueError("Offsets must be non-negative")
+        if self.original_offset_attribute not in (None, "GenMsgStartDelayTime"):
+            raise ValueError("original_offset_attribute is unsupported")
+        if self.original_offset_source not in {"explicit", "default", "unavailable"}:
+            raise ValueError("original_offset_source is unsupported")
 
     @property
     def change_us(self) -> int:

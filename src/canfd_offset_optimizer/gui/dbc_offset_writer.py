@@ -1,4 +1,4 @@
-"""Byte-preserving writer for optimized Offset attributes in DBC copies."""
+"""Byte-preserving writer for optimized GenMsgStartDelayTime DBC attributes."""
 
 from __future__ import annotations
 
@@ -11,30 +11,32 @@ from tempfile import NamedTemporaryFile
 from .output_paths import WINDOWS_SAFE_DBC_PATH_LENGTH, windows_utf16_path_length
 
 
-# Mirrors dbc_parser.DBC_ATTRIBUTES["start_delay"] precedence without importing
-# the core-private parser into this GUI-only byte writer.
-_OFFSET_ATTRIBUTES = (
-    b"GenMsgStartDelayTime",
-    b"GenMsgDelayTime",
-    b"MsgStartDelayTime",
-)
-_OFFSET_ATTRIBUTE = rb"(?:" + rb"|".join(_OFFSET_ATTRIBUTES) + rb")"
+_OFFSET_ATTRIBUTE = b"GenMsgStartDelayTime"
 _OFFSET_LINE = re.compile(
-    rb"(?m)^(?P<prefix>[ \t]*BA_[ \t]+\"(?P<attribute>" + _OFFSET_ATTRIBUTE
-    + rb")\"[ \t]+BO_[ \t]+(?P<frame_id>[0-9]+)[ \t]+)"
+    rb'(?m)^(?P<prefix>[ \t]*BA_[ \t]+"GenMsgStartDelayTime"[ \t]+BO_[ \t]+'
+    rb"(?P<frame_id>[0-9]+)[ \t]+)"
     rb"(?P<value>[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))"
     rb"(?P<suffix>[ \t]*;[^\r\n]*)(?P<carriage_return>\r?)$"
 )
 _OFFSET_DEFINITION = re.compile(
-    rb'(?m)^[ \t]*BA_DEF_[ \t]+BO_[ \t]+"(?P<attribute>'
-    + _OFFSET_ATTRIBUTE
-    + rb')"[ \t]+'
+    rb'(?m)^[ \t]*BA_DEF_[ \t]+BO_[ \t]+"GenMsgStartDelayTime"[ \t]+'
 )
-_OFFSET_DEFAULT = re.compile(
-    rb'(?m)^[ \t]*BA_DEF_DEF_[ \t]+"(?P<attribute>'
-    + _OFFSET_ATTRIBUTE
-    + rb')"[ \t]+'
+_DELAY_LINE = re.compile(
+    rb'(?m)^[ \t]*BA_[ \t]+"GenMsgDelayTime"[ \t]+BO_[ \t]+'
+    rb"[0-9]+[ \t]+[^;\r\n]*;[^\r\n]*(?:\r?$)"
 )
+_MESSAGE_ATTRIBUTE_LINE = re.compile(
+    rb'(?m)^[ \t]*BA_[ \t]+"[^"\r\n]+"[ \t]+BO_[ \t]+'
+    rb"[0-9]+[ \t]+[^;\r\n]*;[^\r\n]*(?:\r?\n|$)"
+)
+_ANY_ATTRIBUTE_LINE = re.compile(
+    rb'(?m)^[ \t]*BA_[ \t]+"[^"\r\n]+"[ \t]+'
+    rb"[^;\r\n]*;[^\r\n]*(?:\r?\n|$)"
+)
+_ATTRIBUTE_SCHEMA_LINE = re.compile(
+    rb'(?m)^[ \t]*BA_DEF_(?:DEF_)?[ \t]+[^;\r\n]*;[^\r\n]*(?:\r?\n|$)'
+)
+_VAL_LINE = re.compile(rb"(?m)^[ \t]*VAL_[ \t]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +53,22 @@ class DbcOffsetReplacement:
 
 @dataclass(frozen=True, slots=True)
 class DbcOffsetWritePlan:
-    """Auditable description of byte-level Offset materialization."""
+    """Auditable description of StartDelay materialization."""
 
     attribute_name: str
     replaced_count: int
     inserted_count: int
+    unchanged_count: int = 0
+    warnings: tuple[str, ...] = ()
+    untouched_delay_count: int = 0
+
+    @property
+    def message_count(self) -> int:
+        return self.replaced_count + self.inserted_count
+
+    @property
+    def warning_count(self) -> int:
+        return len(self.warnings)
 
 
 def validate_dbc_output_path(output_path: Path) -> None:
@@ -74,7 +87,6 @@ class _PreparedWrite:
     original: bytes
     selected: tuple[tuple[re.Match[bytes], DbcOffsetReplacement], ...]
     missing: tuple[DbcOffsetReplacement, ...]
-    insertion_attribute: bytes
     plan: DbcOffsetWritePlan
 
 
@@ -90,124 +102,155 @@ def _prepare_write(
         raise ValueError("DBC Offset values must be non-negative whole milliseconds")
 
     original = source.read_bytes()
-    all_matches = tuple(_OFFSET_LINE.finditer(original))
+    if _OFFSET_DEFINITION.search(original) is None:
+        raise ValueError(
+            "优化成功，但 DBC 缺少 GenMsgStartDelayTime 的 BO_ 属性定义，"
+            "无法安全回写 Offset"
+        )
+
     matches_by_id: dict[int, list[re.Match[bytes]]] = {}
-    for match in all_matches:
+    for match in _OFFSET_LINE.finditer(original):
         frame_id = int(match.group("frame_id"))
         if frame_id in by_raw_id:
             matches_by_id.setdefault(frame_id, []).append(match)
 
     selected_by_id: dict[int, tuple[re.Match[bytes], ...]] = {}
     missing: list[DbcOffsetReplacement] = []
-    invalid: list[str] = []
+    conflicting: list[str] = []
+    warnings: list[str] = []
+    unchanged_count = 0
     for frame_id, item in by_raw_id.items():
-        candidates = matches_by_id.get(frame_id, ())
-        preferred: list[re.Match[bytes]] = []
-        for attribute in _OFFSET_ATTRIBUTES:
-            preferred = [
-                match for match in candidates if match.group("attribute") == attribute
-            ]
-            if preferred:
-                break
-        if len(preferred) > 1 and len(
-            {Decimal(match.group("value").decode("ascii")) for match in preferred}
-        ) > 1:
-            invalid.append(item.message_name)
-        elif preferred:
-            selected_by_id[frame_id] = tuple(preferred)
-        else:
+        candidates = tuple(matches_by_id.get(frame_id, ()))
+        if not candidates:
             missing.append(item)
-    if invalid:
-        raise ValueError(
-            "DBC 中参与优化的报文存在冲突的原 Offset 属性值：" + ", ".join(invalid)
-        )
-
-    declared = {
-        match.group("attribute") for match in _OFFSET_DEFINITION.finditer(original)
-    }
-    defaulted = {
-        match.group("attribute") for match in _OFFSET_DEFAULT.finditer(original)
-    }
-    insertion_attribute = b""
-    if missing:
-        if not defaulted:
-            raise ValueError(
-                "DBC 中参与优化的报文缺少显式原 Offset，且 DBC 未提供 Offset 默认值："
-                + ", ".join(item.message_name for item in missing)
-            )
-        insertion_candidates = [
-            attribute for attribute in _OFFSET_ATTRIBUTES if attribute in declared
-        ]
-        if not insertion_candidates:
-            raise ValueError(
-                "DBC 中参与优化的报文缺少显式原 Offset，且 DBC 未声明可写入的 BO_ Offset 属性："
-                + ", ".join(item.message_name for item in missing)
-            )
-        counts = {
-            attribute: sum(
-                match.group("attribute") == attribute for match in all_matches
-            )
-            for attribute in insertion_candidates
+            continue
+        values = {
+            Decimal(match.group("value").decode("ascii")) for match in candidates
         }
-        insertion_attribute = min(
-            insertion_candidates,
-            key=lambda attribute: (-counts[attribute], _OFFSET_ATTRIBUTES.index(attribute)),
+        if len(values) > 1:
+            conflicting.append(item.message_name)
+            continue
+        selected_by_id[frame_id] = candidates
+        if len(candidates) > 1:
+            warnings.append(
+                f"{item.message_name} 存在 {len(candidates)} 条同值 "
+                "GenMsgStartDelayTime；将同步更新全部声明"
+            )
+        expected = Decimal(item.offset_us // 1_000)
+        if values == {expected}:
+            unchanged_count += 1
+    if conflicting:
+        raise ValueError(
+            "DBC 中参与优化的报文存在冲突的 GenMsgStartDelayTime 原值："
+            + ", ".join(conflicting)
         )
-    elif selected_by_id:
-        insertion_attribute = next(iter(selected_by_id.values()))[0].group("attribute")
 
     selected = tuple(
         sorted(
             (
                 (match, item)
                 for frame_id, item in by_raw_id.items()
-                if frame_id in selected_by_id
-                for match in selected_by_id[frame_id]
+                for match in selected_by_id.get(frame_id, ())
             ),
             key=lambda pair: pair[0].start("value"),
         )
     )
-    attribute_name = insertion_attribute.decode("ascii") if insertion_attribute else ""
-    return _PreparedWrite(
-        original,
-        selected,
-        tuple(missing),
-        insertion_attribute,
-        DbcOffsetWritePlan(attribute_name, len(selected_by_id), len(missing)),
+    plan = DbcOffsetWritePlan(
+        attribute_name=_OFFSET_ATTRIBUTE.decode("ascii"),
+        replaced_count=len(selected_by_id),
+        inserted_count=len(missing),
+        unchanged_count=unchanged_count,
+        warnings=tuple(warnings),
+        untouched_delay_count=sum(1 for _ in _DELAY_LINE.finditer(original)),
     )
+    return _PreparedWrite(original, selected, tuple(missing), plan)
 
 
 def inspect_dbc_offset_write(
     source_path: Path, replacements: tuple[DbcOffsetReplacement, ...]
 ) -> DbcOffsetWritePlan:
     """Validate write capability without creating or changing any file."""
+
     source = source_path.resolve(strict=True)
     return _prepare_write(source, replacements).plan
 
 
+def _insertion_anchor(content: bytes) -> int:
+    """Return a stable BA_ assignment insertion point without reordering sections."""
+
+    first_val = _VAL_LINE.search(content)
+    boundary = first_val.start() if first_val is not None else len(content)
+    message_attributes = tuple(
+        match
+        for match in _MESSAGE_ATTRIBUTE_LINE.finditer(content)
+        if match.start() < boundary
+    )
+    if message_attributes:
+        return message_attributes[-1].end()
+    if first_val is not None:
+        return first_val.start()
+
+    attributes = tuple(_ANY_ATTRIBUTE_LINE.finditer(content))
+    if attributes:
+        return attributes[-1].end()
+    schema = tuple(_ATTRIBUTE_SCHEMA_LINE.finditer(content))
+    if schema:
+        return schema[-1].end()
+    # A StartDelay BA_DEF_ was already required above, so this is unreachable
+    # unless the schema regex and definition regex drift apart.
+    raise ValueError("无法确定 GenMsgStartDelayTime 的安全 BA_ 插入位置")
+
+
+def _insert_explicit_offsets(
+    content: bytes, missing: tuple[DbcOffsetReplacement, ...], newline: bytes
+) -> bytes:
+    if not missing:
+        return content
+    anchor = _insertion_anchor(content)
+    lines = b"".join(
+        b'BA_ "GenMsgStartDelayTime" BO_ '
+        + str(item.raw_dbc_id).encode("ascii")
+        + b" "
+        + str(item.offset_us // 1_000).encode("ascii")
+        + b";"
+        + newline
+        for item in missing
+    )
+    prefix = b""
+    if anchor > 0 and content[anchor - 1 : anchor] not in (b"\n", b"\r"):
+        prefix = newline
+    return content[:anchor] + prefix + lines + content[anchor:]
+
+
 def _verify_updated_bytes(
-    updated: bytes, replacements: tuple[DbcOffsetReplacement, ...]
+    original: bytes,
+    updated: bytes,
+    replacements: tuple[DbcOffsetReplacement, ...],
+    missing: tuple[DbcOffsetReplacement, ...],
 ) -> None:
+    if tuple(_DELAY_LINE.findall(original)) != tuple(_DELAY_LINE.findall(updated)):
+        raise ValueError("GenMsgDelayTime 保护校验失败：Offset Writer 不得修改该属性")
+
     matches_by_id: dict[int, list[re.Match[bytes]]] = {}
     for match in _OFFSET_LINE.finditer(updated):
         matches_by_id.setdefault(int(match.group("frame_id")), []).append(match)
     invalid: list[str] = []
     for item in replacements:
-        candidates = matches_by_id.get(item.raw_dbc_id, ())
-        selected: list[re.Match[bytes]] = []
-        for attribute in _OFFSET_ATTRIBUTES:
-            selected = [
-                match for match in candidates if match.group("attribute") == attribute
-            ]
-            if selected:
-                break
+        selected = matches_by_id.get(item.raw_dbc_id, ())
         expected = str(item.offset_us // 1_000).encode("ascii")
-        if not selected or any(
-            match.group("value") != expected for match in selected
-        ):
+        if not selected or any(match.group("value") != expected for match in selected):
             invalid.append(item.message_name)
     if invalid:
         raise ValueError("DBC Offset 写回验证失败：" + ", ".join(invalid))
+
+    first_val = _VAL_LINE.search(updated)
+    if first_val is not None:
+        for item in missing:
+            inserted = matches_by_id.get(item.raw_dbc_id, ())
+            if not inserted or max(match.start() for match in inserted) >= first_val.start():
+                raise ValueError(
+                    "DBC section 验证失败：新增 GenMsgStartDelayTime 必须位于首个 VAL_ 前"
+                )
 
 
 def write_dbc_with_offsets(
@@ -215,13 +258,7 @@ def write_dbc_with_offsets(
     output_path: Path,
     replacements: tuple[DbcOffsetReplacement, ...],
 ) -> Path:
-    """Create a DBC copy with explicit optimized Offset assignments.
-
-    The function operates on bytes so encoding, line endings, spacing, comments,
-    ordering and every unrelated field remain byte-for-byte identical. Existing
-    values are replaced; messages inheriting a declared BO_ default receive one
-    explicit BA_ assignment in the output copy.
-    """
+    """Create a minimally patched DBC copy with explicit optimized StartDelay."""
 
     source = source_path.resolve(strict=True)
     destination = output_path.resolve(strict=False)
@@ -229,6 +266,7 @@ def write_dbc_with_offsets(
         raise ValueError("DBC output must be a copy, not the imported source file")
     validate_dbc_output_path(destination)
     prepared = _prepare_write(source, replacements)
+
     chunks: list[bytes] = []
     cursor = 0
     for match, item in prepared.selected:
@@ -237,22 +275,11 @@ def write_dbc_with_offsets(
         cursor = match.end("value")
     chunks.append(prepared.original[cursor:])
     updated = b"".join(chunks)
-    if prepared.missing:
-        newline = b"\r\n" if b"\r\n" in prepared.original else b"\n"
-        if updated and not updated.endswith((b"\n", b"\r")):
-            updated += newline
-        for item in prepared.missing:
-            updated += (
-                b'BA_ "'
-                + prepared.insertion_attribute
-                + b'" BO_ '
-                + str(item.raw_dbc_id).encode("ascii")
-                + b" "
-                + str(item.offset_us // 1_000).encode("ascii")
-                + b";"
-                + newline
-            )
-    _verify_updated_bytes(updated, replacements)
+    newline = b"\r\n" if b"\r\n" in prepared.original else b"\n"
+    updated = _insert_explicit_offsets(updated, prepared.missing, newline)
+    _verify_updated_bytes(
+        prepared.original, updated, replacements, prepared.missing
+    )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None

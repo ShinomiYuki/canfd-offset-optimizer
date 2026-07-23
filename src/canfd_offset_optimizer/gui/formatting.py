@@ -63,7 +63,18 @@ def export_assignments_csv(result: GuiOptimizationResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
-        writer.writerow(("报文", "CAN ID", "周期(ms)", "原Offset(ms)", "新Offset(ms)", "变化(ms)"))
+        writer.writerow(
+            (
+                "报文",
+                "CAN ID",
+                "周期(ms)",
+                "原Offset(ms)",
+                "原Offset属性",
+                "原Offset来源",
+                "新Offset(ms)",
+                "变化(ms)",
+            )
+        )
         for row in result.assignments:
             writer.writerow(
                 (
@@ -71,6 +82,8 @@ def export_assignments_csv(result: GuiOptimizationResult, path: Path) -> Path:
                     format_can_id(row.can_id),
                     format_milliseconds(row.cycle_time_us),
                     format_milliseconds(row.original_offset_us),
+                    row.original_offset_attribute or "",
+                    row.original_offset_source,
                     format_milliseconds(row.optimized_offset_us),
                     format_milliseconds(row.change_us),
                 )

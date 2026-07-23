@@ -825,6 +825,56 @@ def test_dbc_export_failure_keeps_core_result_and_other_artifacts(
     assert re.fullmatch(r"\d{8}_\d{6}_\d{6}", batch.output_directory.name)
 
 
+def test_missing_start_delay_definition_fails_only_dbc_export(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    dbc_name = "CAR_VCU_PT Message.dbc"
+    dbc_text = DBC_FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;\n', ""
+    ).replace(
+        'BA_DEF_DEF_ "GenMsgStartDelayTime" 0;\n', ""
+    ).replace(
+        'BA_ "GenMsgStartDelayTime" BO_ 913 15;\n', ""
+    )
+    (source / dbc_name).write_text(dbc_text, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+    inspection = _confirm_all_real_sender_nodes(backend, inspection)
+    request = GuiBatchOptimizationRequest(
+        inspection=inspection,
+        can_fd_weight=WeightMode.PAYLOAD_BYTES,
+        mode=OptimizationMode.PEAK,
+        balanced_tolerance=0.05,
+        restart=RestartSettings(mode=RestartMode.FIXED, fixed_attempts=1),
+        candidate_pool_size=1,
+        enable_triple_search=False,
+        output_root=tmp_path / "user_output",
+        sender_selection=inspection.sender_selection,
+    )
+    batch = backend.optimize_all_networks(request, lambda update: None, token)
+    item = batch.network_results[0]
+
+    assert item.status is NetworkRunStatus.SUCCEEDED
+    assert item.result is not None
+    assert item.result.assignments
+    assert batch.succeeded_count == 1
+    assert batch.dbc_write_failed_count == 1
+    assert item.result.dbc_write_error is not None
+    assert "缺少 GenMsgStartDelayTime" in item.result.dbc_write_error
+    assert not any(path.suffix == ".dbc" for path in item.result.exported_files)
+    assert (batch.output_directory / "results" / "PT" / "offsets.csv").is_file()
+    assert (batch.output_directory / "plots" / "PT_load_curve.png").is_file()
+    assert (batch.output_directory / "plots" / "PT_heatmap.png").is_file()
+    assert "dbc_write_status=failed" in "\n".join(item.result.logs)
+
+
 @pytest.mark.parametrize(
     ("duplicate_value", "expect_dbc"),
     (("15", True), ("20", False)),
@@ -905,7 +955,7 @@ def test_real_backend_handles_duplicate_offset_values_without_losing_core_result
     else:
         assert batch.dbc_write_failed_count == 1
         assert item.result.dbc_write_error is not None
-        assert "存在冲突的原 Offset 属性值" in item.result.dbc_write_error
+        assert "存在冲突的 GenMsgStartDelayTime 原值" in item.result.dbc_write_error
         assert exported_dbc == ()
 
 

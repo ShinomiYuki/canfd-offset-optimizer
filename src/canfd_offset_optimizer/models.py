@@ -93,6 +93,8 @@ class CanMessage:
     definition_index: int
     payload_bytes: int = 8
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    original_offset_attribute: str | None = None
+    original_offset_source: str = "unavailable"
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -128,6 +130,10 @@ class CanMessage:
             raise ValueError("allowed_offsets_us must be unique and strictly increasing")
         if self.original_offset_us is not None and self.original_offset_us < 0:
             raise ValueError("original_offset_us must be non-negative")
+        if self.original_offset_attribute not in (None, "GenMsgStartDelayTime"):
+            raise ValueError("original_offset_attribute is unsupported")
+        if self.original_offset_source not in {"explicit", "default", "unavailable"}:
+            raise ValueError("original_offset_source is unsupported")
 
     @property
     def frame_format(self) -> FrameFormat:

@@ -282,6 +282,8 @@ def load_project(
                 definition_index=raw.definition_index,
                 payload_bytes=raw.payload_bytes,
                 frame_protocol=raw.frame_protocol,
+                original_offset_attribute=raw.original_offset_attribute,
+                original_offset_source=raw.original_offset_source,
             )
         )
         if raw.original_offset_us is None:

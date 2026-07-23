@@ -19,7 +19,10 @@ from ..models import CAN_FD_PAYLOAD_LENGTHS, FrameProtocol
 
 DBC_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "cycle_time": ("GenMsgCycleTime", "CycleTime", "MsgCycleTime"),
-    "start_delay": ("GenMsgStartDelayTime", "GenMsgDelayTime", "MsgStartDelayTime"),
+    # Offset has one formal business meaning: the first cyclic transmission delay.
+    # GenMsgDelayTime and MsgStartDelayTime are independent attributes and must
+    # never be used as an Offset fallback.
+    "start_delay": ("GenMsgStartDelayTime",),
     "send_type": ("GenMsgSendType", "SendType", "MsgSendType"),
     "frame_format": ("VFrameFormat", "FrameFormat", "BusType"),
 }
@@ -40,6 +43,8 @@ class ParsedDbcMessage:
     field_sources: tuple[tuple[str, str], ...]
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
     transmitter_nodes: tuple[str, ...] = ()
+    original_offset_attribute: str | None = None
+    original_offset_source: str = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,13 +250,17 @@ def parse_loaded_dbc(
         original, original_source = _attribute_value(
             message, DBC_ATTRIBUTES["start_delay"]
         )
-        # A DBC BA_DEF_DEF_ value is the effective value for every BO_ without
-        # an explicit BA_ assignment.  Check every explicit alias first so a
-        # lower-priority explicit attribute always beats a higher-priority default.
-        if original is None and frame_protocol is FrameProtocol.CAN_FD:
+        # BA_DEF_DEF_ is the effective value for every BO_ without an explicit
+        # StartDelay assignment. The rule is identical for Classic CAN and CAN FD.
+        if original is None:
             original, original_source = _attribute_default(
                 database, DBC_ATTRIBUTES["start_delay"]
             )
+        original_offset_source = (
+            "unavailable"
+            if original_source is None
+            else ("default" if original_source.endswith(":BA_DEF_DEF_") else "explicit")
+        )
         original_offset_us = None
         if original is not None:
             original_offset_us = _milliseconds_to_us(original)
@@ -305,6 +314,10 @@ def parse_loaded_dbc(
                 field_sources=tuple(field_sources),
                 frame_protocol=frame_protocol,
                 transmitter_nodes=senders,
+                original_offset_attribute=(
+                    "GenMsgStartDelayTime" if original_source is not None else None
+                ),
+                original_offset_source=original_offset_source,
             )
         )
     if not parsed:

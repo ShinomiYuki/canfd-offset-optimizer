@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "canfd-offset-optimizer"
-version = "0.1.3"
+version = "0.1.4"
 description = "Periodic CAN FD message Offset balancing with GCLS."
 readme = "README.md"
 requires-python = ">=3.11"

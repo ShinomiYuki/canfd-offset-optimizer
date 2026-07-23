@@ -24,17 +24,21 @@ def test_parse_minimal_dbc_normalizes_and_filters() -> None:
     assert standard.can_id == 0x391
     assert standard.cycle_time_us == 20_000
     assert standard.original_offset_us == 15_000
+    assert standard.original_offset_attribute == "GenMsgStartDelayTime"
+    assert standard.original_offset_source == "explicit"
     assert standard.sender_ecu == "VCU"
     assert extended.can_id == 0x460
     assert extended.is_extended
     assert extended.definition_index == 1
     assert extended.original_offset_us == 0
+    assert extended.original_offset_attribute == "GenMsgStartDelayTime"
+    assert extended.original_offset_source == "default"
     assert dict(extended.field_sources)["original_offset_us"].endswith(
         "GenMsgStartDelayTime:BA_DEF_DEF_"
     )
 
 
-def test_explicit_offset_alias_beats_higher_priority_attribute_default(
+def test_explicit_delay_never_overrides_start_delay_default(
     tmp_path: Path,
 ) -> None:
     text = FIXTURE.read_text(encoding="utf-8").replace(
@@ -51,10 +55,33 @@ def test_explicit_offset_alias_beats_higher_priority_attribute_default(
 
     extended = parse_dbc(path).messages[1]
 
-    assert extended.original_offset_us == 20_000
+    assert extended.original_offset_us == 0
+    assert extended.original_offset_attribute == "GenMsgStartDelayTime"
+    assert extended.original_offset_source == "default"
     assert dict(extended.field_sources)["original_offset_us"].endswith(
-        "GenMsgDelayTime"
+        "GenMsgStartDelayTime:BA_DEF_DEF_"
     )
+
+
+def test_delay_only_schema_is_not_an_offset_fallback(tmp_path: Path) -> None:
+    text = FIXTURE.read_text(encoding="utf-8").replace(
+        'BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;\n', ""
+    ).replace(
+        'BA_DEF_DEF_ "GenMsgStartDelayTime" 0;\n', ""
+    ).replace(
+        'BA_ "GenMsgStartDelayTime" BO_ 913 15;',
+        'BA_DEF_ BO_ "GenMsgDelayTime" INT 0 10000;\n'
+        'BA_DEF_DEF_ "GenMsgDelayTime" 0;\n'
+        'BA_ "GenMsgDelayTime" BO_ 913 5;',
+    )
+    path = tmp_path / "delay_only.dbc"
+    path.write_text(text, encoding="utf-8")
+
+    messages = parse_dbc(path).messages
+
+    assert all(message.original_offset_us is None for message in messages)
+    assert all(message.original_offset_attribute is None for message in messages)
+    assert all(message.original_offset_source == "unavailable" for message in messages)
 
 
 def test_tx_cyclic_message_without_cycle_has_locatable_error(tmp_path: Path) -> None:

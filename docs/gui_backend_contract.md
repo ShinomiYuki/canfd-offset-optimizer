@@ -181,12 +181,20 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
    核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。GUI 热力图
    使用固定可读单格宽度和水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
    平台单图限制的宽度失败关闭、显示明确错误。
-7. DBC 输出必须从导入工作区副本生成。已有 Offset 只允许字节级替换数字 token；继承
-   `BA_DEF_DEF_` 默认值的参与优化报文可补充显式 `BA_` 赋值，但属性必须已声明为 `BO_`。
-   同一报文最高优先级 Offset 属性存在多条同值声明时，必须保留全部声明并同步替换所有数字
-   token，`replaced_count` 仍按报文数统计；重复声明值冲突、属性未声明或写后回读不一致时将
-   DBC 导出降级为警告。不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件。核心优化
-   成功项仍必须携带完整 `GuiOptimizationResult`，通过
+7. DBC Offset 唯一映射为 `GenMsgStartDelayTime`。Parser 只接受该属性的显式消息赋值或
+   `BA_DEF_DEF_` 默认值；`GenMsgDelayTime`、`MsgStartDelayTime` 不得作为 fallback。
+   `CanMessage` / GUI assignment DTO 必须保留只读的属性名及 `explicit`、`default`、
+   `unavailable` 来源审计。
+8. DBC 输出必须从导入工作区副本生成，且必须存在
+   `BA_DEF_ BO_ "GenMsgStartDelayTime"`。已有 StartDelay 只允许在原位置字节级替换数字 token；
+   缺少显式赋值的参与优化报文补充 StartDelay `BA_` 时，必须放在已有消息级 `BA_` block 末尾并
+   位于首个严格 `VAL_` 记录前。不得将新增 `BA_` 统一追加到 EOF。没有 `VAL_` 时使用已有 `BA_`
+   block、属性 schema block 的稳定锚点，且不得重排已有 section。
+9. 同一报文 StartDelay 存在多条同值声明时，必须保留全部声明并同步替换所有数字 token，
+   `replaced_count` 仍按报文数统计并产生 duplicate warning；重复声明值冲突、缺少合法定义或写后
+   回读不一致时将 DBC 导出降级为警告。Writer 必须额外断言所有 `GenMsgDelayTime` 赋值
+   byte-for-byte 不变。不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件。核心优化成功项
+   仍必须携带完整 `GuiOptimizationResult`，通过
    `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
    basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
 8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是受审计的优化适配边界；

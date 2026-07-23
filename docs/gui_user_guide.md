@@ -172,16 +172,23 @@ user_output/<YYYYMMDD_HHMMSS_ffffff>/
 明确排除和 revision。`logs` 保存批次日志和每个网段的独立日志。`plots` 自动导出每个成功网段
 4 个真实稳态超周期的重复负载曲线，以及不重复的单个稳态窗口拥挤热力图。
 
-`dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。核心 parser 会把 CAN FD DBC 的
-`BA_DEF_DEF_` 消息属性默认值解析为未显式赋值报文的真实原 Offset。写入器在已有
-`GenMsgStartDelayTime`、`GenMsgDelayTime` 或 `MsgStartDelayTime` 属性行中只替换数字；对于继承
-默认值的参与优化报文，则在输出副本末尾补充显式 `BA_` 赋值。新增属性按 DBC 已声明且实际使用
-最多的 Offset 属性选择，不会发明未声明属性。原有编码、换行、空格、注释、顺序及其它字节保持
-不变。批次目录只使用微秒时间戳，DBC 最终文件名保持与来源文件一致；写入临时文件使用短随机名，
-DBC 最终路径采用 240 字符安全预算。同一优先属性重复、缺少有效默认值、未声明可写属性、路径超限
-或写后校验不一致时，只将 DBC 导出标记为失败：核心优化、Offset CSV、负载图、热力图和 GUI 结果
-继续保留，网段仍计为成功并显示“成功（DBC写回失败）”。Classic CAN 临时方案仍要求显式原
-Offset。网段日志和汇总 CSV 会记录 DBC 输出状态、错误及替换、补充条数。
+`dbc` 中的文件是导入工作区 DBC 的新副本，不会修改用户传入的原文件。Offset 的唯一正式 DBC
+属性是 `GenMsgStartDelayTime`：parser 优先读取报文的显式 `BA_` 值；没有显式值时读取该属性的
+`BA_DEF_DEF_` 默认值。`GenMsgDelayTime` 和 `MsgStartDelayTime` 具有独立语义，既不作为原
+Offset fallback，也绝不会被 Offset Writer 修改或新增。Offset CSV 会记录原 Offset 属性及
+`explicit` / `default` / `unavailable` 来源，结果表原 Offset 单元格的提示信息也可审计该来源。
+
+写入器只允许写 `GenMsgStartDelayTime`，且要求 DBC 已存在合法的
+`BA_DEF_ BO_ "GenMsgStartDelayTime"`。已有显式值只在原位置替换数字；继承默认值的参与优化报文
+会物化为显式 `BA_`，插入已有消息级 `BA_` block 末尾并严格位于第一个 `VAL_` 前，不再追加到
+文件末尾。同值重复声明会全部同步更新并产生 warning，冲突值则安全拒绝。除必要数字替换和新增
+StartDelay 赋值外，原有编码、换行、空格、注释、顺序、`VAL_` 及其它字节保持不变。
+
+批次目录只使用微秒时间戳，DBC 最终文件名保持与来源文件一致；写入临时文件使用短随机名，DBC
+最终路径采用 240 字符安全预算。缺少 StartDelay 定义、重复值冲突、路径超限或写后校验不一致时，
+只将 DBC 导出标记为失败：核心优化、Offset CSV、负载图、热力图和 GUI 结果继续保留，网段仍计为
+成功并显示“成功（DBC写回失败）”。网段日志记录 assignment 数、StartDelay 原位替换数、插入数、
+未变化数、warning 数、保持不变的 Delay 数及 DBC 写入状态。
 
 Offset 表默认只包含真正进入 GCLS 的报文。路由排除报文没有 `optimized_offset`，不会进入
 assignment、“只看已修改报文”或 DBC Offset replacement；其原始 DBC 内容在输出副本中保持不变。

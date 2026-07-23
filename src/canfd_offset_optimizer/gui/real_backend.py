@@ -689,6 +689,8 @@ class RealBackend(WorkspaceImporter):
                 (message.original_offset_us
                  if message.original_offset_us is not None else min(message.allowed_offsets_us)),
                 assignments_by_name[message.name].offset_us,
+                original_offset_attribute=message.original_offset_attribute,
+                original_offset_source=message.original_offset_source,
             )
             for message in core_result.messages
         )
@@ -752,7 +754,8 @@ class RealBackend(WorkspaceImporter):
             core_result.restart_execution.actual_attempts,
             core_result.restart_execution.stop_reason,
             core_result.elapsed_seconds,
-            loaded.network.warnings,
+            loaded.network.warnings
+            + (offset_write_plan.warnings if offset_write_plan is not None else ()),
             self._copy_int_tuple(initial_state.steady_slot_loads),
             self._copy_int_tuple(core_result.steady_slot_loads),
             self._copy_int_tuple(initial_state.startup_slot_loads),
@@ -790,12 +793,22 @@ class RealBackend(WorkspaceImporter):
                 *(
                     (
                         f"dbc_offset_attribute={offset_write_plan.attribute_name or 'existing'}",
+                        f"dbc_offset_message_count={offset_write_plan.message_count}",
                         f"dbc_offset_replaced_count={offset_write_plan.replaced_count}",
                         f"dbc_offset_inserted_count={offset_write_plan.inserted_count}",
+                        f"dbc_offset_unchanged_count={offset_write_plan.unchanged_count}",
+                        f"dbc_offset_warning_count={offset_write_plan.warning_count}",
+                        f"dbc_delay_untouched_count={offset_write_plan.untouched_delay_count}",
                     )
                     if offset_write_plan is not None
                     else (
                         "dbc_offset_preflight=failed",
+                        f"dbc_offset_message_count={len(preflight_replacements)}",
+                        "dbc_offset_replaced_count=0",
+                        "dbc_offset_inserted_count=0",
+                        "dbc_offset_unchanged_count=0",
+                        "dbc_offset_warning_count=0",
+                        "dbc_delay_untouched_count=unknown",
                         f"dbc_offset_preflight_error={dbc_preflight_error}",
                     )
                 ),

@@ -778,6 +778,14 @@ class AssignmentTableModel(QAbstractTableModel):
             return raw[index.column()]
         if role == int(Qt.ItemDataRole.TextAlignmentRole) and index.column() >= 1:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if role == int(Qt.ItemDataRole.ToolTipRole) and index.column() == 3:
+            source = {
+                "explicit": "显式值",
+                "default": "默认值",
+                "unavailable": "不可用（基线使用候选最小值）",
+            }[row.original_offset_source]
+            attribute = row.original_offset_attribute or "无"
+            return f"来源：{attribute}（{source}）"
         if role != int(Qt.ItemDataRole.DisplayRole):
             return None
         display = (
