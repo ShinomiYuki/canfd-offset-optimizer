@@ -35,6 +35,33 @@ class HeatmapWindowKind(str, Enum):
         return "稳态窗口" if self is HeatmapWindowKind.STEADY else "启动窗口"
 
 
+class CongestionTableMode(str, Enum):
+    """Explicit detail-table state; table contents never imply the mode."""
+
+    ALL_CONGESTED = "all_congested"
+    SELECTED_SLOT = "selected_slot"
+
+
+@dataclass(frozen=True, slots=True)
+class HeatmapCellSelection:
+    """Stable identity for one selectable cell in one bound result view."""
+
+    network_id: str
+    window_kind: HeatmapWindowKind
+    state: HeatmapState
+    slot_index: int
+
+    def __post_init__(self) -> None:
+        if not self.network_id.strip():
+            raise ValueError("heatmap cell selection requires a network identity")
+        if not isinstance(self.window_kind, HeatmapWindowKind):
+            raise ValueError("heatmap cell selection window is invalid")
+        if not isinstance(self.state, HeatmapState):
+            raise ValueError("heatmap cell selection state is invalid")
+        if self.slot_index < 0:
+            raise ValueError("heatmap cell selection slot is invalid")
+
+
 @dataclass(frozen=True, slots=True)
 class HeatmapCellView:
     state: HeatmapState
@@ -45,6 +72,17 @@ class HeatmapCellView:
     total_load: int
     messages: tuple[HeatmapMessageDetail, ...]
     load_unit: str
+
+    def __post_init__(self) -> None:
+        if self.slot_index < 0 or self.start_us < 0 or self.end_us <= self.start_us:
+            raise ValueError("heatmap cell coordinates are invalid")
+        if self.frame_count < 0 or self.total_load < 0:
+            raise ValueError("heatmap cell count/load must be non-negative")
+        if len(self.messages) != self.frame_count:
+            raise ValueError(
+                "presentation/result data inconsistency: heatmap members do not "
+                "match frame_count"
+            )
 
     @property
     def start_ms(self) -> float:
@@ -125,6 +163,27 @@ class HeatmapViewModel:
     def cells_for(self, state: HeatmapState) -> tuple[HeatmapCellView, ...]:
         return self.original_cells if state is HeatmapState.ORIGINAL else self.optimized_cells
 
+    def cell_for(self, selection: HeatmapCellSelection) -> HeatmapCellView:
+        """Resolve a full cell identity without falling back to slot index alone."""
+
+        if selection.network_id != self.network_id:
+            raise ValueError("selected heatmap cell belongs to another network")
+        if selection.window_kind is not self.window_kind:
+            raise ValueError("selected heatmap cell belongs to another window")
+        cells = self.cells_for(selection.state)
+        if not 0 <= selection.slot_index < len(cells):
+            raise ValueError("selected heatmap cell slot is outside the current window")
+        return cells[selection.slot_index]
+
+    def selection_for(
+        self, state: HeatmapState, slot_index: int
+    ) -> HeatmapCellSelection:
+        selection = HeatmapCellSelection(
+            self.network_id, self.window_kind, state, slot_index
+        )
+        self.cell_for(selection)
+        return selection
+
 
 def build_heatmap_view_model(
     result: GuiOptimizationResult,
@@ -163,20 +222,11 @@ def build_heatmap_view_model(
         load_unit,
     )
     congested = tuple(
-        CongestedMessageRow(
-            cell.state,
-            cell.slot_index,
-            cell.start_us,
-            cell.end_us,
-            cell.frame_count,
-            cell.total_load,
-            cell.load_unit,
-            message,
-        )
+        row
         for cells in (original, optimized)
         for cell in cells
         if cell.frame_count >= 4
-        for message in cell.messages
+        for row in message_rows_for_cell(cell)
     )
     return HeatmapViewModel(
         result.network_id,
@@ -199,6 +249,8 @@ def _state_cells(
     slot_width_us: int,
     load_unit: str,
 ) -> tuple[HeatmapCellView, ...]:
+    if len(loads) != len(counts):
+        raise ValueError("heatmap load/count arrays do not share one time axis")
     slots = None
     if detail is not None:
         slots = (
@@ -206,6 +258,25 @@ def _state_cells(
             if state is HeatmapState.ORIGINAL
             else detail.optimized_slots
         )
+        if len(slots) != len(loads):
+            raise ValueError(
+                "presentation/result data inconsistency: heatmap member slots do "
+                "not align with load arrays"
+            )
+        for index, (slot, load, count) in enumerate(
+            zip(slots, loads, counts, strict=True)
+        ):
+            if (
+                slot.slot_index != index
+                or slot.start_us != index * slot_width_us
+                or slot.end_us != (index + 1) * slot_width_us
+                or slot.frame_count != count
+                or slot.total_load != load
+            ):
+                raise ValueError(
+                    "presentation/result data inconsistency: heatmap slot "
+                    "aggregate or axis mismatch"
+                )
     return tuple(
         HeatmapCellView(
             state,
@@ -231,6 +302,31 @@ def filter_congested_rows(
     if mode == "five_plus":
         return tuple(row for row in rows if row.frame_count >= 5)
     raise ValueError("unsupported congestion filter")
+
+
+def message_rows_for_cell(
+    cell: HeatmapCellView,
+) -> tuple[CongestedMessageRow, ...]:
+    """Expose exactly the formal member list already attached to one slot."""
+
+    if len(cell.messages) != cell.frame_count:
+        raise ValueError(
+            "presentation/result data inconsistency: selected slot member count "
+            f"{len(cell.messages)} != frame_count {cell.frame_count}"
+        )
+    return tuple(
+        CongestedMessageRow(
+            cell.state,
+            cell.slot_index,
+            cell.start_us,
+            cell.end_us,
+            cell.frame_count,
+            cell.total_load,
+            cell.load_unit,
+            message,
+        )
+        for message in cell.messages
+    )
 
 
 def _format_ms(value: float) -> str:

@@ -16,6 +16,8 @@ from canfd_offset_optimizer.gui.contracts import (
     WeightMode,
 )
 from canfd_offset_optimizer.gui.heatmap_view_model import (
+    CongestionTableMode,
+    HeatmapCellSelection,
     HeatmapState,
     HeatmapWindowKind,
     build_heatmap_view_model,
@@ -85,6 +87,15 @@ def _show(qtbot, heatmap: LoadHeatmap, width: int = 760, height: int = 720) -> N
     qtbot.wait(20)
 
 
+def _click_cell(qtbot, heatmap: LoadHeatmap, state: HeatmapState, slot_index: int) -> None:
+    row = 0 if state is HeatmapState.ORIGINAL else 1
+    point = QPoint(
+        slot_index * heatmap.canvas.cell_width + heatmap.canvas.cell_width // 2,
+        TOP_MARGIN + row * ROW_HEIGHT + ROW_HEIGHT // 2,
+    )
+    qtbot.mouseClick(heatmap.canvas, Qt.MouseButton.LeftButton, pos=point)
+
+
 def test_content_width_grows_with_slot_count_without_shrinking_cells(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:
@@ -139,6 +150,33 @@ def test_original_and_optimized_share_the_exact_axis(
     assert tuple((cell.start_us, cell.end_us) for cell in view.original_cells) == tuple(
         (cell.start_us, cell.end_us) for cell in view.optimized_cells
     )
+
+
+def test_cell_selection_identity_rejects_other_network_and_window(
+    batch_result: BatchOptimizationResult,
+) -> None:
+    view = build_heatmap_view_model(
+        _result(batch_result), HeatmapWindowKind.STEADY
+    )
+    valid = view.selection_for(HeatmapState.ORIGINAL, 7)
+    assert view.cell_for(valid) is view.original_cells[7]
+    with pytest.raises(ValueError, match="another network"):
+        view.cell_for(replace(valid, network_id="other-network"))
+    with pytest.raises(ValueError, match="another window"):
+        view.cell_for(
+            replace(valid, window_kind=HeatmapWindowKind.STARTUP)
+        )
+
+
+def test_cell_member_count_inconsistency_is_rejected(
+    batch_result: BatchOptimizationResult,
+) -> None:
+    view = build_heatmap_view_model(
+        _result(batch_result), HeatmapWindowKind.STEADY
+    )
+    cell = next(cell for cell in view.original_cells if cell.frame_count == 2)
+    with pytest.raises(ValueError, match="members do not match frame_count"):
+        replace(cell, frame_count=3)
 
 
 def test_payload_and_frame_time_cell_text_use_result_units(
@@ -270,6 +308,12 @@ def test_switching_network_refreshes_heatmap_and_details_together(
     heatmap.set_batch(batch_result)
     heatmap.set_result(first)
     first_names = {row.message.message_name for row in heatmap.detail_rows}
+    assert heatmap.view_model is not None
+    selected = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 2
+    )
+    _click_cell(qtbot, heatmap, selected.state, selected.slot_index)
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
 
     heatmap.set_result(second)
     assert heatmap.view_model is not None
@@ -280,6 +324,9 @@ def test_switching_network_refreshes_heatmap_and_details_together(
         row.message.message_name.startswith(second.network_name)
         for row in heatmap.detail_rows
     )
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
+    assert heatmap.canvas.highlighted_cell is None
 
 
 def test_switching_window_refreshes_heatmap_and_details_together(
@@ -291,6 +338,11 @@ def test_switching_window_refreshes_heatmap_and_details_together(
     heatmap.set_result(result)
     assert heatmap.view_model is not None
     assert heatmap.view_model.window_kind is HeatmapWindowKind.STEADY
+    selected = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 2
+    )
+    _click_cell(qtbot, heatmap, selected.state, selected.slot_index)
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
 
     heatmap.window_combo.setCurrentIndex(1)
     assert heatmap.view_model is not None
@@ -298,6 +350,18 @@ def test_switching_window_refreshes_heatmap_and_details_together(
     assert heatmap.canvas.before_series == result.original_startup_load
     assert heatmap.canvas.display_duration_ms == 40
     assert heatmap.scroll_area.horizontalScrollBar().value() == 0
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
+    assert heatmap.canvas.highlighted_cell is None
+
+    startup = next(
+        cell for cell in heatmap.view_model.optimized_cells if cell.frame_count > 0
+    )
+    _click_cell(qtbot, heatmap, startup.state, startup.slot_index)
+    heatmap.window_combo.setCurrentIndex(0)
+    assert heatmap.view_model.window_kind is HeatmapWindowKind.STEADY
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
 
 
 def test_many_detail_records_use_vertical_scrolling(
@@ -312,25 +376,198 @@ def test_many_detail_records_use_vertical_scrolling(
     assert heatmap.details_table.verticalScrollBar().maximum() > 0
 
 
-def test_clicking_congested_cell_selects_matching_detail_group(
+def test_rebinding_same_network_result_clears_selected_slot(
     qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    result = _result(batch_result)
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(result)
+    assert heatmap.view_model is not None
+    cell = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 2
+    )
+    _click_cell(qtbot, heatmap, cell.state, cell.slot_index)
+    assert heatmap.selected_cell is not None
+
+    heatmap.set_result(replace(result, elapsed_seconds=result.elapsed_seconds + 1.0))
+
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
+    assert heatmap.canvas.highlighted_cell is None
+    assert all(row.frame_count >= 4 for row in heatmap.visible_detail_rows)
+
+
+def test_initial_mode_keeps_all_congested_summary(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
+    assert heatmap.show_all_button.isHidden()
+    assert heatmap.congestion_filter.isEnabled()
+    assert heatmap.details_table.rowCount() == len(heatmap.detail_rows)
+    assert all(row.frame_count >= 4 for row in heatmap.visible_detail_rows)
+    assert not any(row.frame_count == 3 for row in heatmap.visible_detail_rows)
+
+
+@pytest.mark.parametrize(
+    ("state", "frame_count"),
+    (
+        (HeatmapState.ORIGINAL, 0),
+        (HeatmapState.ORIGINAL, 1),
+        (HeatmapState.ORIGINAL, 2),
+        (HeatmapState.ORIGINAL, 3),
+        (HeatmapState.ORIGINAL, 4),
+        (HeatmapState.ORIGINAL, 5),
+        (HeatmapState.OPTIMIZED, 0),
+        (HeatmapState.OPTIMIZED, 1),
+        (HeatmapState.OPTIMIZED, 2),
+        (HeatmapState.OPTIMIZED, 4),
+        (HeatmapState.OPTIMIZED, 5),
+    ),
+)
+def test_clicking_any_heatmap_cell_shows_only_that_slot(
+    qtbot,
+    batch_result: BatchOptimizationResult,
+    state: HeatmapState,
+    frame_count: int,
 ) -> None:
     heatmap = LoadHeatmap()
     _show(qtbot, heatmap)
     heatmap.set_result(_result(batch_result))
     assert heatmap.view_model is not None
     cell = next(
-        cell for cell in heatmap.view_model.original_cells if cell.frame_count >= 4
+        cell
+        for cell in heatmap.view_model.cells_for(state)
+        if cell.frame_count == frame_count
     )
-    point = QPoint(
-        cell.slot_index * heatmap.canvas.cell_width + heatmap.canvas.cell_width // 2,
-        TOP_MARGIN + ROW_HEIGHT // 2,
+
+    _click_cell(qtbot, heatmap, state, cell.slot_index)
+
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
+    assert heatmap.selected_cell == HeatmapCellSelection(
+        heatmap.view_model.network_id,
+        heatmap.view_model.window_kind,
+        state,
+        cell.slot_index,
     )
-    qtbot.mouseClick(heatmap.canvas, Qt.MouseButton.LeftButton, pos=point)
-    selected = heatmap.details_table.item(heatmap.details_table.currentRow(), 0)
-    assert selected is not None
-    assert selected.data(Qt.ItemDataRole.UserRole + 1) == HeatmapState.ORIGINAL.value
-    assert selected.data(Qt.ItemDataRole.UserRole + 2) == cell.slot_index
+    assert heatmap.canvas.highlighted_cell == (state, cell.slot_index)
+    assert heatmap.details_table.rowCount() == frame_count
+    assert len(heatmap.visible_detail_rows) == frame_count
+    assert {
+        (row.state, row.slot_index) for row in heatmap.visible_detail_rows
+    } <= {(state, cell.slot_index)}
+    assert [row.message for row in heatmap.visible_detail_rows] == list(cell.messages)
+    assert not heatmap.congestion_filter.isEnabled()
+    assert not heatmap.show_all_button.isHidden()
+    assert f"{frame_count} 帧" in heatmap.detail_context_label.text()
+    assert f"{cell.total_load} {cell.load_unit}" in heatmap.detail_context_label.text()
+    if frame_count == 0:
+        assert heatmap.details_table.isHidden()
+        assert "当前时隙没有报文释放" in heatmap.details_empty_label.text()
+    else:
+        assert not heatmap.details_table.isHidden()
+
+
+def test_clicking_optimized_three_frame_cell_shows_three_formal_members(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    base = _result(batch_result)
+    assert base.steady_heatmap is not None
+    source = next(
+        slot
+        for slot in base.steady_heatmap.original_slots
+        if slot.frame_count == 3
+    )
+    target_index = next(
+        slot.slot_index
+        for slot in base.steady_heatmap.optimized_slots
+        if slot.frame_count != 3
+    )
+    optimized_offsets = {
+        assignment.message_name: assignment.optimized_offset_us
+        for assignment in base.assignments
+    }
+    members = tuple(
+        replace(
+            message,
+            offset_us=optimized_offsets[message.message_name],
+        )
+        for message in source.messages
+    )
+    optimized_slots = list(base.steady_heatmap.optimized_slots)
+    optimized_slots[target_index] = replace(
+        optimized_slots[target_index],
+        frame_count=3,
+        total_load=source.total_load,
+        messages=members,
+    )
+    loads_after = list(base.steady_loads_after)
+    counts_after = list(base.steady_counts_after)
+    loads_after[target_index] = source.total_load
+    counts_after[target_index] = 3
+    result = replace(
+        base,
+        steady_loads_after=tuple(loads_after),
+        steady_counts_after=tuple(counts_after),
+        steady_heatmap=HeatmapWindowDetail(
+            base.steady_heatmap.slot_width_us,
+            base.steady_heatmap.original_slots,
+            tuple(optimized_slots),
+        ),
+    )
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(result)
+
+    _click_cell(qtbot, heatmap, HeatmapState.OPTIMIZED, target_index)
+
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
+    assert len(heatmap.visible_detail_rows) == 3
+    assert [row.message for row in heatmap.visible_detail_rows] == list(members)
+    assert all(
+        row.state is HeatmapState.OPTIMIZED
+        and row.slot_index == target_index
+        for row in heatmap.visible_detail_rows
+    )
+
+
+def test_clicking_new_cell_replaces_previous_slot_rows(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+    assert heatmap.view_model is not None
+    original = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 3
+    )
+    optimized = next(
+        cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 2
+    )
+
+    _click_cell(qtbot, heatmap, original.state, original.slot_index)
+    first_names = {
+        row.message.message_name for row in heatmap.visible_detail_rows
+    }
+    assert len(first_names) == 3
+    _click_cell(qtbot, heatmap, optimized.state, optimized.slot_index)
+
+    assert heatmap.selected_cell is not None
+    assert heatmap.selected_cell.state is HeatmapState.OPTIMIZED
+    assert heatmap.selected_cell.slot_index == optimized.slot_index
+    assert heatmap.canvas.highlighted_cell == (
+        HeatmapState.OPTIMIZED,
+        optimized.slot_index,
+    )
+    assert len(heatmap.visible_detail_rows) == 2
+    assert {
+        row.message.message_name for row in heatmap.visible_detail_rows
+    } != first_names
 
 
 def test_clicking_detail_scrolls_and_highlights_heatmap(
@@ -343,10 +580,120 @@ def test_clicking_detail_scrolls_and_highlights_heatmap(
     item = heatmap.details_table.item(last_row, 0)
     assert item is not None
     slot_index = int(item.data(Qt.ItemDataRole.UserRole + 2))
+    state = HeatmapState(str(item.data(Qt.ItemDataRole.UserRole + 1)))
+    count_item = heatmap.details_table.item(last_row, 2)
+    assert count_item is not None
+    expected_count = int(count_item.text())
     heatmap._locate_cell_from_detail(last_row, 0)
     assert heatmap.scroll_area.horizontalScrollBar().value() > 0
-    assert heatmap.canvas._highlight is not None
-    assert heatmap.canvas._highlight[1] == slot_index
+    assert heatmap.canvas.highlighted_cell == (state, slot_index)
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
+    assert heatmap.selected_cell is not None
+    assert heatmap.selected_cell.state is state
+    assert heatmap.selected_cell.slot_index == slot_index
+    assert heatmap.details_table.rowCount() == expected_count
+    assert all(
+        row.state is state and row.slot_index == slot_index
+        for row in heatmap.visible_detail_rows
+    )
+
+
+def test_original_and_optimized_same_slot_use_distinct_selection_and_members(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+    assert heatmap.view_model is not None
+    slot_index = next(
+        index
+        for index, (original, optimized) in enumerate(
+            zip(
+                heatmap.view_model.original_cells,
+                heatmap.view_model.optimized_cells,
+                strict=True,
+            )
+        )
+        if original.frame_count != optimized.frame_count
+        and original.frame_count > 0
+        and optimized.frame_count > 0
+    )
+    original = heatmap.view_model.original_cells[slot_index]
+    optimized = heatmap.view_model.optimized_cells[slot_index]
+
+    _click_cell(qtbot, heatmap, HeatmapState.ORIGINAL, slot_index)
+    original_names = [
+        row.message.message_name for row in heatmap.visible_detail_rows
+    ]
+    original_offsets = [row.message.offset_us for row in heatmap.visible_detail_rows]
+    _click_cell(qtbot, heatmap, HeatmapState.OPTIMIZED, slot_index)
+    optimized_names = [
+        row.message.message_name for row in heatmap.visible_detail_rows
+    ]
+    optimized_offsets = [row.message.offset_us for row in heatmap.visible_detail_rows]
+
+    assert len(original_names) == original.frame_count
+    assert len(optimized_names) == optimized.frame_count
+    assert original_names != optimized_names
+    assert original_offsets != optimized_offsets
+    assert heatmap.selected_cell is not None
+    assert heatmap.selected_cell.state is HeatmapState.OPTIMIZED
+    assert heatmap.canvas.highlighted_cell == (
+        HeatmapState.OPTIMIZED,
+        slot_index,
+    )
+
+
+def test_show_all_restores_previous_congestion_filter_and_clears_highlight(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+    heatmap.congestion_filter.setCurrentIndex(
+        heatmap.congestion_filter.findData("five_plus")
+    )
+    expected = tuple(
+        row for row in heatmap.detail_rows if row.frame_count >= 5
+    )
+    assert heatmap.visible_detail_rows == expected
+    assert heatmap.view_model is not None
+    two_frame = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 2
+    )
+
+    _click_cell(qtbot, heatmap, two_frame.state, two_frame.slot_index)
+    assert len(heatmap.visible_detail_rows) == 2
+    assert heatmap.congestion_filter.currentData() == "five_plus"
+    heatmap.show_all_button.click()
+
+    assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
+    assert heatmap.selected_cell is None
+    assert heatmap.canvas.highlighted_cell is None
+    assert heatmap.congestion_filter.isEnabled()
+    assert heatmap.congestion_filter.currentData() == "five_plus"
+    assert heatmap.visible_detail_rows == expected
+
+
+def test_clicking_message_row_in_selected_mode_keeps_same_slot(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+    assert heatmap.view_model is not None
+    cell = next(
+        cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 5
+    )
+    _click_cell(qtbot, heatmap, cell.state, cell.slot_index)
+    selection = heatmap.selected_cell
+    names = [row.message.message_name for row in heatmap.visible_detail_rows]
+
+    heatmap._locate_cell_from_detail(2, 4)
+
+    assert heatmap.selected_cell == selection
+    assert heatmap.canvas.highlighted_cell == (cell.state, cell.slot_index)
+    assert [row.message.message_name for row in heatmap.visible_detail_rows] == names
 
 
 def test_png_export_contains_full_content_not_current_viewport(
@@ -392,6 +739,40 @@ def test_horizontal_scrolling_is_view_only_and_emits_no_run_signal(
     assert exported == []
 
 
+def test_cell_click_emits_once_and_does_not_rebuild_heatmap(
+    qtbot, batch_result: BatchOptimizationResult, monkeypatch
+) -> None:
+    calls = 0
+    real_builder = heatmap_module.build_heatmap_view_model
+
+    def counted_builder(
+        result: GuiOptimizationResult, kind: HeatmapWindowKind
+    ):
+        nonlocal calls
+        calls += 1
+        return real_builder(result, kind)
+
+    monkeypatch.setattr(heatmap_module, "build_heatmap_view_model", counted_builder)
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(_result(batch_result))
+    assert calls == 1
+    assert heatmap.view_model is not None
+    emitted: list[tuple[str, int]] = []
+    heatmap.canvas.cell_clicked.connect(
+        lambda state, slot: emitted.append((state, slot))
+    )
+    cell = next(
+        cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 2
+    )
+
+    _click_cell(qtbot, heatmap, cell.state, cell.slot_index)
+
+    assert emitted == [(cell.state.value, cell.slot_index)]
+    assert calls == 1
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
+
+
 def test_empty_congestion_state_is_explicit(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:
@@ -420,6 +801,52 @@ def test_empty_congestion_state_is_explicit(
     assert heatmap.details_table.isHidden()
     assert not heatmap.details_empty_label.isHidden()
     assert "不存在同时释放 4 帧及以上" in heatmap.details_empty_label.text()
+
+
+def test_no_congested_slots_still_allows_two_frame_detail(
+    qtbot, batch_result: BatchOptimizationResult
+) -> None:
+    base = _result(batch_result)
+    assert base.steady_heatmap is not None
+
+    def cap_slots(
+        slots: tuple[HeatmapSlotDetail, ...],
+    ) -> tuple[HeatmapSlotDetail, ...]:
+        return tuple(
+            replace(
+                slot,
+                frame_count=min(slot.frame_count, 2),
+                messages=slot.messages[:2],
+            )
+            for slot in slots
+        )
+
+    detail = HeatmapWindowDetail(
+        base.steady_heatmap.slot_width_us,
+        cap_slots(base.steady_heatmap.original_slots),
+        cap_slots(base.steady_heatmap.optimized_slots),
+    )
+    capped = replace(
+        base,
+        steady_counts_before=tuple(slot.frame_count for slot in detail.original_slots),
+        steady_counts_after=tuple(slot.frame_count for slot in detail.optimized_slots),
+        steady_heatmap=detail,
+    )
+    heatmap = LoadHeatmap()
+    _show(qtbot, heatmap)
+    heatmap.set_result(capped)
+    assert heatmap.detail_rows == ()
+    assert heatmap.details_table.isHidden()
+    assert heatmap.view_model is not None
+    cell = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 2
+    )
+
+    _click_cell(qtbot, heatmap, cell.state, cell.slot_index)
+
+    assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
+    assert heatmap.details_table.rowCount() == 2
+    assert len(heatmap.visible_detail_rows) == 2
 
 
 def test_heatmap_network_selector_emits_successful_network_identity(
@@ -476,11 +903,21 @@ def test_widget_weight_change_refreshes_cell_and_table_units_together(
     assert heatmap.view_model is not None
     assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.endswith(" B")
     assert heatmap.details_table.item(0, 3).text().endswith(" B")
+    payload_cell = next(
+        cell for cell in heatmap.view_model.original_cells if cell.frame_count == 3
+    )
+    _click_cell(qtbot, heatmap, payload_cell.state, payload_cell.slot_index)
+    assert heatmap.detail_context_label.text().endswith(" B")
 
     heatmap.set_result(frame)
     assert heatmap.view_model is not None
     assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.endswith(" μs")
     assert heatmap.details_table.item(0, 3).text().endswith(" μs")
+    frame_cell = next(
+        cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 2
+    )
+    _click_cell(qtbot, heatmap, frame_cell.state, frame_cell.slot_index)
+    assert heatmap.detail_context_label.text().endswith(" μs")
 
 
 def test_detail_headers_support_numeric_sorting(
