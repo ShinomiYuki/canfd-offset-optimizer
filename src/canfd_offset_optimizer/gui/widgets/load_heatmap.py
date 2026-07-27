@@ -31,7 +31,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..contracts import BatchOptimizationResult, GuiOptimizationResult
+from ..contracts import (
+    BatchOptimizationResult,
+    GuiOptimizationResult,
+    NetworkTimingConfig,
+)
 from ..formatting import format_load_unit, format_result_weight
 from ..heatmap_view_model import (
     CongestionTableMode,
@@ -53,7 +57,7 @@ CELL_HORIZONTAL_PADDING = 18
 ROW_LABEL_WIDTH = 76
 RIGHT_MARGIN = 12
 TOP_MARGIN = 10
-ROW_HEIGHT = 72
+ROW_HEIGHT = 88
 AXIS_HEIGHT = 42
 CANVAS_HEIGHT = TOP_MARGIN + 2 * ROW_HEIGHT + AXIS_HEIGHT
 MAX_EXPORT_WIDTH = 32_767
@@ -66,13 +70,15 @@ def calculate_heatmap_cell_width(
     maximum_frame_count: int,
     maximum_load: int,
     load_unit: str,
+    maximum_conservative_time: int = 0,
 ) -> int:
-    """Measure readable two-line content; slot count never affects the result."""
+    """Measure readable three-line content; slot count never affects it."""
 
     representative_load = 56 if load_unit == "B" else 384
     samples = (
         f"{max(5, maximum_frame_count)} 帧",
         f"{max(representative_load, maximum_load)} {load_unit}",
+        f"保守 ≥{max(812, maximum_conservative_time)} μs*",
     )
     measured = max(metrics.horizontalAdvance(text) for text in samples)
     return max(CONFIGURED_MIN_CELL_WIDTH, measured + CELL_HORIZONTAL_PADDING)
@@ -325,6 +331,14 @@ class LoadHeatmap(QWidget):
         self.current_network_label = QLabel("当前网段：请选择一个网段")
         self.title_label = QLabel("可优化报文拥挤热力图：无结果")
         self.weight_basis_label = QLabel("权重口径：—")
+        self.timing_basis_label = QLabel(
+            "\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u2014\uff08\u7f3a\u5c11 Nominal Bitrate\uff09"
+        )
+        self.timing_basis_label.setWordWrap(True)
+        self.timing_basis_label.setToolTip(
+            "\u8be5\u6307\u6807\u53ea\u7528\u4e8e\u4f18\u5316\u540e\u8bca\u65ad\u3002CAN FD \u6574\u5e27\u6309 nominal bitrate \u8ba1\u65f6\uff0c"
+            "\u5047\u8bbe data-phase bitrate \u4e0d\u4f4e\u4e8e nominal bitrate\uff1b\u4e0d\u662f\u5b9e\u9645\u5e27\u65f6\u95f4\u3002"
+        )
         self.current_network_id: str | None = None
         self.network_combo = QComboBox()
         self.network_combo.setEnabled(False)
@@ -412,9 +426,20 @@ class LoadHeatmap(QWidget):
 
         self.details_empty_label = QLabel("当前窗口不存在同时释放 4 帧及以上的时隙。")
         self.details_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.details_table = QTableWidget(0, 8)
+        self.details_table = QTableWidget(0, 10)
         self.details_table.setHorizontalHeaderLabels(
-            ("状态", "时间窗口", "同时帧数", "时隙总负载", "报文名称", "CAN ID", "周期", "Offset")
+            (
+                "状态",
+                "时间窗口",
+                "同时帧数",
+                "时隙总负载",
+                "报文名称",
+                "CAN ID",
+                "长度(Byte)",
+                "周期",
+                "Offset",
+                "保守占用时间(μs)",
+            )
         )
         self.details_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -449,10 +474,12 @@ class LoadHeatmap(QWidget):
         layout.addWidget(self.current_network_label)
         layout.addWidget(self.title_label)
         layout.addWidget(self.weight_basis_label)
+        layout.addWidget(self.timing_basis_label)
         layout.addLayout(controls)
         layout.addWidget(self.splitter, 1)
 
         self._result: GuiOptimizationResult | None = None
+        self._timing_config: NetworkTimingConfig | None = None
         self._view_model: HeatmapViewModel | None = None
         self._detail_rows: tuple[CongestedMessageRow, ...] = ()
         self._visible_detail_rows: tuple[CongestedMessageRow, ...] = ()
@@ -489,6 +516,14 @@ class LoadHeatmap(QWidget):
         # A newly bound DTO is a new result revision even when network_id is equal.
         self._reset_table_state(populate=False)
         self._result = result
+        if (
+            self._timing_config is None
+            or self._timing_config.network_id != result.network_id
+        ):
+            self._timing_config = (
+                result.network_timing_config
+                or NetworkTimingConfig(result.network_id)
+            )
         self.current_network_id = result.network_id
         self.current_network_label.setText(f"当前网段：{result.display_name}")
         self.current_network_label.setToolTip(
@@ -517,7 +552,9 @@ class LoadHeatmap(QWidget):
         self._sync_network_combo(network_id)
         self.title_label.setText("可优化报文拥挤热力图：无成功结果")
         self.weight_basis_label.setText("权重口径：—")
+        self.timing_basis_label.setText("\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u2014\uff08\u7f3a\u5c11 Nominal Bitrate\uff09")
         self._result = None
+        self._timing_config = None
         self._view_model = None
         self._detail_rows = ()
         self._visible_detail_rows = ()
@@ -526,6 +563,20 @@ class LoadHeatmap(QWidget):
         self.canvas.set_view_model(None, CONFIGURED_MIN_CELL_WIDTH)
         self._populate_details()
         self.export_button.setEnabled(False)
+
+    def set_timing_config(
+        self, config: NetworkTimingConfig, *, refresh: bool = True
+    ) -> None:
+        """Refresh diagnostics only; this method never invokes an optimizer."""
+
+        self._timing_config = config
+        if (
+            refresh
+            and self._result is not None
+            and self._result.network_id == config.network_id
+        ):
+            self._reset_table_state(populate=False)
+            self._refresh_view_model()
 
     def export_png(self, path: Path) -> Path:
         return self.canvas.export_png(path)
@@ -539,7 +590,9 @@ class LoadHeatmap(QWidget):
             kind = data if isinstance(data, HeatmapWindowKind) else HeatmapWindowKind(str(data))
         except ValueError:
             kind = HeatmapWindowKind.STEADY
-        view_model = build_heatmap_view_model(result, kind)
+        view_model = build_heatmap_view_model(
+            result, kind, self._timing_config
+        )
         max_count = max(
             (cell.frame_count for cells in (view_model.original_cells, view_model.optimized_cells) for cell in cells),
             default=0,
@@ -548,13 +601,40 @@ class LoadHeatmap(QWidget):
             (cell.total_load for cells in (view_model.original_cells, view_model.optimized_cells) for cell in cells),
             default=0,
         )
+        max_conservative = max(
+            (
+                cell.conservative_total_time_us or 0
+                for cells in (
+                    view_model.original_cells,
+                    view_model.optimized_cells,
+                )
+                for cell in cells
+            ),
+            default=0,
+        )
         cell_width = calculate_heatmap_cell_width(
             self.fontMetrics(),
             maximum_frame_count=max_count,
             maximum_load=max_load,
             load_unit=view_model.load_unit,
+            maximum_conservative_time=max_conservative,
         )
         self._view_model = view_model
+        config = view_model.timing_config
+        if config.nominal_bitrate_bps is None:
+            self.timing_basis_label.setText(
+                "\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u2014\uff08\u7f3a\u5c11 Nominal Bitrate\uff1b\u4f18\u5316\u7ed3\u679c\u4ecd\u6709\u6548\uff09"
+            )
+        else:
+            source = (
+                "DBC"
+                if config.source is not None and config.source.value == "dbc"
+                else "\u624b\u52a8"
+            )
+            self.timing_basis_label.setText(
+                "\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u534f\u8bae\u7ea7\u4e0a\u754c\uff1bNominal Bitrate "
+                f"{config.nominal_bitrate_bps / 1000:g} kbit/s\uff08{source}\uff09"
+            )
         self._detail_rows = view_model.congested_rows
         self.title_label.setText(
             f"{result.display_name} / {kind.label}可优化报文拥挤热力图，"
@@ -595,7 +675,8 @@ class LoadHeatmap(QWidget):
                 "当前："
                 f"{selected_cell.state.label} | {selected_cell.start_ms:g}～"
                 f"{selected_cell.end_ms:g} ms | {selected_cell.frame_count} 帧 | "
-                f"{selected_cell.total_load} {selected_cell.load_unit}"
+                f"{selected_cell.total_load} {selected_cell.load_unit} | "
+                f"{selected_cell.conservative_text}"
             )
             self.show_all_button.setVisible(True)
             self.show_all_button.setEnabled(True)
@@ -630,8 +711,18 @@ class LoadHeatmap(QWidget):
                 (row.total_load_text, row.total_load),
                 (row.message.message_name, row.message.message_name),
                 (row.can_id_text, row.message.can_id),
+                (
+                    row.payload_text,
+                    row.message.payload_bytes
+                    if row.message.payload_bytes is not None
+                    else -1,
+                ),
                 (row.period_text, row.message.cycle_time_us),
                 (row.offset_text, row.message.offset_us),
+                (
+                    row.conservative_time_text,
+                    row.message.conservative_service_time_us or -1,
+                ),
             )
             for column, (text, sort_value) in enumerate(values):
                 item = _SortableItem(text, sort_value)
@@ -642,6 +733,10 @@ class LoadHeatmap(QWidget):
                     item.setToolTip(
                         f"{'Extended' if row.message.is_extended else 'Standard'} CAN ID：{row.can_id_text}"
                     )
+                elif column == 6:
+                    item.setToolTip("DBC Payload Length；不是 raw DLC code。")
+                elif column == 9:
+                    item.setToolTip(row.conservative_tooltip)
                 table.setItem(index, column, item)
         table.setSortingEnabled(True)
         del blocker
@@ -732,6 +827,10 @@ class LoadHeatmap(QWidget):
         if isinstance(network_id, str):
             self._reset_table_state(populate=False)
             self.network_selected.emit(network_id)
+
+    @property
+    def timing_config(self) -> NetworkTimingConfig | None:
+        return self._timing_config
 
     @property
     def view_model(self) -> HeatmapViewModel | None:

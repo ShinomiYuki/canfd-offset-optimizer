@@ -53,6 +53,39 @@ class DbcParseResult:
 
     messages: tuple[ParsedDbcMessage, ...]
     warnings: tuple[str, ...] = ()
+    nominal_bitrate_bps: int | None = None
+    nominal_bitrate_source: str | None = None
+
+
+_DBC_NOMINAL_BITRATE_ATTRIBUTE = re.compile(
+    r'^\s*BA_\s+"Baudrate"\s+([0-9]+)\s*;\s*$', re.MULTILINE
+)
+
+
+def read_dbc_nominal_bitrate(path: Path) -> int | None:
+    """Read an explicit global DBC ``Baudrate`` attribute in bit/s.
+
+    cantools accepts the standard DBC ``BS_:`` declaration as an empty section;
+    it exposes a bus baudrate only from the explicit database-level attribute
+    ``BA_ "Baudrate" <bit/s>;``. Attribute defaults, blank ``BS_:`` sections,
+    filenames and project defaults are deliberately not treated as confirmed
+    network timing.
+    """
+
+    if not path.is_file():
+        return None
+    source = path.read_bytes().decode("latin-1")
+    values = tuple(
+        int(match.group(1))
+        for match in _DBC_NOMINAL_BITRATE_ATTRIBUTE.finditer(source)
+    )
+    if not values:
+        return None
+    if any(value <= 0 for value in values) or len(set(values)) != 1:
+        raise InputFileError(
+            f"{path}: conflicting or non-positive DBC Baudrate attribute"
+        )
+    return values[0]
 
 
 def _attribute_value(
@@ -328,7 +361,13 @@ def parse_loaded_dbc(
             f"{path}: one physical network mixes eligible Classic CAN and CAN FD "
             "periodic TX messages; Byte and microsecond weights cannot be mixed"
         )
-    return DbcParseResult(tuple(parsed), tuple(warnings))
+    nominal_bitrate_bps = read_dbc_nominal_bitrate(path)
+    return DbcParseResult(
+        tuple(parsed),
+        tuple(warnings),
+        nominal_bitrate_bps,
+        "DBC:Baudrate" if nominal_bitrate_bps is not None else None,
+    )
 
 
 def parse_dbc(

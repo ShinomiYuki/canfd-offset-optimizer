@@ -43,6 +43,7 @@ from .widgets.assignment_table import AssignmentTable
 from .widgets.input_panel import InputPanel
 from .widgets.load_chart import LoadChart
 from .widgets.load_heatmap import LoadHeatmap
+from .widgets.network_timing_dialog import NetworkTimingDialog
 from .widgets.metrics_panel import BatchSummaryPanel
 from .widgets.progress_panel import ProgressPanel
 from .widgets.quick_start_page import QuickStartPage
@@ -148,6 +149,9 @@ class MainWindow(QMainWindow):
         self.settings_panel.details_requested.connect(self.input_panel.show_details)
         self.settings_panel.sender_selection_requested.connect(
             self.edit_sender_selection
+        )
+        self.settings_panel.timing_configuration_requested.connect(
+            self.edit_network_timing
         )
         self.settings_panel.validity_changed.connect(self._refresh_controls)
         self.progress_panel.run_requested.connect(self.start_optimization)
@@ -395,6 +399,7 @@ class MainWindow(QMainWindow):
                         sender_selection=reconciled,
                         sender_selection_summaries=value.sender_selection_summaries,
                         dbc_revision=value.dbc_revision,
+                        network_timing_configs=value.network_timing_configs,
                     )
             self._inspection = inspected
             self._session = inspected.session
@@ -515,6 +520,10 @@ class MainWindow(QMainWindow):
             )
         else:
             result = item.result
+            self.load_heatmap.set_timing_config(
+                self.settings_panel.timing_config_for(result.network_id),
+                refresh=False,
+            )
             bindings: tuple[
                 tuple[
                     str,
@@ -630,6 +639,39 @@ class MainWindow(QMainWindow):
         self.summary_panel.clear()
         self.load_heatmap.clear_batch()
         self._clear_selected_network()
+
+    def edit_network_timing(self) -> None:
+        """Edit result-only timing metadata without invalidating optimization."""
+
+        inspection = self._inspection
+        if self.task_active or inspection is None:
+            return
+        dialog = NetworkTimingDialog(
+            inspection.networks, self.settings_panel.timing_configs, self
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        configs = dialog.timing_configs
+        if configs is None:
+            return
+        try:
+            self.settings_panel.set_timing_configs(configs)
+        except ValueError as exc:
+            self._show_error("无法应用网段速率参数", str(exc))
+            return
+        configured = sum(
+            config.nominal_bitrate_bps is not None for config in configs
+        )
+        self._append_log(
+            f"网段速率参数已更新：已配置 {configured}/{len(configs)}；"
+            "仅刷新保守占用时间展示，未重新运行 GCLS。"
+        )
+        selected = self.selected_network
+        if selected is not None and selected.result is not None:
+            self.load_heatmap.set_timing_config(
+                self.settings_panel.timing_config_for(selected.network_id)
+            )
+        self._refresh_controls()
 
     def edit_sender_selection(self) -> None:
         inspection = self._inspection

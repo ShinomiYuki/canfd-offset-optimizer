@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from functools import lru_cache
+
+from canfd_offset_optimizer.models import FrameProtocol as CoreFrameProtocol
+from canfd_offset_optimizer.timing.conservative_service import (
+    CONSERVATIVE_ESTIMATOR_VERSION,
+    ConservativeEstimateStatus,
+    ConservativeFrameEstimate,
+    estimate_conservative_bus_service_time,
+)
 
 from .contracts import (
     GuiOptimizationResult,
     HeatmapMessageDetail,
     HeatmapWindowDetail,
+    NetworkTimingConfig,
     WeightMode,
 )
 
@@ -72,6 +82,10 @@ class HeatmapCellView:
     total_load: int
     messages: tuple[HeatmapMessageDetail, ...]
     load_unit: str
+    conservative_total_time_us: int | None
+    conservative_complete_count: int
+    conservative_total_count: int
+    conservative_unavailable_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.slot_index < 0 or self.start_us < 0 or self.end_us <= self.start_us:
@@ -83,6 +97,20 @@ class HeatmapCellView:
                 "presentation/result data inconsistency: heatmap members do not "
                 "match frame_count"
             )
+        if not (
+            0
+            <= self.conservative_complete_count
+            <= self.conservative_total_count
+            == self.frame_count
+        ):
+            raise ValueError("heatmap conservative completeness is invalid")
+        if self.frame_count == 0 and self.conservative_total_time_us != 0:
+            raise ValueError("empty heatmap cell conservative total must be zero")
+        if self.frame_count > 0 and self.conservative_complete_count == 0:
+            if self.conservative_total_time_us is not None:
+                raise ValueError("unavailable heatmap cell must not report zero time")
+        elif self.conservative_total_time_us is None:
+            raise ValueError("known heatmap conservative total is missing")
 
     @property
     def start_ms(self) -> float:
@@ -93,19 +121,67 @@ class HeatmapCellView:
         return self.end_us / 1_000
 
     @property
+    def conservative_text(self) -> str:
+        if self.frame_count == 0:
+            return "保守 0 μs"
+        if self.conservative_complete_count == 0:
+            return "保守 —"
+        assert self.conservative_total_time_us is not None
+        if self.conservative_complete_count < self.conservative_total_count:
+            return f"保守 ≥{self.conservative_total_time_us} μs*"
+        return f"保守 {self.conservative_total_time_us} μs"
+
+    @property
     def text(self) -> str:
         if self.frame_count == 0:
             return ""
-        return f"{self.frame_count} 帧\n{self.total_load} {self.load_unit}"
+        return (
+            f"{self.frame_count} 帧\n"
+            f"{self.total_load} {self.load_unit}\n"
+            f"{self.conservative_text}"
+        )
 
     @property
     def tooltip(self) -> str:
-        return (
-            f"状态：{self.state.label}\n"
-            f"时间：[{_format_ms(self.start_ms)}, {_format_ms(self.end_ms)}) ms\n"
-            f"帧数：{self.frame_count}\n"
-            f"负载：{self.total_load} {self.load_unit}"
-        )
+        lines = [
+            f"状态：{self.state.label}",
+            f"时间：[{_format_ms(self.start_ms)}, {_format_ms(self.end_ms)}) ms",
+            f"帧数：{self.frame_count}",
+            f"当前权重负载：{self.total_load} {self.load_unit}",
+        ]
+        if self.frame_count == 0:
+            lines.extend(("保守占用时间：0 μs", "计算完整度：0/0"))
+        elif self.conservative_complete_count == 0:
+            lines.extend(
+                (
+                    "保守占用时间：—",
+                    f"计算完整度：0/{self.conservative_total_count}",
+                    "原因：" + _reasons_text(self.conservative_unavailable_reasons),
+                )
+            )
+        elif self.conservative_complete_count < self.conservative_total_count:
+            assert self.conservative_total_time_us is not None
+            lines.extend(
+                (
+                    f"保守已知占用：≥{self.conservative_total_time_us} μs",
+                    "计算完整度："
+                    f"{self.conservative_complete_count}/{self.conservative_total_count}",
+                    "缺失："
+                    f"{self.conservative_total_count - self.conservative_complete_count} 帧",
+                    "原因：" + _reasons_text(self.conservative_unavailable_reasons),
+                )
+            )
+        else:
+            assert self.conservative_total_time_us is not None
+            lines.extend(
+                (
+                    f"保守占用时间：{self.conservative_total_time_us} μs",
+                    "计算完整度："
+                    f"{self.conservative_complete_count}/{self.conservative_total_count}",
+                )
+            )
+        lines.append("CAN FD 保守值整帧按 nominal bitrate 计时，不是实际帧时间。")
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +215,21 @@ class CongestedMessageRow:
     def offset_text(self) -> str:
         return f"{_format_ms(self.message.offset_us / 1_000)} ms"
 
+    @property
+    def payload_text(self) -> str:
+        return "—" if self.message.payload_bytes is None else str(self.message.payload_bytes)
+
+    @property
+    def conservative_time_text(self) -> str:
+        value = self.message.conservative_service_time_us
+        return "—" if value is None else str(value)
+
+    @property
+    def conservative_tooltip(self) -> str:
+        if self.message.conservative_service_time_us is not None:
+            return "协议级保守占用时间；包含正常 3-bit Intermission。"
+        return _reason_label(self.message.conservative_unavailable_reason)
+
 
 @dataclass(frozen=True, slots=True)
 class HeatmapViewModel:
@@ -148,6 +239,7 @@ class HeatmapViewModel:
     window_kind: HeatmapWindowKind
     slot_width_us: int
     load_unit: str
+    timing_config: NetworkTimingConfig
     original_cells: tuple[HeatmapCellView, ...]
     optimized_cells: tuple[HeatmapCellView, ...]
     congested_rows: tuple[CongestedMessageRow, ...]
@@ -164,8 +256,6 @@ class HeatmapViewModel:
         return self.original_cells if state is HeatmapState.ORIGINAL else self.optimized_cells
 
     def cell_for(self, selection: HeatmapCellSelection) -> HeatmapCellView:
-        """Resolve a full cell identity without falling back to slot index alone."""
-
         if selection.network_id != self.network_id:
             raise ValueError("selected heatmap cell belongs to another network")
         if selection.window_kind is not self.window_kind:
@@ -188,10 +278,16 @@ class HeatmapViewModel:
 def build_heatmap_view_model(
     result: GuiOptimizationResult,
     window_kind: HeatmapWindowKind,
+    timing_config: NetworkTimingConfig | None = None,
 ) -> HeatmapViewModel:
-    """Select one immutable result window; never recompute loads or releases."""
+    """Build diagnostics from immutable slot members without rerunning GCLS."""
 
     load_unit = "B" if result.weight_mode is WeightMode.PAYLOAD_BYTES else "μs"
+    config = timing_config or result.network_timing_config or NetworkTimingConfig(
+        result.network_id
+    )
+    if config.network_id != result.network_id:
+        raise ValueError("timing config belongs to another network")
     if window_kind is HeatmapWindowKind.STEADY:
         detail = result.steady_heatmap
         before_loads = result.original_steady_load
@@ -206,20 +302,24 @@ def build_heatmap_view_model(
         after_counts = result.optimized_startup_count
     slot_width_us = result.load_window_metadata.slot_width_us
     original = _state_cells(
+        result.network_id,
         HeatmapState.ORIGINAL,
         detail,
         before_loads,
         before_counts,
         slot_width_us,
         load_unit,
+        config,
     )
     optimized = _state_cells(
+        result.network_id,
         HeatmapState.OPTIMIZED,
         detail,
         after_loads,
         after_counts,
         slot_width_us,
         load_unit,
+        config,
     )
     congested = tuple(
         row
@@ -235,6 +335,7 @@ def build_heatmap_view_model(
         window_kind,
         slot_width_us,
         load_unit,
+        config,
         original,
         optimized,
         congested,
@@ -242,12 +343,14 @@ def build_heatmap_view_model(
 
 
 def _state_cells(
+    network_id: str,
     state: HeatmapState,
     detail: HeatmapWindowDetail | None,
     loads: tuple[int, ...],
     counts: tuple[int, ...],
     slot_width_us: int,
     load_unit: str,
+    timing_config: NetworkTimingConfig,
 ) -> tuple[HeatmapCellView, ...]:
     if len(loads) != len(counts):
         raise ValueError("heatmap load/count arrays do not share one time axis")
@@ -277,19 +380,108 @@ def _state_cells(
                     "presentation/result data inconsistency: heatmap slot "
                     "aggregate or axis mismatch"
                 )
-    return tuple(
-        HeatmapCellView(
-            state,
-            index,
-            index * slot_width_us,
-            (index + 1) * slot_width_us,
-            count,
-            load,
-            slots[index].messages if slots is not None else (),
-            load_unit,
+    cells: list[HeatmapCellView] = []
+    for index, (load, count) in enumerate(zip(loads, counts, strict=True)):
+        raw_messages = slots[index].messages if slots is not None else ()
+        messages = tuple(
+            _enrich_message(network_id, message, timing_config)
+            for message in raw_messages
         )
-        for index, (load, count) in enumerate(zip(loads, counts, strict=True))
+        known_times = tuple(
+            message.conservative_service_time_us
+            for message in messages
+            if message.conservative_status is ConservativeEstimateStatus.COMPLETE
+            and message.conservative_service_time_us is not None
+        )
+        reasons = tuple(
+            dict.fromkeys(
+                message.conservative_unavailable_reason or "unknown_reason"
+                for message in messages
+                if message.conservative_status is ConservativeEstimateStatus.UNAVAILABLE
+            )
+        )
+        complete_count = len(known_times)
+        total_count = len(messages)
+        conservative_total = (
+            0
+            if total_count == 0
+            else (sum(known_times) if complete_count > 0 else None)
+        )
+        cells.append(
+            HeatmapCellView(
+                state,
+                index,
+                index * slot_width_us,
+                (index + 1) * slot_width_us,
+                count,
+                load,
+                messages,
+                load_unit,
+                conservative_total,
+                complete_count,
+                total_count,
+                reasons,
+            )
+        )
+    return tuple(cells)
+
+
+def _enrich_message(
+    network_id: str,
+    message: HeatmapMessageDetail,
+    timing_config: NetworkTimingConfig,
+) -> HeatmapMessageDetail:
+    protocol_value = (
+        message.frame_protocol.value if message.frame_protocol is not None else None
     )
+    estimate = _cached_estimate(
+        network_id,
+        message.message_name,
+        message.can_id,
+        protocol_value,
+        message.is_extended,
+        message.payload_bytes,
+        timing_config.nominal_bitrate_bps,
+        CONSERVATIVE_ESTIMATOR_VERSION,
+    )
+    return replace(
+        message,
+        conservative_service_time_us=estimate.conservative_bus_service_time_us,
+        conservative_total_bits_upper_bound=estimate.total_bits_upper_bound,
+        conservative_status=estimate.status,
+        conservative_unavailable_reason=estimate.unavailable_reason,
+    )
+
+
+@lru_cache(maxsize=16_384)
+def _cached_estimate(
+    network_id: str,
+    message_name: str,
+    can_id: int,
+    protocol_value: str | None,
+    is_extended: bool,
+    payload_bytes: int | None,
+    nominal_bitrate_bps: int | None,
+    estimator_version: str,
+) -> ConservativeFrameEstimate:
+    # Identity, network, bitrate and estimator revision are deliberately all in
+    # the cache key so a bitrate change cannot reuse stale presentation values.
+    del network_id, message_name, can_id, estimator_version
+    protocol = (
+        CoreFrameProtocol(protocol_value) if protocol_value is not None else None
+    )
+    return estimate_conservative_bus_service_time(
+        protocol=protocol,
+        is_extended=is_extended,
+        payload_bytes=payload_bytes,
+        nominal_bitrate_bps=nominal_bitrate_bps,
+    )
+
+
+def conservative_estimate_cache_info() -> object:
+    """Expose cache statistics for focused presentation regression tests."""
+
+    return _cached_estimate.cache_info()
 
 
 def filter_congested_rows(
@@ -327,6 +519,20 @@ def message_rows_for_cell(
         )
         for message in cell.messages
     )
+
+
+def _reason_label(reason: str | None) -> str:
+    if reason is None:
+        return "无法计算保守占用时间"
+    return {
+        "missing_nominal_bitrate": "缺少 Nominal Bitrate",
+        "invalid_payload_length": "Payload Length 缺失或非法",
+        "unknown_protocol": "报文协议类型未知",
+        "invalid_frame_metadata": "报文帧格式元数据非法",
+    }.get(reason, reason)
+
+def _reasons_text(reasons: tuple[str, ...]) -> str:
+    return "；".join(_reason_label(reason) for reason in reasons) or "必要参数缺失"
 
 
 def _format_ms(value: float) -> str:

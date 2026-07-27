@@ -15,6 +15,9 @@ def test_quick_start_explains_inputs_parameters_views_and_outputs(qtbot) -> None
     assert "Balanced 容差" in content
     assert "候选池" in content
     assert "3-opt" in content
+    assert "Nominal Bitrate" in content
+    assert "保守占用时间" in content
+    assert "不参与 GCLS" in content
     assert "logs/" in content
     assert "plots/" in content
     assert "results/" in content

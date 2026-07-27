@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
 from ..config import OffsetSearchConfig
+from ..timing.conservative_service import ConservativeEstimateStatus
 
 
 class InputKind(str, Enum):
@@ -48,6 +49,47 @@ class WeightMode(str, Enum):
 class FrameProtocol(str, Enum):
     CLASSIC_CAN = "classic_can"
     CAN_FD = "can_fd"
+
+
+class TimingConfigSource(str, Enum):
+    """Auditable origin of a network nominal bitrate."""
+
+    DBC = "dbc"
+    MANUAL = "manual"
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkTimingConfig:
+    """Network-level timing metadata used only by result diagnostics."""
+
+    network_id: str
+    nominal_bitrate_bps: int | None = None
+    source: TimingConfigSource | None = None
+    confirmed: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.network_id.strip():
+            raise ValueError("timing config network_id must not be empty")
+        if self.nominal_bitrate_bps is None:
+            if self.source is not None or self.confirmed:
+                raise ValueError("missing nominal bitrate cannot have source/confirmation")
+            return
+        if (
+            isinstance(self.nominal_bitrate_bps, bool)
+            or not isinstance(self.nominal_bitrate_bps, int)
+            or self.nominal_bitrate_bps <= 0
+        ):
+            raise ValueError("nominal bitrate must be a positive integer bit/s")
+        if not isinstance(self.source, TimingConfigSource):
+            raise ValueError("configured nominal bitrate requires an auditable source")
+        if not self.confirmed:
+            raise ValueError("configured nominal bitrate must be confirmed")
+
+    @property
+    def nominal_bitrate_kbit_s(self) -> float | None:
+        if self.nominal_bitrate_bps is None:
+            return None
+        return self.nominal_bitrate_bps / 1_000
 
 
 class RouteMatchStatus(str, Enum):
@@ -588,11 +630,17 @@ class WorkspaceInspection:
     )
     sender_selection_summaries: tuple[DbcSenderSelectionSummary, ...] = ()
     dbc_revision: str = ""
+    network_timing_configs: tuple[NetworkTimingConfig, ...] = ()
 
     def __post_init__(self) -> None:
         network_ids = tuple(network.network_id for network in self.networks)
         if len(set(network_ids)) != len(network_ids):
             raise ValueError("inspection network IDs must be unique")
+        timing_ids = tuple(config.network_id for config in self.network_timing_configs)
+        if len(set(timing_ids)) != len(timing_ids):
+            raise ValueError("inspection timing config network IDs must be unique")
+        if timing_ids and set(timing_ids) != set(network_ids):
+            raise ValueError("inspection timing configs must match discovered networks")
         if len(set(self.missing_required)) != len(self.missing_required):
             raise ValueError("missing input kinds must be unique")
         summary_ids = tuple(summary.dbc_id for summary in self.sender_selection_summaries)
@@ -712,6 +760,7 @@ class GuiBatchOptimizationRequest:
     sender_selection: SenderNodeSelectionConfig = field(
         default_factory=SenderNodeSelectionConfig
     )
+    network_timing_configs: tuple[NetworkTimingConfig, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.inspection.can_optimize:
@@ -743,8 +792,24 @@ class GuiBatchOptimizationRequest:
             if network.frame_protocol is FrameProtocol.CAN_FD
         ):
             raise ValueError("selected weight mode is not available for every CAN FD network")
+        timing_ids = tuple(config.network_id for config in self.network_timing_configs)
+        if len(set(timing_ids)) != len(timing_ids):
+            raise ValueError("request timing config network IDs must be unique")
+        known_ids = {network.network_id for network in self.inspection.networks}
+        if not set(timing_ids).issubset(known_ids):
+            raise ValueError("request timing config references an unknown network")
         if self.output_root.exists() and not self.output_root.is_dir():
             raise ValueError("output_root must be a directory")
+
+    def timing_config_for(self, network_id: str) -> NetworkTimingConfig:
+        return next(
+            (
+                config
+                for config in self.network_timing_configs
+                if config.network_id == network_id
+            ),
+            NetworkTimingConfig(network_id),
+        )
 
     @property
     def weight_mode(self) -> WeightMode:
@@ -858,6 +923,14 @@ class HeatmapMessageDetail:
     is_extended: bool
     cycle_time_us: int
     offset_us: int
+    payload_bytes: int | None = None
+    frame_protocol: FrameProtocol | None = None
+    conservative_service_time_us: int | None = None
+    conservative_total_bits_upper_bound: int | None = None
+    conservative_status: ConservativeEstimateStatus = (
+        ConservativeEstimateStatus.UNAVAILABLE
+    )
+    conservative_unavailable_reason: str | None = "missing_nominal_bitrate"
 
     def __post_init__(self) -> None:
         if not self.message_name.strip():
@@ -867,6 +940,25 @@ class HeatmapMessageDetail:
             raise ValueError("heatmap message CAN ID is invalid")
         if self.cycle_time_us <= 0 or self.offset_us < 0:
             raise ValueError("heatmap message period/Offset is invalid")
+        if self.payload_bytes is not None and (
+            isinstance(self.payload_bytes, bool)
+            or not isinstance(self.payload_bytes, int)
+            or self.payload_bytes < 0
+        ):
+            raise ValueError("heatmap payload length is invalid")
+        if self.frame_protocol is not None and not isinstance(
+            self.frame_protocol, FrameProtocol
+        ):
+            raise ValueError("heatmap frame protocol is invalid")
+        complete = self.conservative_status is ConservativeEstimateStatus.COMPLETE
+        if complete != (self.conservative_service_time_us is not None):
+            raise ValueError("heatmap conservative time/status is inconsistent")
+        if complete != (self.conservative_total_bits_upper_bound is not None):
+            raise ValueError("heatmap conservative bits/status is inconsistent")
+        if complete and self.conservative_unavailable_reason is not None:
+            raise ValueError("complete heatmap estimate must not have a failure reason")
+        if not complete and not self.conservative_unavailable_reason:
+            raise ValueError("unavailable heatmap estimate requires a reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -879,6 +971,9 @@ class HeatmapSlotDetail:
     frame_count: int
     total_load: int
     messages: tuple[HeatmapMessageDetail, ...]
+    conservative_total_time_us: int | None = None
+    conservative_complete_count: int | None = None
+    conservative_total_count: int | None = None
 
     def __post_init__(self) -> None:
         if self.slot_index < 0 or self.start_us < 0 or self.end_us <= self.start_us:
@@ -887,6 +982,28 @@ class HeatmapSlotDetail:
             raise ValueError("heatmap slot count/load must be non-negative")
         if len(self.messages) != self.frame_count:
             raise ValueError("heatmap slot members must match frame_count")
+        counts = (self.conservative_complete_count, self.conservative_total_count)
+        if any(value is not None for value in counts):
+            if any(value is None for value in counts):
+                raise ValueError("heatmap conservative completeness is incomplete")
+            assert self.conservative_complete_count is not None
+            assert self.conservative_total_count is not None
+            if not (
+                0 <= self.conservative_complete_count
+                <= self.conservative_total_count
+                == self.frame_count
+            ):
+                raise ValueError("heatmap conservative completeness is invalid")
+            if self.frame_count == 0 and self.conservative_total_time_us != 0:
+                raise ValueError("empty slot conservative total must be zero")
+            if self.conservative_complete_count == 0 and self.frame_count > 0:
+                if self.conservative_total_time_us is not None:
+                    raise ValueError("fully unavailable slot must not report zero time")
+            elif (
+                self.conservative_total_time_us is None
+                or self.conservative_total_time_us < 0
+            ):
+                raise ValueError("known conservative slot total is invalid")
 
     @property
     def start_ms(self) -> float:
@@ -1001,6 +1118,8 @@ class GuiOptimizationResult:
     slot_width_us: int = 5_000
     steady_heatmap: HeatmapWindowDetail | None = None
     startup_heatmap: HeatmapWindowDetail | None = None
+    network_timing_config: NetworkTimingConfig | None = None
+    assignment_hash: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
@@ -1011,6 +1130,13 @@ class GuiOptimizationResult:
             raise ValueError("result frame protocol is unsupported")
         if not isinstance(self.offset_search, OffsetSearchConfig):
             raise ValueError("result offset_search is invalid")
+        if (
+            self.network_timing_config is not None
+            and self.network_timing_config.network_id != self.network_id
+        ):
+            raise ValueError("result timing config belongs to another network")
+        if self.assignment_hash and len(self.assignment_hash) != 64:
+            raise ValueError("result assignment_hash must be SHA-256 hexadecimal text")
         if self.dbc_write_error is not None and not self.dbc_write_error.strip():
             raise ValueError("result dbc_write_error must be non-empty when present")
         if (

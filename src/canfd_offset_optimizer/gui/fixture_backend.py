@@ -40,6 +40,7 @@ from .contracts import (
     NetworkBatchResult,
     NetworkRunStatus,
     NetworkSummary,
+    NetworkTimingConfig,
     ObjectiveMetrics,
     OffsetAssignmentRow,
     OptimizationCancelled,
@@ -355,6 +356,9 @@ class FixtureBackend:
             missing_required=tuple(missing),
             warnings=warnings,
             errors=tuple(errors),
+            network_timing_configs=tuple(
+                NetworkTimingConfig(network.network_id) for network in networks
+            ),
         )
 
     def apply_sender_selection(
@@ -555,12 +559,15 @@ class FixtureBackend:
             startup_counts_after,
         ) = self._load_counts(profile)
         assignments = self._assignments(network, profile)
+        timing_config = request.timing_config_for(network.network_id)
         steady_heatmap = self._fixture_heatmap(
             assignments,
             steady_before,
             steady_after,
             steady_counts_before,
             steady_counts_after,
+            network.frame_protocol,
+            timing_config,
         )
         startup_heatmap = self._fixture_heatmap(
             assignments,
@@ -568,7 +575,17 @@ class FixtureBackend:
             startup_after,
             startup_counts_before,
             startup_counts_after,
+            network.frame_protocol,
+            timing_config,
         )
+        assignment_hash = hashlib.sha256(
+            repr(
+                tuple(
+                    (row.message_name, row.optimized_offset_us)
+                    for row in assignments
+                )
+            ).encode()
+        ).hexdigest()
         result = GuiOptimizationResult(
             network_id=network.network_id,
             network_name=network.network_name,
@@ -618,6 +635,12 @@ class FixtureBackend:
             frame_protocol=network.frame_protocol,
             classic_weight_model=network.classic_weight_model,
             slot_width_us=steady_heatmap.slot_width_us,
+            network_timing_config=(
+                timing_config
+                if timing_config.nominal_bitrate_bps is not None
+                else None
+            ),
+            assignment_hash=assignment_hash,
         )
         return self._write_success_outputs(result, output_directory)
 
@@ -1029,6 +1052,8 @@ class FixtureBackend:
         after_loads: tuple[int, ...],
         before_counts: tuple[int, ...],
         after_counts: tuple[int, ...],
+        frame_protocol: FrameProtocol,
+        timing_config: NetworkTimingConfig,
     ) -> HeatmapWindowDetail:
         slot_width_us = 5_000
 
@@ -1048,6 +1073,14 @@ class FixtureBackend:
                             if optimized
                             else assignment.original_offset_us
                         ),
+                        payload_bytes=(
+                            8
+                            if frame_protocol is FrameProtocol.CLASSIC_CAN
+                            else (8, 12, 16, 20, 24, 32)[
+                                assignment.can_id % 6
+                            ]
+                        ),
+                        frame_protocol=frame_protocol,
                     )
                     for assignment in assignments[:count]
                 )

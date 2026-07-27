@@ -25,6 +25,7 @@ from ...exceptions import ConfigurationError
 from ..contracts import (
     FrameProtocol,
     GuiBatchOptimizationRequest,
+    NetworkTimingConfig,
     OptimizationMode,
     RestartMode,
     RestartSettings,
@@ -38,11 +39,13 @@ class SettingsPanel(QGroupBox):
 
     details_requested = Signal()
     sender_selection_requested = Signal()
+    timing_configuration_requested = Signal()
     validity_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__("批量优化设置")
         self._inspection: WorkspaceInspection | None = None
+        self._timing_configs: tuple[NetworkTimingConfig, ...] = ()
 
         self.networks_label = QLabel("已发现网段：0 个")
         self.networks_label.setWordWrap(True)
@@ -67,6 +70,19 @@ class SettingsPanel(QGroupBox):
         sender_selection_layout.setContentsMargins(0, 0, 0, 0)
         sender_selection_layout.addWidget(self.sender_selection_label, 1)
         sender_selection_layout.addWidget(self.sender_selection_button)
+
+        self.timing_summary_label = QLabel("网段速率参数：已配置 0/0")
+        self.timing_summary_label.setWordWrap(True)
+        self.timing_config_button = QPushButton("配置")
+        self.timing_config_button.setEnabled(False)
+        self.timing_config_button.setToolTip(
+            "仅用于优化后的协议级保守占用时间诊断，不参与 GCLS。"
+        )
+        timing_row = QWidget()
+        timing_layout = QHBoxLayout(timing_row)
+        timing_layout.setContentsMargins(0, 0, 0, 0)
+        timing_layout.addWidget(self.timing_summary_label, 1)
+        timing_layout.addWidget(self.timing_config_button)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Peak（严格峰值）", OptimizationMode.PEAK)
@@ -116,6 +132,7 @@ class SettingsPanel(QGroupBox):
         basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         basic.addRow(network_summary)
         basic.addRow(sender_selection_row)
+        basic.addRow(timing_row)
         basic.addRow(self.messages_label)
         basic.addRow("模式：", self.mode_combo)
         basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
@@ -195,6 +212,9 @@ class SettingsPanel(QGroupBox):
         self.sender_selection_button.clicked.connect(
             self.sender_selection_requested.emit
         )
+        self.timing_config_button.clicked.connect(
+            self.timing_configuration_requested.emit
+        )
         for spin in (self.offset_min_spin, self.offset_max_spin, self.offset_step_spin):
             spin.valueChanged.connect(self._update_offset_summary)
         for control_signal in (
@@ -225,6 +245,22 @@ class SettingsPanel(QGroupBox):
 
     def set_inspection(self, inspection: WorkspaceInspection) -> None:
         self._inspection = inspection
+        existing = {config.network_id: config for config in self._timing_configs}
+        inspected = {
+            config.network_id: config
+            for config in inspection.network_timing_configs
+        }
+        self._timing_configs = tuple(
+            existing.get(
+                network.network_id,
+                inspected.get(
+                    network.network_id, NetworkTimingConfig(network.network_id)
+                ),
+            )
+            for network in inspection.networks
+        )
+        self._update_timing_summary()
+        self.timing_config_button.setEnabled(bool(inspection.networks))
         discovered = len(inspection.networks)
         optimizable = len(inspection.optimizable_networks)
         if inspection.sender_selection_ready:
@@ -308,6 +344,9 @@ class SettingsPanel(QGroupBox):
         self.sender_selection_label.setText("发送节点筛选：未完成")
         self.sender_selection_button.setText("选择发送节点")
         self.sender_selection_button.setEnabled(False)
+        self._timing_configs = ()
+        self._update_timing_summary()
+        self.timing_config_button.setEnabled(False)
         self.can_fd_weight_combo.clear()
 
     def build_request(self) -> GuiBatchOptimizationRequest:
@@ -340,6 +379,38 @@ class SettingsPanel(QGroupBox):
             output_root=self._inspection.session.workspace_root / "user_output",
             offset_search=offset_search,
             sender_selection=self._inspection.sender_selection,
+            network_timing_configs=self._timing_configs,
+        )
+
+    def set_timing_configs(
+        self, configs: tuple[NetworkTimingConfig, ...]
+    ) -> None:
+        if self._inspection is None:
+            raise ValueError("尚未完成工程检查")
+        expected = {network.network_id for network in self._inspection.networks}
+        actual = {config.network_id for config in configs}
+        if len(actual) != len(configs) or actual != expected:
+            raise ValueError("网段速率配置必须与当前工程网段一一对应")
+        self._timing_configs = configs
+        self._update_timing_summary()
+
+    @property
+    def timing_configs(self) -> tuple[NetworkTimingConfig, ...]:
+        return self._timing_configs
+
+    def timing_config_for(self, network_id: str) -> NetworkTimingConfig:
+        return next(
+            (config for config in self._timing_configs if config.network_id == network_id),
+            NetworkTimingConfig(network_id),
+        )
+
+    def _update_timing_summary(self) -> None:
+        configured = sum(
+            config.nominal_bitrate_bps is not None
+            for config in self._timing_configs
+        )
+        self.timing_summary_label.setText(
+            f"网段速率参数：已配置 {configured}/{len(self._timing_configs)}"
         )
 
     def can_build_request(self) -> bool:

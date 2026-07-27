@@ -154,6 +154,27 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
 也不得用最后完成的结果填充其他网段。Qt Widget 只消费上述 DTO/ViewModel，禁止从颜色或负载值
 反推帧数与成员。
 
+### 5.1 协议级保守占用诊断契约
+
+`conservative_bus_service_time_us` 只能是结果展示指标，禁止写入 `CanMessage.weight`、
+`OptimizationRequest.weight_mode`、objective、assignment 或任何 GCLS 搜索结构。
+`NetworkTimingConfig` 按 `network_id` 保存唯一的 `nominal_bitrate_bps`、来源和确认状态；bitrate
+是网段元数据，不得复制成每条报文的可编辑配置。DBC parser 只有在全局 `Baudrate` 属性给出唯一明确正数时
+才能自动填入并标记 `DBC` 来源；空白、冲突或缺失不得猜测 500 kbit/s。缺失配置不得阻止优化。
+
+集中式 timing estimator 输入协议、Standard/Extended、真实 `payload_bytes` 和 nominal bitrate，
+输出总 bit 保守上界、向上取整的微秒值、状态、原因和模型版本。Classic CAN 与 CAN FD 必须使用
+各自协议结构、dynamic worst-case stuffing、固定字段和正常 3-bit Intermission。CAN FD 的 CRC17/
+CRC21、Stuff Bit Count/parity 和 CRC fixed stuff 必须单独建模；本轮整帧全部按 nominal bitrate
+计时，不依赖 Data Bitrate、BRS 或 ARXML，并假设 data-phase bitrate 不低于 nominal bitrate。
+该模型排除错误帧、重传、仲裁等待、排队和 ECU/软件延迟。
+
+`HeatmapMessageDetail` 保存 Payload Length、协议和独立的每帧估算；`HeatmapSlotDetail` 的总量
+必须严格对当前正式成员求和，original/optimized 分别使用各自成员。0 帧为 0；全部不可计算为
+`None`/`保守 —`；部分可计算为已知和及 `保守 ≥xxx μs*`。缓存 key 必须包含 message identity、
+network_id、nominal bitrate、协议元数据和 estimator version。修改 bitrate 只刷新 presentation，
+不得运行 backend/GCLS，assignment hash 必须保持不变。不得新增任何百分比或 utilization 字段。
+
 ## 6. 进度、取消与错误
 
 `ProgressUpdate` 可表达 import/inspect/prepare/network/finalize 阶段、当前网段、序号、attempt、
@@ -178,8 +199,9 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
 5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
 6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线默认重复 4 个真实稳态超周期；热力图必须使用
-   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。GUI 热力图
-   使用固定可读单格宽度和水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
+   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。每个非空格
+   依次显示帧数、当前权重负载和独立的协议级保守占用时间；GUI 热力图使用固定可读单格宽度和
+   水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
    平台单图限制的宽度失败关闭、显示明确错误。
 7. DBC Offset 唯一映射为 `GenMsgStartDelayTime`。Parser 只接受该属性的显式消息赋值或
    `BA_DEF_DEF_` 默认值；`GenMsgDelayTime`、`MsgStartDelayTime` 不得作为 fallback。

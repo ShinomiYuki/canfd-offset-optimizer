@@ -199,8 +199,12 @@ def test_payload_and_frame_time_cell_text_use_result_units(
     frame_view = build_heatmap_view_model(frame_time, HeatmapWindowKind.STEADY)
     payload_cell = next(cell for cell in payload_view.original_cells if cell.frame_count)
     frame_cell = next(cell for cell in frame_view.original_cells if cell.frame_count)
-    assert payload_cell.text == f"{payload_cell.frame_count} 帧\n{payload_cell.total_load} B"
-    assert frame_cell.text == f"{frame_cell.frame_count} 帧\n{frame_cell.total_load} μs"
+    assert payload_cell.text == (
+        f"{payload_cell.frame_count} \u5e27\n{payload_cell.total_load} B\n\u4fdd\u5b88 \u2014"
+    )
+    assert frame_cell.text == (
+        f"{frame_cell.frame_count} \u5e27\n{frame_cell.total_load} \u03bcs\n\u4fdd\u5b88 \u2014"
+    )
 
 
 def test_zero_frame_cell_is_blank_and_has_no_members(
@@ -746,11 +750,13 @@ def test_cell_click_emits_once_and_does_not_rebuild_heatmap(
     real_builder = heatmap_module.build_heatmap_view_model
 
     def counted_builder(
-        result: GuiOptimizationResult, kind: HeatmapWindowKind
+        result: GuiOptimizationResult,
+        kind: HeatmapWindowKind,
+        timing_config=None,
     ):
         nonlocal calls
         calls += 1
-        return real_builder(result, kind)
+        return real_builder(result, kind, timing_config)
 
     monkeypatch.setattr(heatmap_module, "build_heatmap_view_model", counted_builder)
     heatmap = LoadHeatmap()
@@ -901,23 +907,23 @@ def test_widget_weight_change_refreshes_cell_and_table_units_together(
     _show(qtbot, heatmap)
     heatmap.set_result(payload)
     assert heatmap.view_model is not None
-    assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.endswith(" B")
+    assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.splitlines()[1].endswith(" B")
     assert heatmap.details_table.item(0, 3).text().endswith(" B")
     payload_cell = next(
         cell for cell in heatmap.view_model.original_cells if cell.frame_count == 3
     )
     _click_cell(qtbot, heatmap, payload_cell.state, payload_cell.slot_index)
-    assert heatmap.detail_context_label.text().endswith(" B")
+    assert " B | \u4fdd\u5b88 " in heatmap.detail_context_label.text()
 
     heatmap.set_result(frame)
     assert heatmap.view_model is not None
-    assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.endswith(" μs")
+    assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.splitlines()[1].endswith(" \u03bcs")
     assert heatmap.details_table.item(0, 3).text().endswith(" μs")
     frame_cell = next(
         cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 2
     )
     _click_cell(qtbot, heatmap, frame_cell.state, frame_cell.slot_index)
-    assert heatmap.detail_context_label.text().endswith(" μs")
+    assert " \u03bcs | \u4fdd\u5b88 " in heatmap.detail_context_label.text()
 
 
 def test_detail_headers_support_numeric_sorting(

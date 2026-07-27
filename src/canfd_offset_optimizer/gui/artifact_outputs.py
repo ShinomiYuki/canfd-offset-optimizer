@@ -140,6 +140,25 @@ def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> P
         "final_optimized_message_count": (
             request.inspection.final_eligible_message_count
         ),
+        "network_timing_configs": [
+            {
+                "network_id": config.network_id,
+                "nominal_bitrate_bps": config.nominal_bitrate_bps,
+                "source": config.source.value if config.source is not None else None,
+                "confirmed": config.confirmed,
+                "diagnostic_only": True,
+            }
+            for config in request.network_timing_configs
+        ],
+        "conservative_bus_service_time_policy": {
+            "optimizer_weight": False,
+            "includes_intermission_bits": 3,
+            "can_fd_all_bits_at_nominal_bitrate": True,
+            "requires_data_bitrate": False,
+            "requires_brs": False,
+            "requires_arxml": False,
+            "excludes_errors_retransmissions_and_arbitration_wait": True,
+        },
         "sender_node_selection": {
             "confirmed": request.sender_selection.confirmed,
             "dbc_revision": request.sender_selection.dbc_revision,

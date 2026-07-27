@@ -6,8 +6,18 @@ from collections.abc import Mapping, Sequence
 
 from canfd_offset_optimizer.models import CanMessage
 from canfd_offset_optimizer.timeline.slot_map import SlotMap
+from canfd_offset_optimizer.timing.conservative_service import (
+    ConservativeEstimateStatus,
+    estimate_conservative_bus_service_time,
+)
 
-from .contracts import HeatmapMessageDetail, HeatmapSlotDetail, HeatmapWindowDetail
+from .contracts import (
+    FrameProtocol,
+    HeatmapMessageDetail,
+    HeatmapSlotDetail,
+    HeatmapWindowDetail,
+    NetworkTimingConfig,
+)
 
 
 def build_heatmap_window_detail(
@@ -23,6 +33,7 @@ def build_heatmap_window_detail(
     startup: bool,
     original_messages: tuple[CanMessage, ...] | None = None,
     original_slot_map: SlotMap | None = None,
+    network_timing_config: NetworkTimingConfig | None = None,
 ) -> HeatmapWindowDetail:
     """Expose slot members without reimplementing release or load calculation."""
 
@@ -38,6 +49,7 @@ def build_heatmap_window_detail(
         original_loads,
         original_counts,
         startup=startup,
+        network_timing_config=network_timing_config,
     )
     optimized = _build_state_slots(
         messages,
@@ -46,6 +58,7 @@ def build_heatmap_window_detail(
         optimized_loads,
         optimized_counts,
         startup=startup,
+        network_timing_config=network_timing_config,
     )
     return HeatmapWindowDetail(window.slot_width_us, original, optimized)
 
@@ -58,6 +71,7 @@ def _build_state_slots(
     counts: Sequence[int],
     *,
     startup: bool,
+    network_timing_config: NetworkTimingConfig | None,
 ) -> tuple[HeatmapSlotDetail, ...]:
     window = slot_map.startup_window if startup else slot_map.steady_window
     buckets: list[list[HeatmapMessageDetail]] = [
@@ -71,12 +85,31 @@ def _build_state_slots(
             raise ValueError(f"heatmap Offset missing for {message.name}") from exc
         hits = slot_map.for_candidate(message, offset_us)
         indexes = hits.startup if startup else hits.steady
+        nominal_bitrate_bps = (
+            network_timing_config.nominal_bitrate_bps
+            if network_timing_config is not None
+            else None
+        )
+        estimate = estimate_conservative_bus_service_time(
+            protocol=message.frame_protocol,
+            is_extended=message.is_extended,
+            payload_bytes=message.payload_bytes,
+            nominal_bitrate_bps=nominal_bitrate_bps,
+        )
         detail = HeatmapMessageDetail(
             message.name,
             message.can_id,
             message.is_extended,
             message.cycle_time_us,
             offset_us,
+            payload_bytes=message.payload_bytes,
+            frame_protocol=FrameProtocol(message.frame_protocol.value),
+            conservative_service_time_us=(
+                estimate.conservative_bus_service_time_us
+            ),
+            conservative_total_bits_upper_bound=estimate.total_bits_upper_bound,
+            conservative_status=estimate.status,
+            conservative_unavailable_reason=estimate.unavailable_reason,
         )
         for slot_index in indexes:
             buckets[slot_index].append(detail)
@@ -85,14 +118,32 @@ def _build_state_slots(
         raise ValueError("core slot membership disagrees with release counts")
     if tuple(calculated_loads) != tuple(loads):
         raise ValueError("core slot membership disagrees with weighted loads")
-    return tuple(
-        HeatmapSlotDetail(
-            slot_index=index,
-            start_us=index * window.slot_width_us,
-            end_us=(index + 1) * window.slot_width_us,
-            frame_count=int(counts[index]),
-            total_load=int(loads[index]),
-            messages=tuple(bucket),
+    slots: list[HeatmapSlotDetail] = []
+    for index, bucket in enumerate(buckets):
+        known_times = tuple(
+            message.conservative_service_time_us
+            for message in bucket
+            if message.conservative_status is ConservativeEstimateStatus.COMPLETE
+            and message.conservative_service_time_us is not None
         )
-        for index, bucket in enumerate(buckets)
-    )
+        complete_count = len(known_times)
+        total_count = len(bucket)
+        conservative_total = (
+            0
+            if total_count == 0
+            else (sum(known_times) if complete_count > 0 else None)
+        )
+        slots.append(
+            HeatmapSlotDetail(
+                slot_index=index,
+                start_us=index * window.slot_width_us,
+                end_us=(index + 1) * window.slot_width_us,
+                frame_count=int(counts[index]),
+                total_load=int(loads[index]),
+                messages=tuple(bucket),
+                conservative_total_time_us=conservative_total,
+                conservative_complete_count=complete_count,
+                conservative_total_count=total_count,
+            )
+        )
+    return tuple(slots)

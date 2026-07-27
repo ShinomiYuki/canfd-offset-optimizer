@@ -51,6 +51,7 @@ from .contracts import (
     NetworkBatchResult,
     NetworkRunStatus,
     NetworkSummary,
+    NetworkTimingConfig,
     ObjectiveMetrics,
     OffsetAssignmentRow,
     OptimizationCancelled,
@@ -62,6 +63,7 @@ from .contracts import (
     RoutingExclusionReport,
     SenderNodeSelectionConfig,
     SenderSelectionDbcStatus,
+    TimingConfigSource,
     WeightMode,
     WorkspaceInspection,
 )
@@ -166,6 +168,7 @@ class RealBackend(WorkspaceImporter):
                 errors.append(f"ARXML 通道检查失败：{type(exc).__name__}: {exc}")
         display_counts: dict[str, int] = {}
         networks: list[NetworkSummary] = []
+        timing_configs: list[NetworkTimingConfig] = []
         sender_summaries: list[DbcSenderSelectionSummary] = []
         parsed_messages_by_network: dict[
             str, tuple[tuple[int, str, bool], ...]
@@ -187,8 +190,10 @@ class RealBackend(WorkspaceImporter):
             network_id = f"net-{hashlib.sha256(identity_material.encode()).hexdigest()[:16]}"
             record_sha256 = record.sha256 or hashlib.sha256(path.read_bytes()).hexdigest()
             dbc_id = dbc_identity(record.workspace_relative_path, record_sha256)
+            nominal_bitrate_bps: int | None = None
             try:
                 parsed = parse_dbc(path, allowed_offsets_us=allowed_offsets_us)
+                nominal_bitrate_bps = parsed.nominal_bitrate_bps
                 message_count = len(parsed.messages)
                 optimizable = True
                 reason = None
@@ -269,6 +274,18 @@ class RealBackend(WorkspaceImporter):
                     unoptimizable_reason=reason,
                     dbc_id=dbc_id,
                     dbc_message_count=sender_summary.message_count,
+                )
+            )
+            timing_configs.append(
+                NetworkTimingConfig(
+                    network_id=network_id,
+                    nominal_bitrate_bps=nominal_bitrate_bps,
+                    source=(
+                        TimingConfigSource.DBC
+                        if nominal_bitrate_bps is not None
+                        else None
+                    ),
+                    confirmed=nominal_bitrate_bps is not None,
                 )
             )
             progress_callback(
@@ -385,6 +402,7 @@ class RealBackend(WorkspaceImporter):
             sender_selection=SenderNodeSelectionConfig(dbc_revision=revision),
             sender_selection_summaries=summaries,
             dbc_revision=revision,
+            network_timing_configs=tuple(timing_configs),
         )
 
     def apply_sender_selection(
@@ -703,6 +721,7 @@ class RealBackend(WorkspaceImporter):
             )
         original_offsets = {row.message_name: row.original_offset_us for row in rows}
         optimized_offsets = {row.message_name: row.optimized_offset_us for row in rows}
+        timing_config = request.timing_config_for(network.network_id)
         steady_heatmap = build_heatmap_window_detail(
             loaded.network.messages,
             loaded.slot_map,
@@ -715,6 +734,7 @@ class RealBackend(WorkspaceImporter):
             startup=False,
             original_messages=initial_state.messages,
             original_slot_map=initial_state.slot_map,
+            network_timing_config=timing_config,
         )
         startup_heatmap = build_heatmap_window_detail(
             loaded.network.messages,
@@ -728,6 +748,7 @@ class RealBackend(WorkspaceImporter):
             startup=True,
             original_messages=initial_state.messages,
             original_slot_map=initial_state.slot_map,
+            network_timing_config=timing_config,
         )
         layout = create_output_layout(batch_output)
         stem = short_output_stem(network.display_name)
@@ -817,6 +838,17 @@ class RealBackend(WorkspaceImporter):
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
                     else ()
                 ),
+                (
+                    f"conservative_occupancy={network.display_name}: "
+                    f"{len(loaded.network.messages)}/{len(loaded.network.messages)} messages "
+                    f"calculated, nominal_bitrate="
+                    f"{timing_config.nominal_bitrate_bps // 1000} kbit/s"
+                    if timing_config.nominal_bitrate_bps is not None
+                    else (
+                        "conservative_occupancy=unavailable: nominal bitrate "
+                        f"not configured for {network.display_name}"
+                    )
+                ),
                 f"assignment_hash={core_result.assignment_hash}",
             ),
             output_directory=network_output,
@@ -824,6 +856,8 @@ class RealBackend(WorkspaceImporter):
             classic_weight_model=network.classic_weight_model,
             offset_search=request.offset_search,
             slot_width_us=steady_heatmap.slot_width_us,
+            network_timing_config=timing_config,
+            assignment_hash=core_result.assignment_hash,
         )
         progress_callback(
             ProgressUpdate(

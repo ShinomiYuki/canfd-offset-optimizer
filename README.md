@@ -196,13 +196,33 @@ scripts\build_gui_exe.cmd
 - **Offset 修改**：原始 Offset 与优化后 Offset；
 - **可优化报文负载曲线**：原始与优化后负载；稳态窗口可重复展示 1、2、4 或 10 个
   超周期，启动窗口只显示核心返回的真实范围；
-- **可优化报文负载热力图**：原始/优化后两行，每个时隙显示帧数和负载，长窗口使用
-  水平滚动；
-- **拥挤时隙明细**：列出同时释放 4 帧及以上时隙中的报文、CAN ID、周期和 Offset；
+- **可优化报文负载热力图**：原始/优化后两行，每个时隙依次显示帧数、当前权重负载和
+  协议级保守占用时间，长窗口使用水平滚动；
+- **拥挤时隙明细**：列出时隙中的报文、CAN ID、Payload 长度、周期、Offset 和每帧保守
+  占用时间；
 - **运行日志与详情**：输入、资格、路由排除、运行参数、警告和失败原因。
 
 曲线的稳态重复只作用于显示和 PNG 导出，不会复制或修改核心结果。热力图显示一个核心
 稳态或启动窗口，不做多周期重复。
+
+## 协议级保守占用诊断
+
+`conservative_bus_service_time_us` 是优化完成后的独立诊断指标：在无错误、无重发、无仲裁
+等待的一次正常成功发送中，根据报文的 Classic CAN/CAN FD 协议、Standard/Extended 格式、
+真实 Payload Length 和网段 nominal bitrate，采用协议允许的 worst-case stuffing 上界并计入
+正常 3-bit Intermission，向上取整为整数微秒。它不等于 optimizer 的 `frame_time_us` 权重，
+也不进入 GCLS、目标函数、Offset assignment 或 assignment hash。
+
+GUI 的“网段速率参数”窗口按网段维护 nominal bitrate：仅当 DBC 全局 `Baudrate` 属性存在唯一、明确、
+正数的 bit/s 值时自动标为 DBC 来源；否则保持待配置，绝不默认猜测 500 kbit/s。用户可按
+kbit/s 手动确认，并可把当前值应用到尚未配置的 CAN FD 网段而不覆盖已有值。缺少 bitrate
+不会阻止优化，只会令第三行显示 `保守 —`；部分报文不可计算时显示 `保守 ≥xxx μs*`。
+优化完成后修改 bitrate 只重建 Heatmap ViewModel 和明细，不重新运行 GCLS。
+
+Classic CAN 按 nominal bitrate 计算整帧；CAN FD 也故意将整帧全部 bit 按 nominal bitrate
+计时，不要求 Data Bitrate、BRS 或 ARXML，并明确假设 data-phase bitrate 不低于 nominal
+bitrate。该指标不是实测帧时间，不模拟错误帧、重传、ACK failure、排队或软件调度。界面和
+输出只显示微秒总量，不计算或显示任何占用率百分比。
 
 ## DBC 回写
 
