@@ -144,8 +144,27 @@ def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> P
             {
                 "network_id": config.network_id,
                 "nominal_bitrate_bps": config.nominal_bitrate_bps,
-                "source": config.source.value if config.source is not None else None,
+                "data_bitrate_bps": config.data_bitrate_bps,
+                "default_brs": config.default_brs,
+                "nominal_source": (
+                    config.nominal_source.value
+                    if config.nominal_source is not None
+                    else None
+                ),
+                "data_source": (
+                    config.data_source.value
+                    if config.data_source is not None
+                    else None
+                ),
+                "brs_source": (
+                    config.brs_source.value
+                    if config.brs_source is not None
+                    else None
+                ),
                 "confirmed": config.confirmed,
+                "dbc_brs_complete": config.dbc_brs_complete,
+                "dbc_brs_mixed": config.dbc_brs_mixed,
+                "dbc_brs_has_on": config.dbc_brs_has_on,
                 "diagnostic_only": True,
             }
             for config in request.network_timing_configs
@@ -153,9 +172,11 @@ def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> P
         "conservative_bus_service_time_policy": {
             "optimizer_weight": False,
             "includes_intermission_bits": 3,
-            "can_fd_all_bits_at_nominal_bitrate": True,
-            "requires_data_bitrate": False,
-            "requires_brs": False,
+            "can_fd_brs_on_phase_aware": True,
+            "can_fd_brs_off_all_bits_at_nominal_bitrate": True,
+            "requires_data_bitrate_when_brs_on": True,
+            "requires_effective_brs": True,
+            "unknown_brs_is_unavailable": True,
             "requires_arxml": False,
             "excludes_errors_retransmissions_and_arbitration_wait": True,
         },

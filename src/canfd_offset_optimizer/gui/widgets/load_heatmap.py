@@ -33,8 +33,10 @@ from PySide6.QtWidgets import (
 
 from ..contracts import (
     BatchOptimizationResult,
+    FrameProtocol,
     GuiOptimizationResult,
     NetworkTimingConfig,
+    TimingConfigSource,
 )
 from ..formatting import format_load_unit, format_result_weight
 from ..heatmap_view_model import (
@@ -552,7 +554,7 @@ class LoadHeatmap(QWidget):
         self._sync_network_combo(network_id)
         self.title_label.setText("可优化报文拥挤热力图：无成功结果")
         self.weight_basis_label.setText("权重口径：—")
-        self.timing_basis_label.setText("\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u2014\uff08\u7f3a\u5c11 Nominal Bitrate\uff09")
+        self.timing_basis_label.setText("保守占用时间：—（尚未选择结果）")
         self._result = None
         self._timing_config = None
         self._view_model = None
@@ -621,20 +623,7 @@ class LoadHeatmap(QWidget):
         )
         self._view_model = view_model
         config = view_model.timing_config
-        if config.nominal_bitrate_bps is None:
-            self.timing_basis_label.setText(
-                "\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u2014\uff08\u7f3a\u5c11 Nominal Bitrate\uff1b\u4f18\u5316\u7ed3\u679c\u4ecd\u6709\u6548\uff09"
-            )
-        else:
-            source = (
-                "DBC"
-                if config.source is not None and config.source.value == "dbc"
-                else "\u624b\u52a8"
-            )
-            self.timing_basis_label.setText(
-                "\u4fdd\u5b88\u5360\u7528\u65f6\u95f4\uff1a\u534f\u8bae\u7ea7\u4e0a\u754c\uff1bNominal Bitrate "
-                f"{config.nominal_bitrate_bps / 1000:g} kbit/s\uff08{source}\uff09"
-            )
+        self.timing_basis_label.setText(_timing_basis_text(result, config))
         self._detail_rows = view_model.congested_rows
         self.title_label.setText(
             f"{result.display_name} / {kind.label}可优化报文拥挤热力图，"
@@ -851,3 +840,38 @@ class LoadHeatmap(QWidget):
     @property
     def selected_cell(self) -> HeatmapCellSelection | None:
         return self._selected_cell
+
+
+def _timing_basis_text(
+    result: GuiOptimizationResult, config: NetworkTimingConfig
+) -> str:
+    suffix = "；优化结果仍有效"
+    if config.nominal_bitrate_bps is None:
+        return f"保守占用时间：—（缺少 Nominal Bitrate{suffix}）"
+
+    def source_text(source: TimingConfigSource | None) -> str:
+        return "DBC" if source is TimingConfigSource.DBC else "手动"
+
+    nominal = (
+        f"Nominal {config.nominal_bitrate_bps / 1000:g} kbit/s"
+        f"（{source_text(config.nominal_source)}）"
+    )
+    if result.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        return f"保守占用时间：协议级上界；{nominal}"
+    if not config.has_complete_brs():
+        return f"保守占用时间：—（CAN FD BRS 未确认；{nominal}{suffix}）"
+    if config.requires_data_bitrate() and config.data_bitrate_bps is None:
+        return f"保守占用时间：—（缺少 CAN FD Data Bitrate；{nominal}{suffix}）"
+    if config.dbc_brs_complete:
+        brs = "BRS 来自 DBC / 按报文"
+        if config.dbc_brs_mixed:
+            brs += "（混合）"
+    else:
+        brs = f"BRS {'开启' if config.default_brs else '关闭'}（网段默认）"
+    data = (
+        f"；Data {config.data_bitrate_bps / 1000:g} kbit/s"
+        f"（{source_text(config.data_source)}）"
+        if config.data_bitrate_bps is not None
+        else ""
+    )
+    return f"保守占用时间：协议级分阶段上界；{nominal}{data}；{brs}"

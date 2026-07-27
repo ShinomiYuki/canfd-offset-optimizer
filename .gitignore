@@ -46,4 +46,5 @@ user_output/
 /.codex/
 /.codex_tmp/
 /.pytest_tmp/
+/.pytest-tmp-*/
 /test_tmp/

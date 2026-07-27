@@ -44,7 +44,7 @@ def format_result_weight(result: GuiOptimizationResult) -> str:
 
 
 def format_load_unit(result: GuiOptimizationResult) -> str:
-    return "Byte/slot" if result.frame_protocol is FrameProtocol.CLASSIC_CAN else "μs/slot"
+    return "B/slot" if result.weight_mode is WeightMode.PAYLOAD_BYTES else "μs/slot"
 
 
 def metrics_dict(metrics: ObjectiveMetrics) -> dict[str, int | float | None]:

@@ -18,6 +18,7 @@ from .contracts import (
     HeatmapWindowDetail,
     NetworkTimingConfig,
 )
+from .timing_resolution import resolve_effective_brs
 
 
 def build_heatmap_window_detail(
@@ -90,11 +91,22 @@ def _build_state_slots(
             if network_timing_config is not None
             else None
         )
+        effective_brs, effective_brs_source = resolve_effective_brs(
+            message.dbc_brs,
+            message.dbc_brs_source,
+            network_timing_config,
+        )
         estimate = estimate_conservative_bus_service_time(
             protocol=message.frame_protocol,
             is_extended=message.is_extended,
             payload_bytes=message.payload_bytes,
             nominal_bitrate_bps=nominal_bitrate_bps,
+            data_bitrate_bps=(
+                network_timing_config.data_bitrate_bps
+                if network_timing_config is not None
+                else None
+            ),
+            effective_brs=effective_brs,
         )
         detail = HeatmapMessageDetail(
             message.name,
@@ -110,6 +122,14 @@ def _build_state_slots(
             conservative_total_bits_upper_bound=estimate.total_bits_upper_bound,
             conservative_status=estimate.status,
             conservative_unavailable_reason=estimate.unavailable_reason,
+            dbc_brs=message.dbc_brs,
+            dbc_brs_source=message.dbc_brs_source,
+            effective_brs=effective_brs,
+            effective_brs_source=effective_brs_source,
+            conservative_nominal_bits_upper_bound=(
+                estimate.nominal_bits_upper_bound
+            ),
+            conservative_data_bits_upper_bound=estimate.data_bits_upper_bound,
         )
         for slot_index in indexes:
             buckets[slot_index].append(detail)

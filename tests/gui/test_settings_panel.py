@@ -169,6 +169,12 @@ def test_run_config_exports_effective_offset_search_metadata(
         "effective_max_offset_ms": 95,
         "candidate_count": 9,
     }
+    policy = payload["conservative_bus_service_time_policy"]
+    assert policy["optimizer_weight"] is False
+    assert policy["can_fd_brs_on_phase_aware"] is True
+    assert policy["can_fd_brs_off_all_bits_at_nominal_bitrate"] is True
+    assert policy["requires_data_bitrate_when_brs_on"] is True
+    assert policy["requires_effective_brs"] is True
 
 
 def test_dbc_only_fd_payload_keeps_mode_selectable(

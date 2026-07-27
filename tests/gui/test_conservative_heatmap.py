@@ -13,6 +13,7 @@ from canfd_offset_optimizer.gui.contracts import (
 from canfd_offset_optimizer.gui.heatmap_view_model import (
     HeatmapWindowKind,
     build_heatmap_view_model,
+    conservative_estimate_cache_info,
     message_rows_for_cell,
 )
 from canfd_offset_optimizer.gui.widgets.load_heatmap import LoadHeatmap, ROW_HEIGHT
@@ -22,9 +23,22 @@ def _result(batch: BatchOptimizationResult):
     return next(item.result for item in batch.network_results if item.result is not None)
 
 
-def _config(network_id: str, bitrate: int) -> NetworkTimingConfig:
+def _config(
+    network_id: str,
+    bitrate: int,
+    *,
+    data_bitrate: int = 2_000_000,
+    brs: bool = True,
+) -> NetworkTimingConfig:
     return NetworkTimingConfig(
-        network_id, bitrate, TimingConfigSource.MANUAL, confirmed=True
+        network_id,
+        bitrate,
+        TimingConfigSource.MANUAL,
+        confirmed=True,
+        data_bitrate_bps=data_bitrate,
+        default_brs=brs,
+        data_source=TimingConfigSource.MANUAL,
+        brs_source=TimingConfigSource.MANUAL,
     )
 
 
@@ -39,7 +53,9 @@ def test_same_optimization_result_gets_different_diagnostics_without_assignment_
         result, HeatmapWindowKind.STEADY, _config(result.network_id, 500_000)
     )
     view_250 = build_heatmap_view_model(
-        result, HeatmapWindowKind.STEADY, _config(result.network_id, 250_000)
+        result,
+        HeatmapWindowKind.STEADY,
+        _config(result.network_id, 250_000, data_bitrate=1_000_000),
     )
     cell_500 = next(cell for cell in view_500.original_cells if cell.frame_count)
     cell_250 = view_250.original_cells[cell_500.slot_index]
@@ -79,6 +95,8 @@ def test_zero_partial_and_unavailable_cells_are_not_confused_with_zero(
             payload_bytes=None,
             conservative_service_time_us=None,
             conservative_total_bits_upper_bound=None,
+            conservative_nominal_bits_upper_bound=None,
+            conservative_data_bits_upper_bound=None,
             conservative_unavailable_reason="invalid_payload_length",
         ),
         *target.messages[1:],
@@ -164,7 +182,9 @@ def test_widget_refreshes_bitrate_without_rebinding_or_rerun(
     assert widget.view_model is not None
     cell_500 = next(cell for cell in widget.view_model.original_cells if cell.frame_count)
     assignment_identity = result.assignments
-    widget.set_timing_config(_config(result.network_id, 250_000))
+    widget.set_timing_config(
+        _config(result.network_id, 250_000, data_bitrate=1_000_000)
+    )
     assert widget.view_model is not None
     cell_250 = widget.view_model.original_cells[cell_500.slot_index]
     assert cell_250.conservative_total_time_us == 2 * cell_500.conservative_total_time_us
@@ -228,3 +248,123 @@ def test_selected_slot_table_displays_real_8_16_and_64_byte_payloads(
     assert "—" not in displayed_times
     assert widget.details_table.horizontalHeaderItem(6).text() == "长度(Byte)"
     assert widget.details_table.horizontalHeaderItem(9).text() == "保守占用时间(μs)"
+
+
+def test_unknown_brs_and_missing_data_have_distinct_unavailable_reasons(
+    batch_result: BatchOptimizationResult,
+) -> None:
+    result = _result(batch_result)
+    unknown_brs = NetworkTimingConfig(
+        result.network_id,
+        500_000,
+        TimingConfigSource.MANUAL,
+        confirmed=True,
+        data_bitrate_bps=2_000_000,
+        data_source=TimingConfigSource.MANUAL,
+    )
+    missing_data = NetworkTimingConfig(
+        result.network_id,
+        500_000,
+        TimingConfigSource.MANUAL,
+        confirmed=True,
+        default_brs=True,
+        brs_source=TimingConfigSource.MANUAL,
+    )
+
+    unknown_view = build_heatmap_view_model(
+        result, HeatmapWindowKind.STEADY, unknown_brs
+    )
+    missing_view = build_heatmap_view_model(
+        result, HeatmapWindowKind.STEADY, missing_data
+    )
+    unknown = next(
+        message
+        for cell in unknown_view.original_cells
+        for message in cell.messages
+    )
+    missing = next(
+        message
+        for cell in missing_view.original_cells
+        for message in cell.messages
+    )
+    assert unknown.conservative_unavailable_reason == "unknown_brs"
+    assert missing.conservative_unavailable_reason == "missing_can_fd_data_bitrate"
+
+
+def test_per_message_dbc_brs_precedes_network_default(
+    batch_result: BatchOptimizationResult,
+) -> None:
+    result = _result(batch_result)
+    detail = result.steady_heatmap
+    assert detail is not None
+    target = next(slot for slot in detail.original_slots if slot.frame_count)
+    changed_message = replace(
+        target.messages[0],
+        dbc_brs=False,
+        dbc_brs_source="DBC:CANFD_BRS",
+    )
+    changed_slot = replace(
+        target,
+        messages=(changed_message, *target.messages[1:]),
+    )
+    changed_detail = HeatmapWindowDetail(
+        detail.slot_width_us,
+        tuple(
+            changed_slot if slot.slot_index == target.slot_index else slot
+            for slot in detail.original_slots
+        ),
+        detail.optimized_slots,
+    )
+    changed_result = replace(result, steady_heatmap=changed_detail)
+    view = build_heatmap_view_model(
+        changed_result,
+        HeatmapWindowKind.STEADY,
+        _config(result.network_id, 500_000, brs=True),
+    )
+    message = view.original_cells[target.slot_index].messages[0]
+    assert message.effective_brs is False
+    assert message.effective_brs_source == "DBC:CANFD_BRS"
+    assert message.conservative_data_bits_upper_bound == 0
+
+
+def test_data_rate_change_invalidates_diagnostic_cache_only(
+    batch_result: BatchOptimizationResult,
+) -> None:
+    result = _result(batch_result)
+    before = conservative_estimate_cache_info()
+    at_2m = build_heatmap_view_model(
+        result, HeatmapWindowKind.STEADY, _config(result.network_id, 500_000)
+    )
+    middle = conservative_estimate_cache_info()
+    at_5m = build_heatmap_view_model(
+        result,
+        HeatmapWindowKind.STEADY,
+        _config(result.network_id, 500_000, data_bitrate=5_000_000),
+    )
+    after = conservative_estimate_cache_info()
+    index = next(cell.slot_index for cell in at_2m.original_cells if cell.frame_count)
+    assert (
+        at_5m.original_cells[index].conservative_total_time_us
+        < at_2m.original_cells[index].conservative_total_time_us
+    )
+    assert middle.misses >= before.misses
+    assert after.misses > middle.misses
+    assert result.assignment_hash
+
+
+def test_payload_can_fd_top_unit_is_bytes_per_slot(
+    qtbot,
+    batch_result: BatchOptimizationResult,
+) -> None:
+    base = _result(batch_result)
+    result = replace(
+        base,
+        weight_mode=WeightMode.PAYLOAD_BYTES,
+        frame_protocol=FrameProtocol.CAN_FD,
+        classic_weight_model=None,
+    )
+    widget = LoadHeatmap()
+    qtbot.addWidget(widget)
+    widget.set_result(result)
+    widget.set_timing_config(_config(result.network_id, 500_000))
+    assert "数值单位：B/slot" in widget.weight_basis_label.text()

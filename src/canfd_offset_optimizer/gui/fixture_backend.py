@@ -637,7 +637,13 @@ class FixtureBackend:
             slot_width_us=steady_heatmap.slot_width_us,
             network_timing_config=(
                 timing_config
-                if timing_config.nominal_bitrate_bps is not None
+                if (
+                    timing_config.nominal_bitrate_bps is not None
+                    or timing_config.data_bitrate_bps is not None
+                    or timing_config.default_brs is not None
+                    or timing_config.dbc_brs_complete
+                    or timing_config.dbc_brs_has_on
+                )
                 else None
             ),
             assignment_hash=assignment_hash,

@@ -229,5 +229,5 @@ def test_classic_chart_and_heatmap_show_byte_units_without_microseconds(
         heatmap.weight_basis_label.text(),
     ):
         assert "Payload 长度近似权重（payload_bytes）" in label
-        assert "Byte/slot" in label
+        assert "B/slot" in label
         assert "μs" not in label

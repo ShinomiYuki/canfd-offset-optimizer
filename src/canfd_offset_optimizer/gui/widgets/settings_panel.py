@@ -405,9 +405,18 @@ class SettingsPanel(QGroupBox):
         )
 
     def _update_timing_summary(self) -> None:
+        protocols = (
+            {
+                network.network_id: network.frame_protocol
+                for network in self._inspection.networks
+            }
+            if self._inspection is not None
+            else {}
+        )
         configured = sum(
-            config.nominal_bitrate_bps is not None
+            config.is_complete_for(protocols[config.network_id])
             for config in self._timing_configs
+            if config.network_id in protocols
         )
         self.timing_summary_label.setText(
             f"网段速率参数：已配置 {configured}/{len(self._timing_configs)}"

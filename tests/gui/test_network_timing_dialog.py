@@ -42,7 +42,20 @@ def _network(
     )
 
 
-def test_dialog_shows_dbc_source_and_missing_status(qtbot) -> None:
+def _fd_config(network_id: str) -> NetworkTimingConfig:
+    return NetworkTimingConfig(
+        network_id,
+        500_000,
+        TimingConfigSource.MANUAL,
+        confirmed=True,
+        data_bitrate_bps=2_000_000,
+        default_brs=True,
+        data_source=TimingConfigSource.MANUAL,
+        brs_source=TimingConfigSource.MANUAL,
+    )
+
+
+def test_dialog_has_nominal_data_brs_source_and_status_columns(qtbot) -> None:
     networks = (
         _network("bd", FrameProtocol.CLASSIC_CAN),
         _network("dk", FrameProtocol.CAN_FD),
@@ -55,15 +68,21 @@ def test_dialog_shows_dbc_source_and_missing_status(qtbot) -> None:
     )
     dialog = NetworkTimingDialog(networks, configs)
     qtbot.addWidget(dialog)
-    assert dialog.table.item(0, 3).text() == "DBC"
-    assert dialog.table.item(0, 4).text() == "已配置"
-    assert dialog.table.item(1, 3).text() == "—"
-    assert dialog.table.item(1, 4).text() == "待配置"
+
+    assert dialog.table.columnCount() == 7
+    assert dialog.table.horizontalHeaderItem(2).text().startswith("Nominal")
+    assert dialog.table.horizontalHeaderItem(3).text().startswith("Data")
+    assert dialog.table.horizontalHeaderItem(4).text() == "BRS"
+    assert dialog.table.item(0, 5).text() == "N:DBC"
+    assert dialog.table.item(0, 6).text() == "已配置"
+    assert dialog.table.item(1, 5).text() == "N:—；D:—；BRS:—"
+    assert dialog.table.item(1, 6).text() == "待配置：缺少 Nominal"
     assert dialog.editors["bd"].text() == "500"
-    assert dialog.editors["dk"].text() == ""
+    assert not dialog.data_editors["bd"].isEnabled()
+    assert not dialog.brs_combos["bd"].isEnabled()
 
 
-def test_batch_fill_only_unconfigured_can_fd_and_never_overwrites(qtbot) -> None:
+def test_batch_fill_only_empty_can_fd_fields_and_never_classic(qtbot) -> None:
     networks = (
         _network("bd", FrameProtocol.CLASSIC_CAN),
         _network("dk", FrameProtocol.CAN_FD),
@@ -71,24 +90,95 @@ def test_batch_fill_only_unconfigured_can_fd_and_never_overwrites(qtbot) -> None
     )
     configs = (
         NetworkTimingConfig("bd"),
-        NetworkTimingConfig(
-            "dk", 250_000, TimingConfigSource.MANUAL, confirmed=True
-        ),
+        _fd_config("dk"),
         NetworkTimingConfig("gl"),
     )
     dialog = NetworkTimingDialog(networks, configs)
     qtbot.addWidget(dialog)
-    dialog.batch_bitrate_spin.setValue(500)
+    dialog.batch_bitrate_spin.setValue(250)
+    dialog.batch_data_bitrate_spin.setValue(5_000)
+    dialog.batch_brs_combo.setCurrentIndex(dialog.batch_brs_combo.findData(False))
+
     dialog.apply_to_unconfigured_fd()
+
     assert dialog.editors["bd"].text() == ""
-    assert dialog.editors["dk"].text() == "250"
-    assert dialog.editors["gl"].text() == "500"
+    assert dialog.data_editors["bd"].text() == ""
+    assert dialog.editors["dk"].text() == "500"
+    assert dialog.data_editors["dk"].text() == "2000"
+    assert dialog.brs_combos["dk"].currentData() is True
+    assert dialog.editors["gl"].text() == "250"
+    assert dialog.data_editors["gl"].text() == "5000"
+    assert dialog.brs_combos["gl"].currentData() is False
+
     dialog.accept()
     assert dialog.timing_configs is not None
     by_id = {config.network_id: config for config in dialog.timing_configs}
-    assert by_id["dk"].nominal_bitrate_bps == 250_000
-    assert by_id["gl"].nominal_bitrate_bps == 500_000
-    assert by_id["gl"].source is TimingConfigSource.MANUAL
+    assert by_id["dk"] == configs[1]
+    assert by_id["gl"].nominal_bitrate_bps == 250_000
+    assert by_id["gl"].data_bitrate_bps == 5_000_000
+    assert by_id["gl"].default_brs is False
+    assert by_id["gl"].nominal_source is TimingConfigSource.MANUAL
+
+
+def test_dbc_per_message_brs_is_read_only_and_can_be_mixed(qtbot) -> None:
+    network = _network("dk", FrameProtocol.CAN_FD)
+    config = NetworkTimingConfig(
+        "dk",
+        500_000,
+        TimingConfigSource.MANUAL,
+        confirmed=True,
+        data_bitrate_bps=2_000_000,
+        data_source=TimingConfigSource.MANUAL,
+        dbc_brs_complete=True,
+        dbc_brs_mixed=True,
+        dbc_brs_has_on=True,
+    )
+    dialog = NetworkTimingDialog((network,), (config,))
+    qtbot.addWidget(dialog)
+
+    combo = dialog.brs_combos["dk"]
+    assert not combo.isEnabled()
+    assert combo.currentText() == "来自 DBC / 按报文（混合）"
+    assert "BRS:DBC/按报文" in dialog.table.item(0, 5).text()
+    assert dialog.table.item(0, 6).text() == "已配置"
+
+
+def test_brs_on_requires_data_bitrate_but_brs_off_does_not(qtbot) -> None:
+    network = _network("dk", FrameProtocol.CAN_FD)
+    dialog = NetworkTimingDialog(
+        (network,),
+        (
+            NetworkTimingConfig(
+                "dk",
+                500_000,
+                TimingConfigSource.MANUAL,
+                confirmed=True,
+                default_brs=True,
+                brs_source=TimingConfigSource.MANUAL,
+            ),
+        ),
+    )
+    qtbot.addWidget(dialog)
+    assert dialog.table.item(0, 6).text() == "待配置：缺少 Data"
+
+    combo = dialog.brs_combos["dk"]
+    combo.setCurrentIndex(combo.findData(False))
+    assert dialog.table.item(0, 6).text() == "已配置"
+
+
+def test_data_below_nominal_is_preserved_with_warning(qtbot) -> None:
+    network = _network("dk", FrameProtocol.CAN_FD)
+    dialog = NetworkTimingDialog((network,), (NetworkTimingConfig("dk"),))
+    qtbot.addWidget(dialog)
+    dialog.editors["dk"].setText("500")
+    dialog.data_editors["dk"].setText("250")
+    combo = dialog.brs_combos["dk"]
+    combo.setCurrentIndex(combo.findData(True))
+
+    assert dialog.table.item(0, 6).text() == "已配置（Data < Nominal）"
+    dialog.accept()
+    assert dialog.timing_configs is not None
+    assert dialog.timing_configs[0].data_bitrate_bps == 250_000
 
 
 def test_non_positive_manual_value_is_rejected(qtbot, monkeypatch) -> None:
@@ -106,7 +196,7 @@ def test_non_positive_manual_value_is_rejected(qtbot, monkeypatch) -> None:
     assert warnings and "正数" in warnings[0]
 
 
-def test_missing_bitrate_does_not_block_settings_request(
+def test_missing_timing_does_not_block_settings_request(
     qtbot, inspection: WorkspaceInspection
 ) -> None:
     inspected = WorkspaceInspection(

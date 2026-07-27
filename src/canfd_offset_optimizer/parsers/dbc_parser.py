@@ -25,6 +25,9 @@ DBC_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "start_delay": ("GenMsgStartDelayTime",),
     "send_type": ("GenMsgSendType", "SendType", "MsgSendType"),
     "frame_format": ("VFrameFormat", "FrameFormat", "BusType"),
+    # Vector's CANFD_BRS is a BO_ attribute. Explicit assignments and its
+    # BA_DEF_DEF_ value both have normal DBC effective-value semantics.
+    "brs": ("CANFD_BRS",),
 }
 
 
@@ -45,6 +48,8 @@ class ParsedDbcMessage:
     transmitter_nodes: tuple[str, ...] = ()
     original_offset_attribute: str | None = None
     original_offset_source: str = "unavailable"
+    dbc_brs: bool | None = None
+    dbc_brs_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +60,17 @@ class DbcParseResult:
     warnings: tuple[str, ...] = ()
     nominal_bitrate_bps: int | None = None
     nominal_bitrate_source: str | None = None
+    data_bitrate_bps: int | None = None
+    data_bitrate_source: str | None = None
 
 
 _DBC_NOMINAL_BITRATE_ATTRIBUTE = re.compile(
     r'^\s*BA_\s+"Baudrate"\s+([0-9]+)\s*;\s*$', re.MULTILINE
+)
+_DBC_DATA_BITRATE_ATTRIBUTE = re.compile(
+    r'^\s*BA_\s+"(CANFD_DataBitrate|CANFD_Baudrate|DataBitrate|DataBaudrate)"'
+    r'\s+([0-9]+)\s*;\s*$',
+    re.MULTILINE,
 )
 
 
@@ -86,6 +98,52 @@ def read_dbc_nominal_bitrate(path: Path) -> int | None:
             f"{path}: conflicting or non-positive DBC Baudrate attribute"
         )
     return values[0]
+
+
+def read_dbc_data_bitrate(path: Path) -> tuple[int | None, str | None]:
+    """Read an explicit global CAN FD data-rate attribute when unambiguous.
+
+    DBC has no universal data-rate field. The accepted names are narrowly
+    limited to explicit database-level attributes used by common engineering
+    exports; defaults, filenames and message attributes are not inferred.
+    """
+
+    if not path.is_file():
+        return None, None
+    source = path.read_bytes().decode("latin-1")
+    matches = tuple(_DBC_DATA_BITRATE_ATTRIBUTE.finditer(source))
+    if not matches:
+        return None, None
+    values = tuple(int(match.group(2)) for match in matches)
+    if any(value <= 0 for value in values) or len(set(values)) != 1:
+        raise InputFileError(
+            f"{path}: conflicting or non-positive DBC CAN FD data bitrate attribute"
+        )
+    names = tuple(dict.fromkeys(match.group(1) for match in matches))
+    return values[0], "DBC:" + "/".join(names)
+
+
+def _normalize_brs(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(int(value)) if value in (0, 1) else None
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "on", "true", "enabled", "enable"}:
+        return True
+    if normalized in {"0", "off", "false", "disabled", "disable"}:
+        return False
+    return None
+
+
+def _message_brs(database: Any, message: Any) -> tuple[bool | None, str | None]:
+    value, source = _attribute_value(message, DBC_ATTRIBUTES["brs"])
+    if value is None:
+        value, source = _attribute_default(database, DBC_ATTRIBUTES["brs"])
+    normalized = _normalize_brs(value) if value is not None else None
+    if normalized is None:
+        return None, None
+    return normalized, source
 
 
 def _attribute_value(
@@ -254,6 +312,11 @@ def parse_loaded_dbc(
             if _is_fd_message(message)
             else FrameProtocol.CLASSIC_CAN
         )
+        dbc_brs, dbc_brs_source = (
+            _message_brs(database, message)
+            if frame_protocol is FrameProtocol.CAN_FD
+            else (None, None)
+        )
         length = getattr(message, "length", None)
         valid_lengths = (
             CAN_FD_PAYLOAD_LENGTHS
@@ -334,6 +397,8 @@ def parse_loaded_dbc(
             field_sources.append(
                 ("original_offset_us", f"{source_prefix}:{original_source}")
             )
+        if dbc_brs_source is not None:
+            field_sources.append(("dbc_brs", f"{source_prefix}:{dbc_brs_source}"))
         parsed.append(
             ParsedDbcMessage(
                 name=str(message.name),
@@ -351,6 +416,10 @@ def parse_loaded_dbc(
                     "GenMsgStartDelayTime" if original_source is not None else None
                 ),
                 original_offset_source=original_offset_source,
+                dbc_brs=dbc_brs,
+                dbc_brs_source=(
+                    f"DBC:{dbc_brs_source}" if dbc_brs_source is not None else None
+                ),
             )
         )
     if not parsed:
@@ -362,11 +431,14 @@ def parse_loaded_dbc(
             "periodic TX messages; Byte and microsecond weights cannot be mixed"
         )
     nominal_bitrate_bps = read_dbc_nominal_bitrate(path)
+    data_bitrate_bps, data_bitrate_source = read_dbc_data_bitrate(path)
     return DbcParseResult(
         tuple(parsed),
         tuple(warnings),
         nominal_bitrate_bps,
         "DBC:Baudrate" if nominal_bitrate_bps is not None else None,
+        data_bitrate_bps,
+        data_bitrate_source,
     )
 
 

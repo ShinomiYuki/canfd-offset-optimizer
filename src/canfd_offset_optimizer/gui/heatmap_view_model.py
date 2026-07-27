@@ -15,12 +15,14 @@ from canfd_offset_optimizer.timing.conservative_service import (
 )
 
 from .contracts import (
+    FrameProtocol,
     GuiOptimizationResult,
     HeatmapMessageDetail,
     HeatmapWindowDetail,
     NetworkTimingConfig,
     WeightMode,
 )
+from .timing_resolution import resolve_effective_brs
 
 
 class HeatmapState(str, Enum):
@@ -180,7 +182,10 @@ class HeatmapCellView:
                     f"{self.conservative_complete_count}/{self.conservative_total_count}",
                 )
             )
-        lines.append("CAN FD 保守值整帧按 nominal bitrate 计时，不是实际帧时间。")
+        lines.append(
+            "保守值按已确认的实际速率/BRS配置分阶段计时；"
+            "对未知数据位型采用协议级 stuffing 上界。"
+        )
         return "\n".join(lines)
 
 
@@ -227,7 +232,30 @@ class CongestedMessageRow:
     @property
     def conservative_tooltip(self) -> str:
         if self.message.conservative_service_time_us is not None:
-            return "协议级保守占用时间；包含正常 3-bit Intermission。"
+            lines = ["协议级保守占用时间；包含正常 3-bit Intermission。"]
+            if self.message.frame_protocol is FrameProtocol.CAN_FD:
+                brs = (
+                    "开启"
+                    if self.message.effective_brs is True
+                    else "关闭"
+                    if self.message.effective_brs is False
+                    else "未确认"
+                )
+                lines.append(
+                    f"有效 BRS：{brs}"
+                    + (
+                        f"（{self.message.effective_brs_source}）"
+                        if self.message.effective_brs_source
+                        else ""
+                    )
+                )
+            if self.message.conservative_nominal_bits_upper_bound is not None:
+                lines.append(
+                    "计时分解："
+                    f"Nominal {self.message.conservative_nominal_bits_upper_bound} bit；"
+                    f"Data {self.message.conservative_data_bits_upper_bound or 0} bit"
+                )
+            return "\n".join(lines)
         return _reason_label(self.message.conservative_unavailable_reason)
 
 
@@ -431,6 +459,11 @@ def _enrich_message(
     message: HeatmapMessageDetail,
     timing_config: NetworkTimingConfig,
 ) -> HeatmapMessageDetail:
+    effective_brs, effective_brs_source = resolve_effective_brs(
+        message.dbc_brs,
+        message.dbc_brs_source,
+        timing_config,
+    )
     protocol_value = (
         message.frame_protocol.value if message.frame_protocol is not None else None
     )
@@ -442,6 +475,8 @@ def _enrich_message(
         message.is_extended,
         message.payload_bytes,
         timing_config.nominal_bitrate_bps,
+        timing_config.data_bitrate_bps,
+        effective_brs,
         CONSERVATIVE_ESTIMATOR_VERSION,
     )
     return replace(
@@ -450,6 +485,10 @@ def _enrich_message(
         conservative_total_bits_upper_bound=estimate.total_bits_upper_bound,
         conservative_status=estimate.status,
         conservative_unavailable_reason=estimate.unavailable_reason,
+        effective_brs=effective_brs,
+        effective_brs_source=effective_brs_source,
+        conservative_nominal_bits_upper_bound=estimate.nominal_bits_upper_bound,
+        conservative_data_bits_upper_bound=estimate.data_bits_upper_bound,
     )
 
 
@@ -462,6 +501,8 @@ def _cached_estimate(
     is_extended: bool,
     payload_bytes: int | None,
     nominal_bitrate_bps: int | None,
+    data_bitrate_bps: int | None,
+    effective_brs: bool | None,
     estimator_version: str,
 ) -> ConservativeFrameEstimate:
     # Identity, network, bitrate and estimator revision are deliberately all in
@@ -475,6 +516,8 @@ def _cached_estimate(
         is_extended=is_extended,
         payload_bytes=payload_bytes,
         nominal_bitrate_bps=nominal_bitrate_bps,
+        data_bitrate_bps=data_bitrate_bps,
+        effective_brs=effective_brs,
     )
 
 
@@ -526,6 +569,9 @@ def _reason_label(reason: str | None) -> str:
         return "无法计算保守占用时间"
     return {
         "missing_nominal_bitrate": "缺少 Nominal Bitrate",
+        "missing_can_fd_data_bitrate": "缺少 CAN FD Data Bitrate",
+        "unknown_brs": "CAN FD BRS 未确认",
+        "invalid_brs": "CAN FD BRS 非法",
         "invalid_payload_length": "Payload Length 缺失或非法",
         "unknown_protocol": "报文协议类型未知",
         "invalid_frame_metadata": "报文帧格式元数据非法",

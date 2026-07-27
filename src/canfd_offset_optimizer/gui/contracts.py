@@ -52,7 +52,7 @@ class FrameProtocol(str, Enum):
 
 
 class TimingConfigSource(str, Enum):
-    """Auditable origin of a network nominal bitrate."""
+    """Auditable origin of one network timing value."""
 
     DBC = "dbc"
     MANUAL = "manual"
@@ -64,32 +64,88 @@ class NetworkTimingConfig:
 
     network_id: str
     nominal_bitrate_bps: int | None = None
-    source: TimingConfigSource | None = None
+    nominal_source: TimingConfigSource | None = None
     confirmed: bool = False
+    data_bitrate_bps: int | None = None
+    default_brs: bool | None = None
+    data_source: TimingConfigSource | None = None
+    brs_source: TimingConfigSource | None = None
+    dbc_brs_complete: bool = False
+    dbc_brs_mixed: bool = False
+    dbc_brs_has_on: bool = False
 
     def __post_init__(self) -> None:
         if not self.network_id.strip():
             raise ValueError("timing config network_id must not be empty")
         if self.nominal_bitrate_bps is None:
-            if self.source is not None or self.confirmed:
+            if self.nominal_source is not None or self.confirmed:
                 raise ValueError("missing nominal bitrate cannot have source/confirmation")
-            return
-        if (
-            isinstance(self.nominal_bitrate_bps, bool)
-            or not isinstance(self.nominal_bitrate_bps, int)
-            or self.nominal_bitrate_bps <= 0
-        ):
-            raise ValueError("nominal bitrate must be a positive integer bit/s")
-        if not isinstance(self.source, TimingConfigSource):
-            raise ValueError("configured nominal bitrate requires an auditable source")
-        if not self.confirmed:
-            raise ValueError("configured nominal bitrate must be confirmed")
+        else:
+            if not _is_positive_integer(self.nominal_bitrate_bps):
+                raise ValueError("nominal bitrate must be a positive integer bit/s")
+            if not isinstance(self.nominal_source, TimingConfigSource):
+                raise ValueError("configured nominal bitrate requires an auditable source")
+            if not self.confirmed:
+                raise ValueError("configured nominal bitrate must be confirmed")
+        if self.data_bitrate_bps is None:
+            if self.data_source is not None:
+                raise ValueError("missing data bitrate cannot have a source")
+        else:
+            if not _is_positive_integer(self.data_bitrate_bps):
+                raise ValueError("data bitrate must be a positive integer bit/s")
+            if not isinstance(self.data_source, TimingConfigSource):
+                raise ValueError("configured data bitrate requires an auditable source")
+        if self.default_brs is None:
+            if self.brs_source is not None:
+                raise ValueError("missing default BRS cannot have a source")
+        else:
+            if not isinstance(self.default_brs, bool):
+                raise ValueError("default BRS must be boolean when provided")
+            if not isinstance(self.brs_source, TimingConfigSource):
+                raise ValueError("configured default BRS requires an auditable source")
+        if self.dbc_brs_mixed and not self.dbc_brs_complete:
+            raise ValueError("mixed DBC BRS requires complete per-message coverage")
+        if self.dbc_brs_mixed and not self.dbc_brs_has_on:
+            raise ValueError("mixed DBC BRS must contain at least one BRS-on message")
 
     @property
     def nominal_bitrate_kbit_s(self) -> float | None:
         if self.nominal_bitrate_bps is None:
             return None
         return self.nominal_bitrate_bps / 1_000
+
+    @property
+    def data_bitrate_kbit_s(self) -> float | None:
+        if self.data_bitrate_bps is None:
+            return None
+        return self.data_bitrate_bps / 1_000
+
+    @property
+    def source(self) -> TimingConfigSource | None:
+        """Compatibility alias for the former nominal-only DTO."""
+
+        return self.nominal_source
+
+    def has_complete_brs(self) -> bool:
+        return self.dbc_brs_complete or self.default_brs is not None
+
+    def requires_data_bitrate(self) -> bool:
+        if self.dbc_brs_complete:
+            return self.dbc_brs_has_on
+        return self.dbc_brs_has_on or self.default_brs is True
+
+    def is_complete_for(self, protocol: FrameProtocol) -> bool:
+        if self.nominal_bitrate_bps is None:
+            return False
+        if protocol is FrameProtocol.CLASSIC_CAN:
+            return True
+        return self.has_complete_brs() and (
+            not self.requires_data_bitrate() or self.data_bitrate_bps is not None
+        )
+
+
+def _is_positive_integer(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int) and value > 0
 
 
 class RouteMatchStatus(str, Enum):
@@ -931,6 +987,12 @@ class HeatmapMessageDetail:
         ConservativeEstimateStatus.UNAVAILABLE
     )
     conservative_unavailable_reason: str | None = "missing_nominal_bitrate"
+    dbc_brs: bool | None = None
+    dbc_brs_source: str | None = None
+    effective_brs: bool | None = None
+    effective_brs_source: str | None = None
+    conservative_nominal_bits_upper_bound: int | None = None
+    conservative_data_bits_upper_bound: int | None = None
 
     def __post_init__(self) -> None:
         if not self.message_name.strip():
@@ -950,11 +1012,24 @@ class HeatmapMessageDetail:
             self.frame_protocol, FrameProtocol
         ):
             raise ValueError("heatmap frame protocol is invalid")
+        if self.dbc_brs is not None and not isinstance(self.dbc_brs, bool):
+            raise ValueError("heatmap DBC BRS is invalid")
+        if (self.dbc_brs is None) != (self.dbc_brs_source is None):
+            raise ValueError("heatmap DBC BRS value/source is inconsistent")
+        if self.effective_brs is not None and not isinstance(self.effective_brs, bool):
+            raise ValueError("heatmap effective BRS is invalid")
+        if (self.effective_brs is None) != (self.effective_brs_source is None):
+            raise ValueError("heatmap effective BRS value/source is inconsistent")
         complete = self.conservative_status is ConservativeEstimateStatus.COMPLETE
         if complete != (self.conservative_service_time_us is not None):
             raise ValueError("heatmap conservative time/status is inconsistent")
         if complete != (self.conservative_total_bits_upper_bound is not None):
             raise ValueError("heatmap conservative bits/status is inconsistent")
+        if complete != (
+            self.conservative_nominal_bits_upper_bound is not None
+            and self.conservative_data_bits_upper_bound is not None
+        ):
+            raise ValueError("heatmap conservative phase bits/status is inconsistent")
         if complete and self.conservative_unavailable_reason is not None:
             raise ValueError("complete heatmap estimate must not have a failure reason")
         if not complete and not self.conservative_unavailable_reason:

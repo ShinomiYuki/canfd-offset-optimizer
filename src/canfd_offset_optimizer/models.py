@@ -95,6 +95,8 @@ class CanMessage:
     frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
     original_offset_attribute: str | None = None
     original_offset_source: str = "unavailable"
+    dbc_brs: bool | None = None
+    dbc_brs_source: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -134,6 +136,12 @@ class CanMessage:
             raise ValueError("original_offset_attribute is unsupported")
         if self.original_offset_source not in {"explicit", "default", "unavailable"}:
             raise ValueError("original_offset_source is unsupported")
+        if self.dbc_brs is not None and not isinstance(self.dbc_brs, bool):
+            raise ValueError("dbc_brs must be boolean when provided")
+        if (self.dbc_brs is None) != (self.dbc_brs_source is None):
+            raise ValueError("DBC BRS value and source must be provided together")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN and self.dbc_brs is not None:
+            raise ValueError("Classic CAN message must not carry BRS metadata")
 
     @property
     def frame_format(self) -> FrameFormat:

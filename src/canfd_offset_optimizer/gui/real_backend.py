@@ -191,9 +191,14 @@ class RealBackend(WorkspaceImporter):
             record_sha256 = record.sha256 or hashlib.sha256(path.read_bytes()).hexdigest()
             dbc_id = dbc_identity(record.workspace_relative_path, record_sha256)
             nominal_bitrate_bps: int | None = None
+            data_bitrate_bps: int | None = None
+            dbc_brs_complete = False
+            dbc_brs_mixed = False
+            dbc_brs_has_on = False
             try:
                 parsed = parse_dbc(path, allowed_offsets_us=allowed_offsets_us)
                 nominal_bitrate_bps = parsed.nominal_bitrate_bps
+                data_bitrate_bps = parsed.data_bitrate_bps
                 message_count = len(parsed.messages)
                 optimizable = True
                 reason = None
@@ -203,6 +208,14 @@ class RealBackend(WorkspaceImporter):
                     if parsed.messages[0].frame_protocol is CoreFrameProtocol.CLASSIC_CAN
                     else FrameProtocol.CAN_FD
                 )
+                if frame_protocol is FrameProtocol.CAN_FD:
+                    brs_values = tuple(message.dbc_brs for message in parsed.messages)
+                    dbc_brs_complete = all(value is not None for value in brs_values)
+                    dbc_brs_has_on = any(value is True for value in brs_values)
+                    dbc_brs_mixed = (
+                        dbc_brs_complete
+                        and len(set(brs_values)) > 1
+                    )
                 parsed_messages_by_network[network_id] = tuple(
                     (message.can_id, message.name, message.is_extended)
                     for message in parsed.messages
@@ -280,12 +293,21 @@ class RealBackend(WorkspaceImporter):
                 NetworkTimingConfig(
                     network_id=network_id,
                     nominal_bitrate_bps=nominal_bitrate_bps,
-                    source=(
+                    nominal_source=(
                         TimingConfigSource.DBC
                         if nominal_bitrate_bps is not None
                         else None
                     ),
                     confirmed=nominal_bitrate_bps is not None,
+                    data_bitrate_bps=data_bitrate_bps,
+                    data_source=(
+                        TimingConfigSource.DBC
+                        if data_bitrate_bps is not None
+                        else None
+                    ),
+                    dbc_brs_complete=dbc_brs_complete,
+                    dbc_brs_mixed=dbc_brs_mixed,
+                    dbc_brs_has_on=dbc_brs_has_on,
                 )
             )
             progress_callback(
@@ -750,6 +772,31 @@ class RealBackend(WorkspaceImporter):
             original_slot_map=initial_state.slot_map,
             network_timing_config=timing_config,
         )
+        diagnostic_messages = {
+            message.message_name: message
+            for slot in steady_heatmap.original_slots
+            for message in slot.messages
+        }
+        diagnostic_complete = sum(
+            message.conservative_status.value == "complete"
+            for message in diagnostic_messages.values()
+        )
+        diagnostic_reasons = sorted(
+            {
+                message.conservative_unavailable_reason or "unknown_reason"
+                for message in diagnostic_messages.values()
+                if message.conservative_status.value == "unavailable"
+            }
+        )
+        conservative_log = (
+            f"conservative_occupancy={network.display_name}: "
+            f"{diagnostic_complete}/{len(diagnostic_messages)} messages calculated, "
+            f"nominal_bitrate={timing_config.nominal_bitrate_bps or 'missing'}, "
+            f"data_bitrate={timing_config.data_bitrate_bps or 'missing'}, "
+            f"default_brs={timing_config.default_brs}, "
+            f"dbc_brs_complete={timing_config.dbc_brs_complete}, "
+            f"unavailable_reasons={','.join(diagnostic_reasons) or 'none'}"
+        )
         layout = create_output_layout(batch_output)
         stem = short_output_stem(network.display_name)
         network_output = layout.results / stem
@@ -838,17 +885,7 @@ class RealBackend(WorkspaceImporter):
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
                     else ()
                 ),
-                (
-                    f"conservative_occupancy={network.display_name}: "
-                    f"{len(loaded.network.messages)}/{len(loaded.network.messages)} messages "
-                    f"calculated, nominal_bitrate="
-                    f"{timing_config.nominal_bitrate_bps // 1000} kbit/s"
-                    if timing_config.nominal_bitrate_bps is not None
-                    else (
-                        "conservative_occupancy=unavailable: nominal bitrate "
-                        f"not configured for {network.display_name}"
-                    )
-                ),
+                conservative_log,
                 f"assignment_hash={core_result.assignment_hash}",
             ),
             output_directory=network_output,

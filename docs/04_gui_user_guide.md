@@ -88,7 +88,7 @@ user_input/<timestamp>_<project>/
   不混合 Byte 与 μs。Peak、Balanced、Variance 均可用于每个网段自己的权重单位。
 
 后续改进项中的 Classic CAN `frame_time_us` 指可进入 GCLS 的 optimizer 权重模型；本版本仍未
-实现该权重。结果页已经提供的 Classic CAN“保守占用时间”是独立 nominal-only 诊断，不会进入
+实现该权重。结果页已经提供的 Classic CAN“保守占用时间”是独立 nominal-rate 诊断，不会进入
 GCLS，不能用它替代或冒充 optimizer `frame_time_us`。
 
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。
@@ -210,31 +210,30 @@ Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult
 
 ### 网段速率参数与保守占用时间
 
-“批量优化设置”中的 `网段速率参数：已配置 x/y [配置]` 是独立的结果诊断入口，不属于 GCLS
-业务参数。窗口按网段显示：网段、Classic CAN/CAN FD 类型、Nominal Bitrate、来源和状态。用户
-输入单位固定为 kbit/s，内部保存为正整数 bit/s。
+“批量优化设置”中的 `网段速率参数：已配置 x/y [配置]` 是独立的结果诊断入口，不属于 GCLS 业务参数。窗口列为：
 
-程序只在 DBC 存在唯一、明确、正数的全局属性时自动填入并标记来源为 DBC：
-
-```dbc
-BA_ "Baudrate" 500000;
+```text
+网段 | 类型 | Nominal Bitrate | Data Bitrate | BRS | 来源 | 状态
 ```
 
-空白 `BS_:`、`BA_DEF_DEF_ "Baudrate"` 默认值、文件名、其他网段和项目经验都不会被静默当作
-500 kbit/s。没有可靠值时状态为“待配置”，由用户确认。批量按钮只把当前值填入尚未配置的 CAN FD
-网段，不覆盖 Classic CAN 或已有不同值。
+Classic CAN 仅允许编辑 Nominal；Data 和 BRS 显示 `—` 且禁用。CAN FD 可按网段填写 Nominal、Data 和默认 BRS（开启/关闭/未确认）。单位为 kbit/s，内部精确保存为正整数 bit/s。Data < Nominal 不会被自动修改，但会显示“少见配置”提示。
 
-缺少 Nominal Bitrate 不会阻止 Offset 优化；该网段仍可得到 assignment、曲线和现有权重负载，
-但保守占用时间显示 `—`。优化完成后重新打开速率窗口修改数值，只刷新热力图第三行和报文明细，
-不会重新运行 GCLS，也不会改变 Offset、objective 或 assignment hash。
+DBC 有可靠值时自动使用：显式全局 `BA_ "Baudrate"` 可提供 Nominal，受支持的显式全局 Data Bitrate 属性可提供 Data，`CANFD_BRS` 的 per-message 显式值或有效默认值可提供 BRS。若 BRS 已被 DBC 对所有报文覆盖，GUI 显示“来自 DBC / 按报文”；一个网段可以混合 BRS ON/OFF，网段默认不会覆盖 DBC 报文值。
 
-Classic CAN 整帧按 Nominal Bitrate 计时。CAN FD 的保守策略也故意把整帧所有 bit 按 Nominal
-Bitrate 计时，不要求 Data Bitrate、BRS 或 ARXML，并假设 Data Phase Bitrate 不低于 Nominal
-Bitrate。这是工具的 conservative calculation policy，不是“真实 CAN FD 整帧只使用 nominal
-rate”。500 kbit/s 时，Standard Classic CAN 8 Byte 的当前结果是 270 μs，而 Standard CAN FD
-8 Byte 是 294 μs；看到大量相同的 270 μs，通常意味着这些报文都是相同格式、相同长度和相同
-bitrate 的 Classic CAN 帧。完整字段公式和参考表见 README“保守占用时间估算”。
+纯 DBC 工作流仅表示不强制 ARXML。若 DBC 没有 Nominal/Data/BRS，用户仍需确认这些少量网段级时序参数。程序不会从空白 `BS_:`、文件名、Payload 或经验值猜测 500/2000 kbit/s，也不会把 BRS unknown 当成 OFF。
 
+计算资格：
+
+- Classic CAN：需要 Nominal；
+- CAN FD BRS OFF：需要 Nominal；
+- CAN FD BRS ON：需要 Nominal + Data；
+- CAN FD BRS unknown：保守时间不可计算。
+
+缺失参数不阻止 Offset 优化。该网段仍有 assignment、曲线和权重负载；仅保守占用时间显示 `—`。优化后修改时序配置只刷新热力图第三行、报文明细和时隙求和，不重新运行 GCLS，也不改变 Offset、objective 或 assignment hash。
+
+“保守”表示在已确认真实速率/BRS 下，对未知 Payload bit pattern 使用协议级 worst-case stuffing，并计入 CRC fixed stuff、固定字段和正常 Intermission；不是故意把 CAN FD 整帧降到 Nominal。BRS ON 按 BRS/CRC delimiter 的 sample-point 切速边界使用 Nominal/Data phase，BRS OFF 才整帧使用 Nominal。
+
+500k Nominal、2M Data、BRS ON 时，Standard CAN FD 8/32/48/64 Byte 的当前参考值分别为 126/249/329/409 μs；同一 48 Byte 报文在 500k、BRS OFF 时为 1104 μs。Classic CAN Standard 8 Byte、500k 仍为 270 μs。完整字段公式见 README“保守占用时间估算”。
 ### 负载热力图
 
 “负载热力图”页参考主分支 `congestion_plotter` 的拥挤热力图语义：上排为原始方案，下排为

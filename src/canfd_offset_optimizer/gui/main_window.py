@@ -659,8 +659,13 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self._show_error("无法应用网段速率参数", str(exc))
             return
+        protocols = {
+            network.network_id: network.frame_protocol
+            for network in inspection.networks
+        }
         configured = sum(
-            config.nominal_bitrate_bps is not None for config in configs
+            config.is_complete_for(protocols[config.network_id])
+            for config in configs
         )
         self._append_log(
             f"网段速率参数已更新：已配置 {configured}/{len(configs)}；"

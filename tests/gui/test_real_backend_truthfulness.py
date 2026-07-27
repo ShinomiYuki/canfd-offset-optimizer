@@ -30,6 +30,7 @@ from canfd_offset_optimizer.gui.contracts import (
     RestartMode,
     RestartSettings,
     SenderNodeSelectionConfig,
+    TimingConfigSource,
     WeightMode,
 )
 from canfd_offset_optimizer.gui.mock_backend import MockBackend
@@ -219,6 +220,41 @@ def test_current_project_fixture_adds_classic_bd_dm_and_skips_empty_dg(
     skipped = {item.network_name: item for item in inspection.networks if not item.is_optimizable}
     assert set(skipped) == {"DG"}
     assert "没有符合资格的周期 TX" in skipped["DG"].unoptimizable_reason
+
+
+def test_real_backend_inspection_exposes_dbc_timing_metadata(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "timed_project"
+    source.mkdir()
+    dbc_text = (
+        DBC_FIXTURE.read_text(encoding="utf-8")
+        + '\nBA_DEF_ BO_ "CANFD_BRS" ENUM "0","1";'
+        + '\nBA_DEF_DEF_ "CANFD_BRS" "1";'
+        + '\nBA_DEF_ "Baudrate" INT 1 10000000;'
+        + '\nBA_ "Baudrate" 500000;'
+        + '\nBA_DEF_ "DataBitrate" INT 1 10000000;'
+        + '\nBA_ "DataBitrate" 2000000;\n'
+    )
+    (source / "CAR_VCU_DK Message.dbc").write_text(dbc_text, encoding="utf-8")
+    (source / "project.yaml").write_bytes(
+        Path("tests/fixtures/config/project.yaml").read_bytes()
+    )
+    backend = RealBackend(workspace_root=tmp_path / "workspace")
+    token = CancellationToken()
+    session = backend.import_inputs((source,), lambda update: None, token)
+
+    inspection = backend.inspect_workspace(session, lambda update: None, token)
+    config = inspection.network_timing_configs[0]
+
+    assert config.nominal_bitrate_bps == 500_000
+    assert config.data_bitrate_bps == 2_000_000
+    assert config.nominal_source is TimingConfigSource.DBC
+    assert config.data_source is TimingConfigSource.DBC
+    assert config.dbc_brs_complete
+    assert config.dbc_brs_has_on
+    assert not config.dbc_brs_mixed
+    assert config.is_complete_for(FrameProtocol.CAN_FD)
 
 
 def test_real_backend_maps_each_dbc_to_its_unique_arxml_controller(

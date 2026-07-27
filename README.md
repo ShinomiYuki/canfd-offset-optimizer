@@ -110,8 +110,9 @@ CAN FD 支持两种权重：
 - `payload_bytes`：optimizer 权重。按 Payload Length 计权，单位为 Byte；忽略协议开销和
   实际 bitrate。
 
-这两个权重都不同于结果页的 `conservative_bus_service_time_us`。后者采用独立的
-nominal-only 协议模型，只用于优化后的结果诊断，不会进入 GCLS。
+这两个权重都不同于结果页的 `conservative_bus_service_time_us`。后者采用独立的协议级
+保守时序模型，只用于优化后的结果诊断，不会进入 GCLS。CAN FD BRS 开启时按 Nominal/Data
+phase 分段计算；BRS 关闭时整帧按 Nominal 计算。
 
 当工程存在唯一可用的 ARXML Controller 映射时，GUI 会提供 `frame_time_us`；
 否则只提供 `payload_bytes`。Classic CAN 始终固定为 `payload_bytes`。
@@ -212,292 +213,130 @@ scripts\build_gui_exe.cmd
 
 ## 保守占用时间估算
 
-### 作用与优化边界
+### 定义与优化边界
 
-Offset 优化改变周期报文的释放时刻。只看某个时隙同时释放多少帧，无法体现 8 Byte
-Classic CAN 与 64 Byte CAN FD 在协议服务时间上的差异。因此结果层额外计算每条报文的：
+结果层为每条正式参与优化的周期报文计算 `conservative_bus_service_time_us`。它表示：在**当前已确认的真实网段时序配置**下，对一次无错误、无重发、正常成功发送，按协议允许的 worst-case dynamic stuffing、CAN FD CRC fixed stuff、固定字段和正常 3-bit Intermission 得到的总线服务时间保守上界。
 
-```text
-conservative_bus_service_time_us
-```
+保守性来自未知运行时 bit pattern 的 stuffing 上界，不再来自故意取消 CAN FD Data Phase 加速。它只属于优化后的结果诊断，不写入 `CanMessage.frame_time_us`，不参与 GCLS、Peak、Balanced、Variance、restart、assignment、Offset 或 objective。修改网段时序参数只刷新报文时间、时隙求和、热力图和明细，不重新运行优化器。
 
-该值表示：在一次正常成功发送、无错误、无重发、无仲裁等待的前提下，根据帧格式、
-Payload Length 和网段 Nominal Bitrate，对协议允许的动态位填充采用 worst-case 上界后得到的
-总线服务时间估计。它显示在单条报文明细、原始热力图和优化后热力图中。
+本模型不包含仲裁失败等待、Error Frame、Retransmission、ACK failure、Bus-Off、排队、ECU 软件调度或实际 Payload bit pattern，也不是精确 airtime、实测总线利用率或 Worst-Case Response Time。
 
-这是只读结果诊断，不是 optimizer 权重。它不写入 `CanMessage.frame_time_us`，不改变
-`weight_mode`，也不参与 GCLS、Peak/Balanced/Variance、目标函数、Offset assignment 或
-assignment hash。即使 optimizer 的 `frame_time_us` 和第三行保守时间都使用 `μs`，两者也不是
-同一个指标。
+### 数据来源与纯 DBC 工作流
 
-### DBC 提供什么，程序自己知道什么
-
-| 信息 | 实际来源 |
+| 信息 | 来源 |
 |---|---|
-| Classic CAN / CAN FD | DBC 帧属性，由 `dbc_parser.py` 规范化为 `FrameProtocol` |
-| Standard / Extended | DBC/cantools 帧元数据，规范化为 `is_extended` |
-| CAN ID | DBC `BO_`，用于报文身份和 Standard/Extended 合法性检查 |
-| Payload Length | DBC Message Length，单位 Byte；不是 raw DLC code |
-| Nominal Bitrate | DBC 显式全局 `BA_ "Baudrate" <bit/s>;`，否则由 GUI 用户按网段确认 |
-| CAN/CAN FD 字段结构 | `timing/conservative_service.py` 中的协议模型 |
-| CRC17 / CRC21 选择 | 程序内协议模型按 Payload Length 选择 |
-| Dynamic bit stuffing 上界 | 程序内 `worst_case_dynamic_stuff_bits()` |
-| CAN FD CRC fixed stuff | 程序内 CRC 字段模型 |
-| CRC delimiter、ACK、EOF、Intermission | 程序内固定字段模型 |
+| 协议、Standard/Extended、Payload Length | DBC Message 元数据 |
+| Nominal Bitrate | DBC 显式全局 `BA_ "Baudrate"`，否则 GUI 按网段确认 |
+| CAN FD Data Bitrate | DBC 中唯一、明确的受支持全局属性，否则 GUI 按网段确认 |
+| CAN FD BRS | DBC `CANFD_BRS` 的 per-message 显式值或有效 `BA_DEF_DEF_`；缺失时使用 GUI 网段默认 |
+| 协议字段、CRC17/CRC21、stuffing 与 Intermission | `timing/conservative_service.py` |
 
-DBC 不会直接给出“本次发送产生多少 stuff bit”“ACK 占多少 bit”或“EOF 占多少 bit”。
-这些是协议规则。Estimator 使用 DBC 给出的报文元数据和程序内协议结构推导 bit 上界；不会从
-Signal Init Value、signal range 或 signal 总长度反推 Payload。
-
-### 总计算流程
+BRS 的有效值优先级固定为：
 
 ```text
-DBC Message
-    ├─ protocol：Classic CAN / CAN FD
-    ├─ frame format：Standard / Extended
-    └─ Payload Length(Byte)
-            +
-NetworkTimingConfig.nominal_bitrate_bps
-            ↓
-protocol frame model
-    ├─ dynamic region base bits
-    ├─ worst-case dynamic stuffing
-    ├─ CAN FD CRC/SBC/parity/fixed stuff
-    ├─ CRC delimiter + ACK + EOF
-    └─ normal 3-bit Intermission
-            ↓
-conservative total bit upper bound
-            ↓
-time_us = ceil(total_bits_upper_bound × 1,000,000 / nominal_bitrate_bps)
+DBC per-message BRS > user network default BRS > unavailable
 ```
 
-整数微秒使用向上取整，避免显示值低于当前模型的理论结果。Dynamic stuffing 区域为 `N` bit
-时，当前实现使用：
+不会根据 Payload、Data Bitrate 是否存在或经验值猜测 BRS。纯 DBC 工作流表示不强制用户导出 ARXML；它不表示 CAN FD 的 Data Bitrate/BRS 可以省略。缺少的 network-level timing metadata 在 GUI 中每个网段确认一次，不需要逐条报文填写。
+
+当前实际 GL/IC/DK DBC 含可靠 `CANFD_BRS` 默认值，但没有 Nominal/Data Bitrate，因此 BRS 可由 DBC 自动使用，两个 bitrate 仍需人工确认。空白 `BS_:`、文件名、其他网段和项目经验不会被当作 500 kbit/s 或 2 Mbit/s。
+
+### Classic CAN（保持原模型）
+
+Classic CAN 只需要 Nominal Bitrate。`D` 为 Payload Length(Byte)，范围 0～8：
 
 ```text
-worst_case_stuff_bits(N) = floor((N - 1) / 4)
+S(N) = floor((N - 1) / 4)
+Standard dynamic_bits = 34 + 8D
+Extended dynamic_bits = 54 + 8D
+total_bits = dynamic_bits + S(dynamic_bits) + 13
+service_time_us = ceil(total_bits × 1,000,000 / nominal_bitrate)
 ```
 
-这是协议级最坏上界，不是平均 stuffing，也不是实际 Payload bitstream 仿真。
+`+13` 为 CRC delimiter 1、ACK slot 1、ACK delimiter 1、EOF 7 和正常 Intermission 3。Standard Classic CAN、8 Byte、500 kbit/s 仍为 `135 bit / 270 μs`。
 
-### Classic CAN
+### CAN FD BRS 关闭
 
-`D` 表示 DBC Payload Length(Byte)，合法范围为 0～8 Byte。SOF 到 15-bit CRC sequence
-参与 dynamic stuffing；CRC delimiter、ACK 和 EOF 不参与该动态填充。
-
-Standard Classic CAN：
-
-```text
-dynamic_bits = 34 + 8D
-             = SOF 1 + arbitration 12 + control 6 + data 8D + CRC sequence 15
-stuff_bits   = floor((dynamic_bits - 1) / 4)
-total_bits   = dynamic_bits + stuff_bits + 13
-```
-
-Extended Classic CAN：
-
-```text
-dynamic_bits = 54 + 8D
-             = SOF 1 + arbitration 32 + control 6 + data 8D + CRC sequence 15
-stuff_bits   = floor((dynamic_bits - 1) / 4)
-total_bits   = dynamic_bits + stuff_bits + 13
-```
-
-这里的 `+13` 不是经验常数：
-
-```text
-CRC delimiter 1
-+ ACK slot 1
-+ ACK delimiter 1
-+ EOF 7
-+ normal Intermission 3
-= 13 bit
-```
-
-Standard Classic CAN、8 Byte、500 kbit/s 的完整示例：
-
-```text
-dynamic_bits = 34 + 8 × 8 = 98
-stuff_bits   = floor((98 - 1) / 4) = 24
-total_bits   = 98 + 24 + 13 = 135 bit
-time         = ceil(135 × 1,000,000 / 500,000) = 270 μs
-```
-
-因此，同样是 Standard Classic CAN、8 Byte、500 kbit/s 时，不同 CAN ID 数值、报文名称、
-周期和 Offset 不会改变该保守时间。CAN ID 是否为 Extended 会改变帧结构，具体 ID bit pattern
-不会用于本模型的实际 stuffing 推测。
-
-### CAN FD
-
-CAN FD 合法 Payload Length 为 `0～8、12、16、20、24、32、48、64 Byte`。SOF 到数据字段
-按 dynamic stuffing 上界处理。Standard 和 Extended 的 dynamic region 分别为：
+CAN FD 合法 Payload Length 为 `0～8、12、16、20、24、32、48、64 Byte`。BRS 明确关闭时整帧确实使用 Nominal Bitrate，原来的单速率公式仍合法：
 
 ```text
 Standard dynamic_bits = 22 + 8D
 Extended dynamic_bits = 41 + 8D
-stuff_bits             = floor((dynamic_bits - 1) / 4)
+crc_field_bits = 27 (D <= 16) or 32 (D > 16)
+total_bits = dynamic_bits + S(dynamic_bits) + crc_field_bits + 13
+service_time_us = ceil(total_bits × 1,000,000 / nominal_bitrate)
 ```
 
-Standard 的 22 bit 由 SOF、11-bit identifier、RRS、IDE、FDF、res、BRS、ESI 和 DLC 组成；
-Extended 的 41 bit 还包含 SRR、IDE 和 18-bit identifier extension。
+因此 Standard CAN FD 48 Byte、500 kbit/s、BRS OFF 的 `1104 μs` 是合理结果；它不能再作为 BRS ON 的默认示例。
 
-CRC 长度按当前实现选择：
+### CAN FD BRS 开启：Nominal/Data phase 分段模型
+
+CAN FD BRS 开启时必须同时提供 Nominal Bitrate 和 Data Bitrate。协议在 BRS bit 的 sample point 切换到 data timing，并在 CRC delimiter 的 sample point 切回 nominal timing。Estimator 不把 Control/Data/CRC 粗暴整体切为 Data Phase，而是按字段边界分解：
 
 ```text
-Payload Length <= 16 Byte → CRC17
-Payload Length >  16 Byte → CRC21
+P = 17 (Standard) or 36 (Extended)  # SOF through BRS
+Q = 5 + 8D                          # ESI + DLC + Payload
+S_prefix = floor((P - 1) / 4)
+S_data_with_carry = ceil(Q / 4)
+CRC_field = 27 (CRC17) or 32 (CRC21), including fixed stuff
+
+nominal_full_bits = (P - 1) + S_prefix + 12
+data_full_bits    = Q + S_data_with_carry + CRC_field
+transition_guard = 2 × (1/Nominal + 1/Data)
+
+service_time_us = ceil(
+    nominal_full_bits × 1,000,000 / nominal_bitrate
+  + data_full_bits    × 1,000,000 / data_bitrate
+  + transition_guard × 1,000,000
+)
 ```
 
-CRC 字段还包含 3-bit Stuff Bit Count、1-bit parity，以及 CAN FD fixed stuff bits。实现把
-`4 + CRC length` 作为 protected bits，并计算：
+Dynamic stuffing 从 SOF 连续到 Data Field。前缀从空 stuffing history 开始；Data suffix 可能继承前缀的连续位状态，因此使用 `ceil(Q/4)` 的 phase-safe 上界。CRC 字段计入 Stuff Bit Count、parity 和 fixed stuff，ACK、EOF 与 Intermission 属于 nominal 尾段。
+
+BRS 和 CRC delimiter 都在各自 bit 的 sample point 内切速。当前网段 DTO 只保存 bitrate，不保存 sample-point segment 长度；为避免凭空制造比例，两个 transition bit 不强行归入整数 phase bit，而是单独保存精确的 `Fraction` duration guard：每个边界在相邻速率各取一次完整 bit-time 上界。`total_bits_upper_bound` 仅保留为兼容性的计时核算上界，不是一条具体物理 bitstream 的去重 wire-bit 数。该处理对任意正 bitrate（包括少见的 Data < Nominal）仍安全；Data < Nominal 会提示异常配置但不会静默改值。
+
+### 当前估算器参考值
+
+以下数值由当前 estimator 实际计算，均为 Standard Frame：
+
+| Protocol / timing | Payload | Nominal | Data | Conservative time |
+|---|---:|---:|---:|---:|
+| Classic CAN | 8 B | 500 kbit/s | — | 270 μs |
+| CAN FD, BRS ON | 8 B | 500 kbit/s | 2000 kbit/s | 126 μs |
+| CAN FD, BRS ON | 16 B | 500 kbit/s | 2000 kbit/s | 166 μs |
+| CAN FD, BRS ON | 32 B | 500 kbit/s | 2000 kbit/s | 249 μs |
+| CAN FD, BRS ON | 48 B | 500 kbit/s | 2000 kbit/s | 329 μs |
+| CAN FD, BRS ON | 64 B | 500 kbit/s | 2000 kbit/s | 409 μs |
+| CAN FD, BRS OFF | 48 B | 500 kbit/s | — | 1104 μs |
+| CAN FD, BRS OFF | 64 B | 500 kbit/s | — | 1424 μs |
+
+相同 CAN FD 报文在 `500k/2M, BRS ON` 下必须明显快于 `500k, BRS OFF`，但长 Payload 仍比短 Payload 占用更长。Extended 64 Byte、500k/2M、BRS ON 为 `455 μs`。
+
+### 缺失参数与 partial 语义
+
+- 缺 Nominal：Classic CAN 与 CAN FD 均不可计算；
+- CAN FD BRS unknown：不可计算，不按 ON、OFF 或两者较大值猜测；
+- CAN FD BRS ON 且缺 Data Bitrate：不可计算，不回退为 `Data = Nominal`；
+- CAN FD BRS OFF：不需要 Data Bitrate；
+- ARXML：不是本诊断的必需输入。
+
+这些情况不阻止 Offset 优化。热力格全部成员不可计算时显示 `保守 —`；部分成员可计算时显示 `保守 ≥xxx μs*`，Tooltip 给出已计算数和缺失原因。时隙值始终为当前正式 members 的逐帧保守时间之和，不重做仲裁、queue 或 stuffing 联合仿真：
 
 ```text
-crc_field_bits = protected_bits + 1 + floor(protected_bits / 4)
+slot conservative time = sum(member.conservative_bus_service_time_us)
 ```
 
-因此：
+### GUI 单位与代码位置
 
-```text
-CRC17 + SBC/parity/fixed stuff region = 27 bit
-CRC21 + SBC/parity/fixed stuff region = 32 bit
-```
+热力图第二行严格跟随 optimizer `weight_mode`：`payload_bytes → B/slot`，`frame_time_us → μs/slot`；第三行始终是独立的 `保守 xxx μs`。当前功能不计算 `conservative_time / slot_width` 或 utilization 百分比。
 
-CRC 字段之后同样加入 13 bit：CRC delimiter 1、ACK slot 1、ACK delimiter 1、EOF 7 和正常
-Intermission 3。最终：
+关键实现：
 
-```text
-total_bits = dynamic_bits + stuff_bits + crc_field_bits + 13
-```
-
-Standard CAN FD、8 Byte、500 kbit/s：
-
-```text
-dynamic_bits = 22 + 8 × 8 = 86
-stuff_bits   = floor((86 - 1) / 4) = 21
-CRC17/SBC/parity/fixed stuff = 27
-total_bits   = 86 + 21 + 27 + 13 = 147 bit
-time         = ceil(147 × 1,000,000 / 500,000) = 294 μs
-```
-
-Standard CAN FD、64 Byte、500 kbit/s：
-
-```text
-dynamic_bits = 22 + 8 × 64 = 534
-stuff_bits   = floor((534 - 1) / 4) = 133
-CRC21/SBC/parity/fixed stuff = 32
-total_bits   = 534 + 133 + 32 + 13 = 712 bit
-time         = ceil(712 × 1,000,000 / 500,000) = 1424 μs
-```
-
-这说明 CAN FD 报文不会因为属于同一网段而具有相同时间；协议、Standard/Extended、Payload
-Length 和 Nominal Bitrate 相同的报文才会得到相同结果。
-
-### 500 kbit/s 参考结果
-
-以下结果由当前 `estimate_conservative_bus_service_time()` 重新计算，均为 Standard Frame：
-
-| Protocol | Payload | Conservative bits | Conservative time |
-|---|---:|---:|---:|
-| Classic CAN | 4 B | 95 bit | 190 μs |
-| Classic CAN | 8 B | 135 bit | 270 μs |
-| CAN FD | 8 B | 147 bit | 294 μs |
-| CAN FD | 16 B | 227 bit | 454 μs |
-| CAN FD | 24 B | 312 bit | 624 μs |
-| CAN FD | 32 B | 392 bit | 784 μs |
-| CAN FD | 48 B | 552 bit | 1104 μs |
-| CAN FD | 64 B | 712 bit | 1424 μs |
-
-Extended Frame 使用更长的 dynamic region，结果不会小于相同 Payload 和 bitrate 的 Standard
-Frame。例如 Extended Classic CAN 8 Byte 为 160 bit/320 μs；Extended CAN FD 64 Byte 为
-736 bit/1472 μs。
-
-### 为什么只要求 Nominal Bitrate
-
-Classic CAN 整帧按 Nominal Bitrate 计时。对于 CAN FD，当前工具采用的是
-**conservative calculation policy**，不是“CAN FD 实际整帧只使用 Nominal Bitrate”：
-
-```text
-CAN FD 整帧所有 bit 均按 Nominal Bitrate 计时
-```
-
-因此本指标不要求 Data Bitrate、BRS 或 ARXML。该策略假设：
-
-```text
-Data Phase Bitrate >= Nominal Bitrate
-```
-
-在该假设成立时，不计 data-phase speed-up、把整帧都按较慢的 Nominal Bitrate 计时，会比正常
-高速 data phase 更保守。若要估算某一真实 BRS 帧的实际 airtime，则必须使用 Data Bitrate、BRS
-和更精确的 phase/bitstream 信息；那不是本指标的语义。
-
-一旦 DBC 已提供协议、Standard/Extended 和 Payload Length，协议固定字段、CRC 规则和 stuffing
-上界都由 timing 模块确定，所以唯一仍用于把 bit 数换算成时间的网段级参数就是 Nominal Bitrate。
-Sample point、SJW、TSEG 和 prescaler 在 bitrate 已确定后不改变本模型中的单 bit 时长。
-
-### Nominal Bitrate 来源与缺失行为
-
-只有 DBC 中唯一、明确、正数的全局属性才会被自动接受：
-
-```dbc
-BA_ "Baudrate" 500000;
-```
-
-单位为 bit/s。空白 `BS_:`、`BA_DEF_DEF_ "Baudrate"` 默认值、文件名、其他网段和项目经验都不会
-被当作已确认速率。无法可靠读取时，GUI 的“网段速率参数”窗口保持为空，由用户按 kbit/s 确认；
-程序不会静默假设 500 kbit/s。批量填充只作用于尚未配置的 CAN FD 网段，不覆盖已有值。
-
-Nominal Bitrate 缺失不会阻止 Offset 优化，因为该指标不属于优化资格条件。优化结果、assignment
-和现有负载仍然有效，但每帧保守时间不可计算，非空热力格显示 `保守 —`。若一个时隙只有部分
-成员可计算，则显示已知下界 `保守 ≥xxx μs*`，并在 Tooltip 中说明缺失原因。优化完成后修改
-bitrate 只刷新结果 presentation，不重新运行 GCLS。
-
-### 时隙汇总、热力图和报文明细
-
-对原始和优化后状态分别使用当前正式 heatmap members：
-
-```text
-slot conservative time
-    = sum(当前 slot 中每条 member 的 conservative_bus_service_time_us)
-```
-
-未选择 sender、`routing_excluded`、非周期或其他资格已排除报文不会重新加入。空时隙的总量是
-0；全部成员不可计算时显示 `—`。这个和不是实测总线占用、仲裁仿真、队列完成时间或 Worst-Case
-Response Time，只是同一时隙内释放的可优化周期报文之单帧保守服务时间总和。
-
-热力格三行含义：
-
-```text
-3 帧          ← 当前 slot 的正式报文数量
-72 B          ← 当前 optimizer weight_mode 的 slot load
-保守 812 μs   ← 独立的 protocol-level conservative service time total
-```
-
-若 optimizer 使用 `frame_time_us`，第二行也可能是 `μs`，但仍来自 optimizer 权重模型；第三行始终
-来自 nominal-only conservative estimator，不能混用。当前功能只显示绝对微秒值，不计算
-`conservative_time / slot_width`，也不提供 occupancy/utilization/load-rate 百分比。
-
-热力图下方明细包含 Message Name、CAN ID、`长度(Byte)`、Cycle、Offset 和
-`保守占用时间(μs)`。`长度(Byte)` 是 DBC Message Payload Length，不是 raw DLC code、整个 CAN
-frame 长度或 signal bit 长度总和。例如 CAN FD raw DLC code 15 对应 64 Byte，GUI 显示 `64`。
-
-### 模型边界与代码位置
-
-当前模型包含协议固定字段、Payload、worst-case dynamic stuffing、CAN FD CRC fixed stuff、ACK、
-EOF 和正常 3-bit Intermission；不考虑仲裁失败等待、Error Frame、Retransmission、ACK failure、
-排队、ECU 软件调度、实际 Payload、实际运行时 bitstream 或 CAN FD data-phase speed-up。它应称为
-“保守占用时间”或 “Conservative Bus Service Time”，不能解释为精确 airtime、实际发送时间或
-Worst-Case Response Time。
-
-关键实现入口：
-
-- `src/canfd_offset_optimizer/timing/conservative_service.py`
-  - `estimate_conservative_bus_service_time()`
-  - `worst_case_dynamic_stuff_bits()`
-- `src/canfd_offset_optimizer/parsers/dbc_parser.py`
-  - `read_dbc_nominal_bitrate()`
-- `src/canfd_offset_optimizer/gui/heatmap_details.py`：把正式 slot members 转成报文级和时隙级结果；
-- `src/canfd_offset_optimizer/gui/heatmap_view_model.py`：缓存报文估算并构造三行展示。
-
+- `timing/conservative_service.py`：Classic、BRS ON/OFF 和 phase bounds；
+- `parsers/dbc_parser.py`：Nominal/Data 与 per-message `CANFD_BRS`；
+- `gui/timing_resolution.py`：effective BRS 优先级；
+- `gui/heatmap_details.py` / `gui/heatmap_view_model.py`：members 求和、缓存和 presentation；
+- `gui/widgets/network_timing_dialog.py`：Nominal、Data、BRS 的网段级确认。
 ## DBC 回写
 
 优化结果写入输出 DBC 副本中的：
@@ -566,7 +405,7 @@ python -m pip install -e ".[solver]"
 - GUI 图表统计的是本次纳入 GCLS 的可优化报文，不是整条物理总线的全部流量；
 - routed TX 只有在提供并成功匹配路由 Excel 时才会自动排除；
 - Classic CAN 的 `payload_bytes` 是工程近似；
-- CAN FD optimizer 的 `frame_time_us` 是基于 nominal/data bitrate 和 BRS 的权重估计；它不同于结果页 nominal-only 的保守占用时间；
+- CAN FD optimizer 的 `frame_time_us` 是优化权重；它与结果页独立的 phase-aware 保守占用时间不是同一字段；
 - 默认自动超周期受 5000 ms 上限约束，周期最小公倍数超过上限的网段不能直接运行；
 - 不模拟完整 CAN 仲裁、事件触发、错误帧、重传、网关运行时延迟或 ECU 调度抖动。
 
