@@ -156,24 +156,119 @@ assignment 构造成员索引，并对照核心 load/count 数组校验，不复
 
 ### 5.1 协议级保守占用诊断契约
 
-`conservative_bus_service_time_us` 只能是结果展示指标，禁止写入 `CanMessage.weight`、
-`OptimizationRequest.weight_mode`、objective、assignment 或任何 GCLS 搜索结构。
-`NetworkTimingConfig` 按 `network_id` 保存唯一的 `nominal_bitrate_bps`、来源和确认状态；bitrate
-是网段元数据，不得复制成每条报文的可编辑配置。DBC parser 只有在全局 `Baudrate` 属性给出唯一明确正数时
-才能自动填入并标记 `DBC` 来源；空白、冲突或缺失不得猜测 500 kbit/s。缺失配置不得阻止优化。
+正式入口是
+`src/canfd_offset_optimizer/timing/conservative_service.py::estimate_conservative_bus_service_time()`。
+输入为核心 `FrameProtocol`、`is_extended`、DBC `payload_bytes` 和网段级
+`nominal_bitrate_bps`；输出 `ConservativeFrameEstimate`，其中
+`conservative_bus_service_time_us` 与 `total_bits_upper_bound` 只属于结果诊断。禁止把它们写入
+`CanMessage.frame_time_us`、`OptimizationRequest.weight_mode`、objective、assignment 或任何
+GCLS 搜索结构。现有 optimizer `frame_time_us` 继续由 `timing/frame_time.py` 计算，两套模型不得
+互相调用或别名化。
 
-集中式 timing estimator 输入协议、Standard/Extended、真实 `payload_bytes` 和 nominal bitrate，
-输出总 bit 保守上界、向上取整的微秒值、状态、原因和模型版本。Classic CAN 与 CAN FD 必须使用
-各自协议结构、dynamic worst-case stuffing、固定字段和正常 3-bit Intermission。CAN FD 的 CRC17/
-CRC21、Stuff Bit Count/parity 和 CRC fixed stuff 必须单独建模；本轮整帧全部按 nominal bitrate
-计时，不依赖 Data Bitrate、BRS 或 ARXML，并假设 data-phase bitrate 不低于 nominal bitrate。
-该模型排除错误帧、重传、仲裁等待、排队和 ECU/软件延迟。
+#### 数据来源和状态
 
-`HeatmapMessageDetail` 保存 Payload Length、协议和独立的每帧估算；`HeatmapSlotDetail` 的总量
-必须严格对当前正式成员求和，original/optimized 分别使用各自成员。0 帧为 0；全部不可计算为
-`None`/`保守 —`；部分可计算为已知和及 `保守 ≥xxx μs*`。缓存 key 必须包含 message identity、
-network_id、nominal bitrate、协议元数据和 estimator version。修改 bitrate 只刷新 presentation，
-不得运行 backend/GCLS，assignment hash 必须保持不变。不得新增任何百分比或 utilization 字段。
+`dbc_parser.py` 提供协议、Standard/Extended、CAN ID 和正式 Payload Length。Nominal Bitrate 是
+`NetworkTimingConfig` 中按 `network_id` 保存的网段元数据，内部单位固定为 bit/s。DBC 自动来源
+只接受唯一、明确、正数的全局：
+
+```dbc
+BA_ "Baudrate" 500000;
+```
+
+空白 `BS_:`、属性默认值、文件名、其他网段和项目默认不得当作确认值。不能可靠读取时由 GUI 用户
+以 kbit/s 手工确认，内部精确换算为 bit/s；缺失不得阻止优化。Estimator 对未知协议、非法 Payload、
+非法帧元数据或缺失/非正 bitrate 返回 `UNAVAILABLE`，不得返回 0 或 fallback 500 kbit/s。若
+`is_extended` 在直接调用中为 `None`，当前 estimator 以 Extended Frame 作为保守假设；正式 DBC
+parser 正常会提供明确 bool。
+
+#### 共同计算规则
+
+Dynamic stuffing 区域为 `N` bit 时：
+
+```text
+S(N) = floor((N - 1) / 4)
+```
+
+总 bit 上界换算为整数微秒时：
+
+```text
+conservative_bus_service_time_us
+    = ceil(total_bits_upper_bound × 1,000,000 / nominal_bitrate_bps)
+```
+
+Estimator 描述一次正常成功发送，计入正常 3-bit Intermission；排除错误帧、重传、ACK failure、
+仲裁等待、排队及 ECU/软件延迟。它不构造实际 Payload，不使用 Signal Init Value、signal range、
+随机值或平均 stuffing。
+
+#### Classic CAN bit 模型
+
+`D` 为 Payload Length(Byte)，范围 0～8。SOF 到 15-bit CRC sequence 参与 dynamic stuffing：
+
+```text
+Standard: dynamic_bits = 34 + 8D
+Extended: dynamic_bits = 54 + 8D
+stuff_bits = S(dynamic_bits)
+total_bits = dynamic_bits + stuff_bits + 13
+```
+
+Standard 的 34 bit 为 `SOF 1 + arbitration 12 + control 6 + CRC sequence 15`；Extended 的
+54 bit 为 `SOF 1 + arbitration 32 + control 6 + CRC sequence 15`，两者再加 `8D` data bits。
+固定 `+13` 必须解释为：
+
+```text
+CRC delimiter 1 + ACK slot 1 + ACK delimiter 1 + EOF 7 + Intermission 3
+```
+
+500 kbit/s 下，Standard 8 Byte 为 `98 + 24 + 13 = 135 bit`，向上取整后为 `270 μs`；
+Extended 8 Byte 为 `160 bit / 320 μs`。
+
+#### CAN FD bit 模型
+
+`D` 必须属于 `0～8、12、16、20、24、32、48、64 Byte`：
+
+```text
+Standard: dynamic_bits = 22 + 8D
+Extended: dynamic_bits = 41 + 8D
+stuff_bits = S(dynamic_bits)
+```
+
+Standard 22 bit 是 SOF、11-bit identifier、RRS、IDE、FDF、res、BRS、ESI 和 DLC；Extended
+41 bit 还包含 SRR、IDE 和 18-bit identifier extension。CRC 规则为：
+
+```text
+D <= 16 Byte → CRC17
+D >  16 Byte → CRC21
+protected_bits = 3-bit Stuff Bit Count + parity 1 + CRC sequence
+crc_field_bits = protected_bits + leading fixed bit + floor(protected_bits / 4)
+```
+
+所以 CRC17/SBC/parity/fixed-stuff region 为 27 bit，CRC21 对应 32 bit。最终：
+
+```text
+total_bits = dynamic_bits + stuff_bits + crc_field_bits + 13
+```
+
+末尾 `+13` 仍为 CRC delimiter、ACK slot、ACK delimiter、EOF 和正常 Intermission。500 kbit/s
+下，Standard 8 Byte 为 `147 bit / 294 μs`，Standard 64 Byte 为 `712 bit / 1424 μs`，
+Extended 64 Byte 为 `736 bit / 1472 μs`。
+
+CAN FD 本轮采用 nominal-only conservative policy：整帧所有 bit 均按 Nominal Bitrate 计时，不读取
+Data Bitrate、BRS 或 ARXML，并假设 `Data Phase Bitrate >= Nominal Bitrate`。这是为了不使用
+未知的 data-phase speed-up，并不表示真实 CAN FD 帧整帧只运行在 nominal rate。若该假设不成立，
+当前保守语义不成立，不能把结果称为实际 airtime。
+
+#### DTO、时隙汇总与 presentation
+
+`HeatmapMessageDetail` 保存 `payload_bytes`、协议、报文级时间、bit 上界、状态和原因。
+`HeatmapSlotDetail` 必须严格对当前正式 members 求和，original/optimized 分别使用各自 Offset 下的
+members；不得重新扫描整个 DBC 或加入 sender/routing/eligibility 已排除报文。空时隙为 0，全部
+不可计算为 `None`/`保守 —`，部分可计算为已知和/`保守 ≥xxx μs*`。
+
+`heatmap_view_model.py` 的缓存 key 必须包含 message identity、network_id、Nominal Bitrate、帧元数据
+和 estimator version。修改 bitrate 只刷新 presentation，不调用 RealBackend/GCLS，assignment hash
+保持不变。热力格三行依次为帧数、当前 optimizer weight load 和独立保守时间；即使后两行单位都为
+`μs` 也不得混用。明细中的 `长度(Byte)` 是 DBC Payload Length，不是 raw DLC。不得增加
+`conservative_time / slot_width`、occupancy、utilization 或 load-rate 百分比。
 
 ## 6. 进度、取消与错误
 

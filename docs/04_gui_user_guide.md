@@ -87,8 +87,9 @@ user_input/<timestamp>_<project>/
 - 同一物理网段若同时包含 eligible Classic CAN 与 CAN FD 周期 TX，本版本明确拒绝，
   不混合 Byte 与 μs。Peak、Balanced、Variance 均可用于每个网段自己的权重单位。
 
-后续改进项：实现包含标准/扩展帧、协议开销、位填充和 nominal bitrate 的完整 Classic CAN
-`frame_time_us` 模型；本版本不实现该精确模型。
+后续改进项中的 Classic CAN `frame_time_us` 指可进入 GCLS 的 optimizer 权重模型；本版本仍未
+实现该权重。结果页已经提供的 Classic CAN“保守占用时间”是独立 nominal-only 诊断，不会进入
+GCLS，不能用它替代或冒充 optimizer `frame_time_us`。
 
 网段名直接显示 `DA`、`DK`、`PT` 等原名，不解释缩写。
 `..._ADAS BUS_Matrix_...` 一类 DBC 文件名会显示并匹配为 `ADAS_BUS`，完整文件名仍只作为来源信息。
@@ -207,6 +208,35 @@ Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult
 重新运行优化。启动窗口始终只显示核心返回的真实范围，并禁用稳态重复数选项。导出 PNG 使用
 当前选择的完整重复范围。
 
+### 网段速率参数与保守占用时间
+
+“批量优化设置”中的 `网段速率参数：已配置 x/y [配置]` 是独立的结果诊断入口，不属于 GCLS
+业务参数。窗口按网段显示：网段、Classic CAN/CAN FD 类型、Nominal Bitrate、来源和状态。用户
+输入单位固定为 kbit/s，内部保存为正整数 bit/s。
+
+程序只在 DBC 存在唯一、明确、正数的全局属性时自动填入并标记来源为 DBC：
+
+```dbc
+BA_ "Baudrate" 500000;
+```
+
+空白 `BS_:`、`BA_DEF_DEF_ "Baudrate"` 默认值、文件名、其他网段和项目经验都不会被静默当作
+500 kbit/s。没有可靠值时状态为“待配置”，由用户确认。批量按钮只把当前值填入尚未配置的 CAN FD
+网段，不覆盖 Classic CAN 或已有不同值。
+
+缺少 Nominal Bitrate 不会阻止 Offset 优化；该网段仍可得到 assignment、曲线和现有权重负载，
+但保守占用时间显示 `—`。优化完成后重新打开速率窗口修改数值，只刷新热力图第三行和报文明细，
+不会重新运行 GCLS，也不会改变 Offset、objective 或 assignment hash。
+
+Classic CAN 整帧按 Nominal Bitrate 计时。CAN FD 的保守策略也故意把整帧所有 bit 按 Nominal
+Bitrate 计时，不要求 Data Bitrate、BRS 或 ARXML，并假设 Data Phase Bitrate 不低于 Nominal
+Bitrate。这是工具的 conservative calculation policy，不是“真实 CAN FD 整帧只使用 nominal
+rate”。500 kbit/s 时，Standard Classic CAN 8 Byte 的当前结果是 270 μs，而 Standard CAN FD
+8 Byte 是 294 μs；看到大量相同的 270 μs，通常意味着这些报文都是相同格式、相同长度和相同
+bitrate 的 Classic CAN 帧。完整字段公式和参考表见 README“保守占用时间估算”。
+
+### 负载热力图
+
 “负载热力图”页参考主分支 `congestion_plotter` 的拥挤热力图语义：上排为原始方案，下排为
 优化后方案；颜色按同一时隙释放帧数固定分为白色 0 帧、绿色 1 帧、黄色 2 帧、橙色 3 帧、
 红色 4 帧、黑色 5 帧及以上。帧数来自核心时隙快照，不从负载值推测。稳态和启动热力图均只显示核心返回
@@ -218,14 +248,37 @@ Attempts 和四组负载数组来自该网段自己的核心 `OptimizationResult
 优化后行和时间轴位于同一个水平滚动画布中，左侧行标题与图例固定。切换网段或稳态/启动窗口时
 会绑定该网段该窗口自己的 DTO、重建宽度并回到起点，不插值、合并、重采样或重复热力数组。
 
-非空热力格显示三行：`N 帧`、当前真实累计负载和 `保守 xxx μs`；
-`payload_bytes` 的第二行显示 `B`，`frame_time_us` 的第二行显示 `μs`，第三行始终是独立的
-协议级保守占用时间。完全不可计算时显示 `保守 —`，部分可计算时显示
-`保守 ≥xxx μs*`。热力图下方“拥挤时隙明细”默认列出原始和优化后所有 4 帧及以上时隙，
-每条报文独占一行，并显示时间窗口、同时帧数、时隙总负载、报文名、完整十六进制 CAN ID、
-`长度(Byte)`、周期、对应状态的 Offset 和 `保守占用时间(μs)`；该长度是 DBC 正式
-Payload Length，不是 raw DLC。可筛选仅 4 帧或 5 帧及以上。点击热力格会显示当前唯一时隙
-的正式成员，点击表格会滚动并高亮对应热力格。没有拥挤时隙时显示明确空状态。
+非空热力格显示三行。例如 Payload 权重下：
+
+```text
+3 帧
+72 B
+保守 812 μs
+```
+
+`frame_time_us` 权重下可能显示：
+
+```text
+3 帧
+421 μs
+保守 812 μs
+```
+
+第一行是当前 slot 的正式报文数量；第二行是当前 optimizer `weight_mode` 的 slot load；第三行是
+当前 slot 正式 members 的 protocol-level conservative service time 之和。即使第二、第三行都为
+`μs`，它们也不是同一字段。第三行不参与优化，也不是总线占用率、仲裁结果或响应时间。当前 GUI
+不计算 `保守时间 / slot_width` 百分比。
+
+原始和优化后分别按各自 Offset 对应的 member list 求和；未选择 sender、路由排除、非周期及其他
+资格排除报文不会重新加入。完全不可计算显示 `保守 —`，部分成员可计算显示
+`保守 ≥xxx μs*`，Tooltip 说明缺失原因。
+
+热力图下方“拥挤时隙明细”默认列出原始和优化后所有 4 帧及以上时隙，每条报文独占一行，并显示
+状态、时间窗口、同时帧数、时隙总负载、Message Name、完整十六进制 CAN ID、`长度(Byte)`、
+Cycle、对应状态的 Offset 和 `保守占用时间(μs)`。`长度(Byte)` 是 DBC Message Payload Length，
+不是 raw DLC code、整个 CAN frame 长度或 signal 长度总和；例如 CAN FD DLC code 15 在 GUI 中
+显示为 64 Byte，而不是 15 Byte。可筛选仅 4 帧或 5 帧及以上。点击热力格会显示当前唯一时隙的
+正式成员，点击表格会滚动并高亮对应热力格。没有拥挤时隙时显示明确空状态。
 
 “导出热力图 PNG”渲染完整逻辑画布，与当前滚动位置无关；图片包含全部时隙、两行状态、每格三行指标和时间轴。
 达到平台单图尺寸或内存安全上限时明确报告“当前热力图过宽，无法以单张 PNG 导出”，不会静默
