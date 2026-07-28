@@ -94,10 +94,14 @@ def test_joint_cli_generates_exact_audited_json(tmp_path: Path) -> None:
     ) == 0
     summary_path = output / "results" / "joint-output_joint_summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["schema_version"] == 1
+    assert summary["schema_version"] == 2
     assert summary["configuration"]["rho"]["exact"] == "1/2"
     assert summary["configuration"]["epsilon_points"] == 3
     assert summary["anchors"]["peak_reference"]["assignments"]
+    assert summary["anchors"]["refined_can_endpoint"]["assignments"]
+    assert summary["candidate_archive"]["assignment_count"] > 0
+    assert summary["refinement"]["passes_run"] >= 1
+    assert summary["recommendation"]["method"]
     assert summary["anchors"]["can_anchor"]["main_function"]["groups"]
     assert summary["performance"]["joint_evaluations"] > 0
     assert (output / "logs" / "run.log").is_file()

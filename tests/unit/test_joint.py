@@ -25,11 +25,15 @@ from canfd_offset_optimizer.optimization.joint import (
     JointOptimizationConfig,
     JointSearchMetadata,
     JointSolution,
+    _observed_can_endpoint,
+    _official_peak_key,
+    _peak_feasible_archive,
     build_joint_domain,
     filter_pareto_solutions,
     generate_epsilon_budgets,
     optimize_can_cpu_balanced,
 )
+from canfd_offset_optimizer.optimization.gcls import calculate_peak_budget_us
 from canfd_offset_optimizer.optimization.main_function import (
     MainFunctionGroup,
     MainFunctionMessage,
@@ -85,13 +89,16 @@ def _mixed_messages() -> tuple[CanMessage, ...]:
 
 
 def test_joint_config_parses_rho_exactly_and_validates_point_count() -> None:
-    config = JointOptimizationConfig.from_values("0.1", 7)
+    config = JointOptimizationConfig.from_values("0.1", 7, 4)
     assert config.rho == Fraction(1, 10)
     assert config.epsilon_points == 7
+    assert config.max_refinement_passes == 4
     with pytest.raises(ValueError, match="positive"):
         JointOptimizationConfig.from_values("0")
     with pytest.raises(ValueError, match=">= 2"):
         JointOptimizationConfig.from_values("1", 1)
+    with pytest.raises(ValueError, match="max_refinement_passes"):
+        JointOptimizationConfig.from_values("1", 2, 0)
 
 
 def test_joint_domain_uses_strict_long_period_threshold_without_mutation() -> None:
@@ -225,6 +232,41 @@ def test_pareto_filter_dominance_duplicates_peak_and_order() -> None:
     assert cpu_side in result  # 更低 Peak 不会让 (Q=12,P=9) 支配其他目标点。
 
 
+def test_archive_refines_dominated_can_endpoint_and_next_pmax() -> None:
+    initial = _synthetic_solution("initial", 10, 300, 100, 10)
+    same_q_lower_cpu = _synthetic_solution("refined", 10, 250, 100, 20)
+    both_better = _synthetic_solution("best", 9, 240, 100, 30)
+
+    endpoint = _observed_can_endpoint((initial, same_q_lower_cpu))
+    assert endpoint.assignment_hash == same_q_lower_cpu.assignment_hash
+    assert endpoint.cpu_proxy == 250
+    assert generate_epsilon_budgets(Fraction(100), endpoint.cpu_proxy, 3)[-1] == 250
+
+    endpoint = _observed_can_endpoint((initial, same_q_lower_cpu, both_better))
+    assert endpoint.assignment_hash == both_better.assignment_hash
+    pareto = filter_pareto_solutions((initial, same_q_lower_cpu, both_better))
+    assert pareto == (both_better,)
+
+
+def test_peak_refinement_recomputes_budget_and_excludes_old_point() -> None:
+    old_peak = _synthetic_solution("old-peak", 10, 10, 100, 10)
+    improved_peak = _synthetic_solution("new-peak", 50, 50, 80, 20)
+    selected = min((old_peak, improved_peak), key=_official_peak_key)
+    budget = calculate_peak_budget_us(selected.peak, ObjectiveConfig())
+    feasible = _peak_feasible_archive(
+        {
+            old_peak.assignment_hash: old_peak,
+            improved_peak.assignment_hash: improved_peak,
+        },
+        selected,
+        budget,
+    )
+
+    assert selected is improved_peak
+    assert budget == 84
+    assert feasible == (improved_peak,)
+
+
 def test_no_decision_domain_returns_one_full_solution() -> None:
     messages = (
         _message("slow_a", 0, 60_000),
@@ -259,6 +301,66 @@ def test_equal_anchor_cpu_proxy_skips_redundant_epsilon_runs() -> None:
     assert result.cpu_anchor.cpu_proxy == result.can_anchor.cpu_proxy
     assert result.epsilon_runs == ()
     assert len(result.pareto_solutions) == 1
+
+
+def test_refinement_converges_or_reports_bounded_limit() -> None:
+    converged = optimize_can_cpu_balanced(
+        "converged",
+        _mixed_messages(),
+        _config(),
+        ObjectiveConfig(),
+        joint_config=JointOptimizationConfig.from_values("1", 3, 3),
+    )
+    assert converged.refinement is not None
+    assert converged.refinement.converged
+    assert converged.refinement.passes_run == 2
+    assert converged.refinement.termination_reason == "refinement_converged"
+    assert converged.refinement.passes[0].signature == (converged.refinement.passes[1].signature)
+
+    limited = optimize_can_cpu_balanced(
+        "limited",
+        _mixed_messages(),
+        _config(),
+        ObjectiveConfig(),
+        joint_config=JointOptimizationConfig.from_values("1", 3, 1),
+    )
+    assert limited.refinement is not None
+    assert not limited.refinement.converged
+    assert limited.refinement.passes_run == 1
+    assert limited.refinement.termination_reason == "refinement_limit_reached"
+
+
+def test_joint_attempt_schedule_is_prefix_preserving() -> None:
+    def run(attempts: int):
+        return optimize_can_cpu_balanced(
+            f"prefix-{attempts}",
+            _mixed_messages(),
+            _config(attempts=attempts),
+            ObjectiveConfig(),
+            seed=23,
+            joint_config=JointOptimizationConfig.from_values(
+                "1",
+                3,
+                1,
+                endpoint_only=True,
+            ),
+        )
+
+    one = run(1)
+    three = run(3)
+    for source in (
+        "initial_peak_reference",
+        "refinement_00_peak",
+        "refinement_00_can",
+        "refinement_00_cpu",
+    ):
+        one_stage = next(item for item in one.stage_solutions if item.source == source)
+        three_stage = next(item for item in three.stage_solutions if item.source == source)
+        assert [
+            (item.seed, item.assignment_hash) for item in one_stage.search_metadata.attempts
+        ] == [
+            (item.seed, item.assignment_hash) for item in three_stage.search_metadata.attempts[:1]
+        ]
 
 
 def test_anchors_epsilon_constraints_and_determinism() -> None:
@@ -385,8 +487,25 @@ def test_joint_json_preserves_exact_fractions_and_full_audit(tmp_path) -> None:
     payload = json.loads(output.read_text(encoding="utf-8"))
 
     assert fraction_dict(Fraction(2, 3))["exact"] == "2/3"
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["configuration"]["rho"]["exact"] == "1/2"
+    assert payload["configuration"]["max_refinement_passes"] == 3
     assert payload["anchors"]["can_anchor"]["assignment_hash"]
     assert payload["anchors"]["can_anchor"]["main_function"]["groups"]
+    assert payload["anchors"]["refined_can_endpoint"]["assignment_hash"]
+    assert payload["candidate_archive"]["assignment_count"] > 0
+    assert payload["stage_results"]
+    assert payload["refinement"]["passes_run"] >= 1
+    assert payload["refinement"]["termination_reason"] in {
+        "refinement_converged",
+        "refinement_limit_reached",
+    }
+    assert payload["recommendation"]["method"] in {
+        "geometric_knee",
+        "ideal_point_fallback",
+        "unique_solution",
+        "no_interior_knee",
+    }
+    assert payload["performance"]["refinement_seconds"] >= 0
+    assert payload["performance"]["epsilon_seconds"] >= 0
     assert payload["performance"]["solver_calls"] > 0

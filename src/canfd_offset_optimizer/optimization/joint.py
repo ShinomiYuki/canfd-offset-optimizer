@@ -10,6 +10,8 @@ MainFunction partition 是全局精确的。
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 from collections import Counter, defaultdict
 from collections.abc import Mapping
@@ -53,6 +55,7 @@ from .main_function import (
     solve_main_function_partition,
 )
 from .objective import ObjectivePolicy, score_state, slot_load_threshold_us
+from .joint_analysis import JointRecommendation, select_joint_recommendation
 from .triple_search import conflict_triple_search
 
 
@@ -62,6 +65,8 @@ class JointOptimizationConfig:
 
     rho: Fraction = Fraction(1, 1)
     epsilon_points: int = 21
+    max_refinement_passes: int = 3
+    endpoint_only: bool = False
 
     def __post_init__(self) -> None:
         if self.rho <= 0:
@@ -72,15 +77,30 @@ class JointOptimizationConfig:
             or self.epsilon_points < 2
         ):
             raise ValueError("epsilon_points must be an integer >= 2")
+        if (
+            isinstance(self.max_refinement_passes, bool)
+            or not isinstance(self.max_refinement_passes, int)
+            or self.max_refinement_passes < 1
+        ):
+            raise ValueError("max_refinement_passes must be an integer >= 1")
+        if not isinstance(self.endpoint_only, bool):
+            raise ValueError("endpoint_only must be boolean")
 
     @classmethod
     def from_values(
         cls,
         rho: RhoInput = Fraction(1, 1),
         epsilon_points: int = 21,
+        max_refinement_passes: int = 3,
+        endpoint_only: bool = False,
     ) -> JointOptimizationConfig:
         """! @brief 稳定解析公开 API 的十进制 rho。"""
-        return cls(normalize_rho(rho), epsilon_points)
+        return cls(
+            normalize_rho(rho),
+            epsilon_points,
+            max_refinement_passes,
+            endpoint_only,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +197,8 @@ class JointSolution:
     source: str
     epsilon_budget: Fraction | None
     search_metadata: JointSearchMetadata
+    refinement_pass: int = -1
+    origin_attempt: int | None = None
 
     def __post_init__(self) -> None:
         if self.assignment_hash != hash_offset_assignments(self.assignments):
@@ -221,6 +243,8 @@ class JointPerformanceStats:
     unique_d_histograms: int
     solver_seconds: float
     total_seconds: float
+    refinement_seconds: float = 0.0
+    epsilon_seconds: float = 0.0
 
     @property
     def cache_hit_rate(self) -> float:
@@ -244,6 +268,49 @@ class JointOptimizationResult:
     pareto_solutions: tuple[JointSolution, ...]
     performance: JointPerformanceStats
     status: str
+    refined_peak_reference: JointSolution | None = None
+    refined_peak_budget: int | None = None
+    refined_can_endpoint: JointSolution | None = None
+    refined_cpu_endpoint: JointSolution | None = None
+    archive_solutions: tuple[JointSolution, ...] = ()
+    stage_solutions: tuple[JointSolution, ...] = ()
+    refinement: JointRefinementSummary | None = None
+    recommendation: JointRecommendation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class JointRefinementPass:
+    """! @brief 一个 refinement pass 结束后的稳定 observed-state 快照。"""
+
+    pass_index: int
+    peak_reference_hash: str
+    peak_objective: ObjectiveValue
+    peak_budget: int
+    can_endpoint_hash: str
+    can_qss: int
+    can_cpu_proxy: Fraction
+    cpu_endpoint_hash: str
+    cpu_qss: int
+    cpu_cpu_proxy: Fraction
+    epsilon_budgets: tuple[Fraction, ...]
+    epsilon_solution_hashes: tuple[str, ...]
+    pareto_hashes: tuple[str, ...]
+    pareto_objectives: tuple[tuple[int, Fraction], ...]
+    archive_size: int
+    peak_feasible_archive_size: int
+    signature: str
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class JointRefinementSummary:
+    """! @brief bounded iterative refinement 的终止与逐 pass 审计。"""
+
+    passes_run: int
+    max_passes: int
+    converged: bool
+    termination_reason: str
+    passes: tuple[JointRefinementPass, ...]
 
 
 def build_joint_domain(
@@ -682,6 +749,8 @@ def _solution_from_state(
     source: str,
     epsilon_budget: Fraction | None,
     metadata: JointSearchMetadata,
+    refinement_pass: int = -1,
+    origin_attempt: int | None = None,
 ) -> JointSolution:
     assignments = evaluator.full_assignments(state)
     return JointSolution(
@@ -695,6 +764,8 @@ def _solution_from_state(
         source,
         epsilon_budget,
         metadata,
+        refinement_pass,
+        origin_attempt,
     )
 
 
@@ -707,6 +778,7 @@ def _run_joint_search(
     base_seed: int,
     stage: str,
     incumbents: tuple[JointSolution, ...],
+    refinement_pass: int = -1,
 ) -> JointSolution:
     """Run one shared custom-comparator GCLS path for CPU anchor and ε stages."""
     started = perf_counter()
@@ -857,6 +929,7 @@ def _run_joint_search(
         stage,
         policy.epsilon_budget,
         metadata,
+        refinement_pass,
     )
 
 
@@ -929,6 +1002,228 @@ def filter_pareto_solutions(
     )
 
 
+def _archive_representative_key(solution: JointSolution) -> tuple[object, ...]:
+    return (
+        solution.refinement_pass,
+        solution.source,
+        -1 if solution.origin_attempt is None else solution.origin_attempt,
+        _assignment_signature(solution.assignments),
+    )
+
+
+def _archive_add(
+    archive: dict[str, JointSolution],
+    solution: JointSolution,
+) -> None:
+    previous = archive.get(solution.assignment_hash)
+    if previous is None or _archive_representative_key(solution) < _archive_representative_key(
+        previous
+    ):
+        archive[solution.assignment_hash] = solution
+
+
+def _solution_from_attempt(
+    attempt: JointSearchAttempt,
+    parent: JointSolution,
+    evaluator: JointEvaluator,
+    domain: JointDomain,
+) -> JointSolution:
+    decision_names = {message.name for message in domain.decision_messages}
+    decision_offsets = {
+        assignment.message_name: assignment.offset_us
+        for assignment in attempt.assignments
+        if assignment.message_name in decision_names
+    }
+    state, metrics = evaluator.evaluate_assignments(decision_offsets)
+    metadata = JointSearchMetadata(
+        stage=f"{parent.source}/attempt_{attempt.attempt_index:02d}",
+        base_seed=attempt.seed,
+        objective=parent.search_metadata.objective,
+        hard_constraints=parent.search_metadata.hard_constraints,
+        actual_attempts=1,
+        stop_reason="archive_attempt",
+        elapsed_seconds=attempt.elapsed_seconds,
+        attempts=(),
+    )
+    return _solution_from_state(
+        evaluator,
+        state,
+        metrics,
+        metadata.stage,
+        parent.epsilon_budget,
+        metadata,
+        parent.refinement_pass,
+        attempt.attempt_index,
+    )
+
+
+def _archive_stage(
+    archive: dict[str, JointSolution],
+    solution: JointSolution,
+    evaluator: JointEvaluator,
+    domain: JointDomain,
+) -> None:
+    _archive_add(archive, solution)
+    for attempt in solution.search_metadata.attempts:
+        _archive_add(
+            archive,
+            _solution_from_attempt(attempt, solution, evaluator, domain),
+        )
+
+
+def _official_peak_key(solution: JointSolution) -> tuple[object, ...]:
+    return (
+        solution.can_objective.as_tuple(),
+        _assignment_signature(solution.assignments),
+    )
+
+
+def _peak_feasible(
+    solution: JointSolution,
+    peak_reference: JointSolution,
+    peak_budget: int,
+) -> bool:
+    reference = peak_reference.can_objective
+    objective = solution.can_objective
+    return objective.steady_peak <= peak_budget and (
+        objective.violation_count,
+        objective.violation_excess,
+    ) <= (reference.violation_count, reference.violation_excess)
+
+
+def _peak_feasible_archive(
+    archive: Mapping[str, JointSolution],
+    peak_reference: JointSolution,
+    peak_budget: int,
+) -> tuple[JointSolution, ...]:
+    return tuple(
+        sorted(
+            (
+                solution
+                for solution in archive.values()
+                if _peak_feasible(solution, peak_reference, peak_budget)
+            ),
+            key=lambda item: (
+                item.qss,
+                item.cpu_proxy,
+                item.peak,
+                _assignment_signature(item.assignments),
+            ),
+        )
+    )
+
+
+def _observed_can_endpoint(
+    solutions: tuple[JointSolution, ...],
+) -> JointSolution:
+    if not solutions:
+        raise OptimizationError("joint archive contains no Peak-feasible CAN endpoint")
+    return min(
+        solutions,
+        key=lambda item: (
+            item.qss,
+            item.cpu_proxy,
+            item.can_objective.as_tuple(),
+            _assignment_signature(item.assignments),
+        ),
+    )
+
+
+def _observed_cpu_endpoint(
+    solutions: tuple[JointSolution, ...],
+) -> JointSolution:
+    if not solutions:
+        raise OptimizationError("joint archive contains no Peak-feasible CPU endpoint")
+    return min(
+        solutions,
+        key=lambda item: (
+            item.cpu_proxy,
+            item.qss,
+            item.can_objective.as_tuple(),
+            _assignment_signature(item.assignments),
+        ),
+    )
+
+
+def _warm_start_archive(
+    solutions: tuple[JointSolution, ...],
+    *,
+    epsilon_budget: Fraction | None = None,
+    required: tuple[JointSolution, ...] = (),
+    cap: int = 4,
+) -> tuple[JointSolution, ...]:
+    eligible = tuple(
+        solution
+        for solution in solutions
+        if epsilon_budget is None or solution.cpu_proxy <= epsilon_budget
+    )
+    ordered = tuple(
+        sorted(
+            (*required, *eligible),
+            key=lambda item: (
+                item.qss,
+                item.cpu_proxy,
+                item.peak,
+                _assignment_signature(item.assignments),
+            ),
+        )
+    )
+    unique: list[JointSolution] = []
+    seen: set[str] = set()
+    required_hashes = {item.assignment_hash for item in required}
+    for solution in ordered:
+        if solution.assignment_hash in seen:
+            continue
+        if len(unique) >= cap and solution.assignment_hash not in required_hashes:
+            continue
+        seen.add(solution.assignment_hash)
+        unique.append(solution)
+    return tuple(unique)
+
+
+def _refinement_signature(
+    peak_reference: JointSolution,
+    peak_budget: int,
+    can_endpoint: JointSolution,
+    cpu_endpoint: JointSolution,
+    pareto: tuple[JointSolution, ...],
+) -> str:
+    payload = {
+        "peak": {
+            "objective": peak_reference.can_objective.as_tuple(),
+            "hash": peak_reference.assignment_hash,
+        },
+        "peak_budget": peak_budget,
+        "can": {
+            "qss": can_endpoint.qss,
+            "cpu": (
+                can_endpoint.cpu_proxy.numerator,
+                can_endpoint.cpu_proxy.denominator,
+            ),
+            "hash": can_endpoint.assignment_hash,
+        },
+        "cpu": {
+            "qss": cpu_endpoint.qss,
+            "cpu": (
+                cpu_endpoint.cpu_proxy.numerator,
+                cpu_endpoint.cpu_proxy.denominator,
+            ),
+            "hash": cpu_endpoint.assignment_hash,
+        },
+        "pareto": [
+            (
+                item.qss,
+                item.cpu_proxy.numerator,
+                item.cpu_proxy.denominator,
+                item.assignment_hash,
+            )
+            for item in pareto
+        ],
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _gcls_metadata(
     stage: str,
     base_seed: int,
@@ -978,6 +1273,7 @@ def _solution_from_gcls(
     result: OptimizationResult,
     evaluator: JointEvaluator,
     domain: JointDomain,
+    refinement_pass: int = -1,
 ) -> JointSolution:
     state, metrics = evaluator.evaluate_assignments(result.offset_by_name())
     if metrics.can_objective.metrics_tuple() != result.objective.metrics_tuple():
@@ -990,6 +1286,7 @@ def _solution_from_gcls(
         source,
         None,
         metadata,
+        refinement_pass,
     )
 
 
@@ -1024,9 +1321,12 @@ def optimize_can_cpu_balanced(
     seed: int = 0,
     joint_config: JointOptimizationConfig | None = None,
 ) -> JointOptimizationResult:
-    """! @brief 运行 joint Peak/CAN/CPU anchors、ε 扫描并返回全部 Pareto 点。
+    """! @brief 运行 bounded iterative refinement 并解释最终 observed Pareto。
 
-    @note 不选择推荐点；observed Pareto 仅来自配置搜索发现的候选。
+    @details
+    ``peak_reference/can_anchor/cpu_anchor`` 保留 initial heuristic 语义；refined
+    字段保存 cumulative archive 上的最终 observed endpoints。Knee 仅在搜索和
+    convergence 完成后做 post-processing，不反馈给搜索。
     """
     started = perf_counter()
     selected_joint_config = joint_config or JointOptimizationConfig()
@@ -1046,6 +1346,14 @@ def optimize_can_cpu_balanced(
     )
     if not domain.decision_messages:
         only = _single_assignment_solution(domain, evaluator, "single_assignment", seed)
+        recommendation = select_joint_recommendation((only,))
+        refinement = JointRefinementSummary(
+            0,
+            selected_joint_config.max_refinement_passes,
+            True,
+            "no_decision_messages",
+            (),
+        )
         performance = JointPerformanceStats(
             evaluator.evaluation_count,
             evaluator.solver_calls,
@@ -1068,8 +1376,17 @@ def optimize_can_cpu_balanced(
             (only,),
             performance,
             "no_decision_messages",
+            only,
+            calculate_peak_budget_us(only.peak, objective_config),
+            only,
+            only,
+            (only,),
+            (only,),
+            refinement,
+            recommendation,
         )
 
+    archive: dict[str, JointSolution] = {}
     peak_objective = replace(objective_config, mode=ObjectiveMode.PEAK)
     peak_result = run_gcls(
         domain.decision_messages,
@@ -1083,13 +1400,13 @@ def optimize_can_cpu_balanced(
         fixed_offsets=domain.fixed_offset_map,
     )
     peak_reference = _solution_from_gcls(
-        "peak_reference",
+        "initial_peak_reference",
         seed,
         peak_result,
         evaluator,
         domain,
     )
-    peak_budget = calculate_peak_budget_us(
+    initial_peak_budget = calculate_peak_budget_us(
         peak_reference.peak,
         objective_config,
     )
@@ -1107,19 +1424,21 @@ def optimize_can_cpu_balanced(
         fixed_offsets=domain.fixed_offset_map,
     )
     can_anchor = _solution_from_gcls(
-        "can_anchor",
+        "initial_can_anchor",
         seed,
         can_result,
         evaluator,
         domain,
     )
+    _archive_stage(archive, peak_reference, evaluator, domain)
+    _archive_stage(archive, can_anchor, evaluator, domain)
     violation_guardrail = (
         peak_result.objective.violation_count,
         peak_result.objective.violation_excess,
     )
     cpu_policy = _JointPolicy(
         "cpu_proxy_then_qss",
-        peak_budget,
+        initial_peak_budget,
         violation_guardrail,
     )
     cpu_anchor = _run_joint_search(
@@ -1128,53 +1447,282 @@ def optimize_can_cpu_balanced(
         optimization_config,
         cpu_policy,
         base_seed=seed + 10_000,
-        stage="cpu_anchor",
+        stage="initial_cpu_anchor",
         incumbents=(can_anchor,),
     )
     if cpu_anchor.cpu_proxy > can_anchor.cpu_proxy:
         raise RuntimeError("CPU anchor lost the known feasible CAN anchor")
+    _archive_stage(archive, cpu_anchor, evaluator, domain)
+    stage_solutions: list[JointSolution] = [
+        peak_reference,
+        can_anchor,
+        cpu_anchor,
+    ]
 
-    epsilon_runs: list[JointEpsilonRun] = []
-    candidates: list[JointSolution] = [can_anchor, cpu_anchor]
-    status = "ok"
-    if cpu_anchor.cpu_proxy == can_anchor.cpu_proxy:
-        status = "no_observed_cpu_tradeoff"
-    else:
-        budgets = generate_epsilon_budgets(
-            cpu_anchor.cpu_proxy,
-            can_anchor.cpu_proxy,
-            selected_joint_config.epsilon_points,
+    refined_peak = min(archive.values(), key=_official_peak_key)
+    refined_budget = calculate_peak_budget_us(refined_peak.peak, objective_config)
+    feasible_archive = _peak_feasible_archive(
+        archive,
+        refined_peak,
+        refined_budget,
+    )
+    refined_can = _observed_can_endpoint(feasible_archive)
+    refined_cpu = _observed_cpu_endpoint(feasible_archive)
+    if refined_cpu.cpu_proxy > refined_can.cpu_proxy:
+        raise RuntimeError("observed CPU endpoint exceeds observed CAN endpoint CPU Proxy")
+
+    pass_records: list[JointRefinementPass] = []
+    final_epsilon_runs: tuple[JointEpsilonRun, ...] = ()
+    previous_signature: str | None = None
+    converged = False
+    termination_reason = "refinement_limit_reached"
+    epsilon_seconds = 0.0
+    refinement_started = perf_counter()
+
+    for pass_index in range(selected_joint_config.max_refinement_passes):
+        pass_started = perf_counter()
+        pass_seed_base = seed + 1_000_000 + pass_index * 100_000
+
+        peak_pass_result = run_gcls(
+            domain.decision_messages,
+            domain.slot_map,
+            optimization_config,
+            average_load_limit,
+            pass_seed_base,
+            weight_mode,
+            peak_objective,
+            fixed_messages=domain.fixed_messages,
+            fixed_offsets=domain.fixed_offset_map,
         )
-        previous = cpu_anchor
-        for index, budget in enumerate(budgets):
-            epsilon_policy = _JointPolicy(
-                "qss_then_cpu_proxy",
-                peak_budget,
-                violation_guardrail,
-                budget,
-            )
-            feasible_incumbents = tuple(
-                solution
-                for solution in (previous, cpu_anchor, can_anchor)
-                if solution.cpu_proxy <= budget
-            )
-            solution = _run_joint_search(
-                domain,
-                evaluator,
-                optimization_config,
-                epsilon_policy,
-                base_seed=seed + 100_000 + index * 1_000,
-                stage=f"epsilon_{index:02d}",
-                incumbents=feasible_incumbents,
-            )
-            run = JointEpsilonRun(index, budget, solution)
-            epsilon_runs.append(run)
-            candidates.append(solution)
-            previous = solution
-        if epsilon_runs[-1].solution.qss > can_anchor.qss:
-            raise RuntimeError("last epsilon run lost the feasible CAN anchor")
+        peak_pass = _solution_from_gcls(
+            f"refinement_{pass_index:02d}_peak",
+            pass_seed_base,
+            peak_pass_result,
+            evaluator,
+            domain,
+            pass_index,
+        )
+        _archive_stage(archive, peak_pass, evaluator, domain)
+        stage_solutions.append(peak_pass)
 
-    pareto = filter_pareto_solutions(tuple(candidates))
+        refined_peak = min(archive.values(), key=_official_peak_key)
+        refined_budget = calculate_peak_budget_us(
+            refined_peak.peak,
+            objective_config,
+        )
+        feasible_archive = _peak_feasible_archive(
+            archive,
+            refined_peak,
+            refined_budget,
+        )
+        refined_can = _observed_can_endpoint(feasible_archive)
+        violation_guardrail = (
+            refined_peak.can_objective.violation_count,
+            refined_peak.can_objective.violation_excess,
+        )
+
+        can_policy = _JointPolicy(
+            "qss_then_cpu_proxy",
+            refined_budget,
+            violation_guardrail,
+        )
+        can_refinement = _run_joint_search(
+            domain,
+            evaluator,
+            optimization_config,
+            can_policy,
+            base_seed=pass_seed_base + 20_000,
+            stage=f"refinement_{pass_index:02d}_can",
+            incumbents=_warm_start_archive(
+                feasible_archive,
+                required=(refined_can,),
+            ),
+            refinement_pass=pass_index,
+        )
+        _archive_stage(archive, can_refinement, evaluator, domain)
+        stage_solutions.append(can_refinement)
+
+        refined_peak = min(archive.values(), key=_official_peak_key)
+        refined_budget = calculate_peak_budget_us(
+            refined_peak.peak,
+            objective_config,
+        )
+        feasible_archive = _peak_feasible_archive(
+            archive,
+            refined_peak,
+            refined_budget,
+        )
+        refined_can = _observed_can_endpoint(feasible_archive)
+        refined_cpu = _observed_cpu_endpoint(feasible_archive)
+        violation_guardrail = (
+            refined_peak.can_objective.violation_count,
+            refined_peak.can_objective.violation_excess,
+        )
+        cpu_policy = _JointPolicy(
+            "cpu_proxy_then_qss",
+            refined_budget,
+            violation_guardrail,
+        )
+        cpu_refinement = _run_joint_search(
+            domain,
+            evaluator,
+            optimization_config,
+            cpu_policy,
+            base_seed=pass_seed_base + 30_000,
+            stage=f"refinement_{pass_index:02d}_cpu",
+            incumbents=_warm_start_archive(
+                feasible_archive,
+                required=(refined_cpu, refined_can),
+            ),
+            refinement_pass=pass_index,
+        )
+        _archive_stage(archive, cpu_refinement, evaluator, domain)
+        stage_solutions.append(cpu_refinement)
+
+        refined_peak = min(archive.values(), key=_official_peak_key)
+        refined_budget = calculate_peak_budget_us(
+            refined_peak.peak,
+            objective_config,
+        )
+        feasible_archive = _peak_feasible_archive(
+            archive,
+            refined_peak,
+            refined_budget,
+        )
+        refined_can = _observed_can_endpoint(feasible_archive)
+        refined_cpu = _observed_cpu_endpoint(feasible_archive)
+        if refined_cpu.cpu_proxy > refined_can.cpu_proxy:
+            raise RuntimeError("refined P_min exceeds refined P_max")
+
+        pass_epsilon_runs: list[JointEpsilonRun] = []
+        budgets: tuple[Fraction, ...] = ()
+        if (
+            not selected_joint_config.endpoint_only
+            and refined_cpu.cpu_proxy < refined_can.cpu_proxy
+        ):
+            budgets = generate_epsilon_budgets(
+                refined_cpu.cpu_proxy,
+                refined_can.cpu_proxy,
+                selected_joint_config.epsilon_points,
+            )
+            previous = refined_cpu
+            epsilon_started = perf_counter()
+            for index, budget in enumerate(budgets):
+                epsilon_required = tuple(
+                    solution
+                    for solution in (previous, refined_cpu, refined_can)
+                    if solution.cpu_proxy <= budget
+                )
+                epsilon_policy = _JointPolicy(
+                    "qss_then_cpu_proxy",
+                    refined_budget,
+                    (
+                        refined_peak.can_objective.violation_count,
+                        refined_peak.can_objective.violation_excess,
+                    ),
+                    budget,
+                )
+                solution = _run_joint_search(
+                    domain,
+                    evaluator,
+                    optimization_config,
+                    epsilon_policy,
+                    base_seed=pass_seed_base + 40_000 + index * 1_000,
+                    stage=f"refinement_{pass_index:02d}_epsilon_{index:02d}",
+                    incumbents=_warm_start_archive(
+                        feasible_archive,
+                        epsilon_budget=budget,
+                        required=epsilon_required,
+                        cap=6,
+                    ),
+                    refinement_pass=pass_index,
+                )
+                run = JointEpsilonRun(index, budget, solution)
+                pass_epsilon_runs.append(run)
+                _archive_stage(archive, solution, evaluator, domain)
+                stage_solutions.append(solution)
+                previous = solution
+            epsilon_seconds += perf_counter() - epsilon_started
+
+        # 任意 stage 都可能发现更好的正式 Peak candidate；以收紧后的 guardrail
+        # 重新筛 archive，绝不为保留旧 Pareto 点沿用过时 budget。
+        refined_peak = min(archive.values(), key=_official_peak_key)
+        refined_budget = calculate_peak_budget_us(
+            refined_peak.peak,
+            objective_config,
+        )
+        feasible_archive = _peak_feasible_archive(
+            archive,
+            refined_peak,
+            refined_budget,
+        )
+        refined_can = _observed_can_endpoint(feasible_archive)
+        refined_cpu = _observed_cpu_endpoint(feasible_archive)
+        pareto = filter_pareto_solutions(feasible_archive)
+        final_epsilon_runs = tuple(
+            run
+            for run in pass_epsilon_runs
+            if _peak_feasible(run.solution, refined_peak, refined_budget)
+        )
+        signature = _refinement_signature(
+            refined_peak,
+            refined_budget,
+            refined_can,
+            refined_cpu,
+            pareto,
+        )
+        pass_records.append(
+            JointRefinementPass(
+                pass_index,
+                refined_peak.assignment_hash,
+                refined_peak.can_objective,
+                refined_budget,
+                refined_can.assignment_hash,
+                refined_can.qss,
+                refined_can.cpu_proxy,
+                refined_cpu.assignment_hash,
+                refined_cpu.qss,
+                refined_cpu.cpu_proxy,
+                budgets,
+                tuple(run.solution.assignment_hash for run in pass_epsilon_runs),
+                tuple(solution.assignment_hash for solution in pareto),
+                tuple((solution.qss, solution.cpu_proxy) for solution in pareto),
+                len(archive),
+                len(feasible_archive),
+                signature,
+                perf_counter() - pass_started,
+            )
+        )
+        if previous_signature is not None and signature == previous_signature:
+            converged = True
+            termination_reason = "refinement_converged"
+            break
+        previous_signature = signature
+
+    refinement_seconds = perf_counter() - refinement_started
+    if not pass_records:
+        raise RuntimeError("joint refinement produced no pass")
+    pareto = filter_pareto_solutions(feasible_archive)
+    recommendation = select_joint_recommendation(pareto)
+    refinement = JointRefinementSummary(
+        len(pass_records),
+        selected_joint_config.max_refinement_passes,
+        converged,
+        termination_reason,
+        tuple(pass_records),
+    )
+    archive_solutions = tuple(
+        sorted(
+            archive.values(),
+            key=lambda item: (
+                item.refinement_pass,
+                item.source,
+                -1 if item.origin_attempt is None else item.origin_attempt,
+                _assignment_signature(item.assignments),
+            ),
+        )
+    )
+    status = "no_observed_cpu_tradeoff" if refined_cpu.cpu_proxy == refined_can.cpu_proxy else "ok"
     performance = JointPerformanceStats(
         evaluator.evaluation_count,
         evaluator.solver_calls,
@@ -1183,6 +1731,8 @@ def optimize_can_cpu_balanced(
         evaluator.unique_histogram_count,
         evaluator.solver_seconds,
         perf_counter() - started,
+        refinement_seconds,
+        epsilon_seconds,
     )
     return JointOptimizationResult(
         network_id,
@@ -1190,11 +1740,19 @@ def optimize_can_cpu_balanced(
         len(domain.decision_messages),
         len(domain.fixed_messages),
         peak_reference,
-        peak_budget,
+        initial_peak_budget,
         can_anchor,
         cpu_anchor,
-        tuple(epsilon_runs),
+        final_epsilon_runs,
         pareto,
         performance,
         status,
+        refined_peak,
+        refined_budget,
+        refined_can,
+        refined_cpu,
+        archive_solutions,
+        tuple(stage_solutions),
+        refinement,
+        recommendation,
     )

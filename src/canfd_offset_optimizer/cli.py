@@ -157,6 +157,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=21,
         help="number of exact CPU budgets including both anchors (default: 21)",
     )
+    joint.add_argument(
+        "--max-refinement-passes",
+        type=int,
+        default=3,
+        help="bounded iterative joint refinement passes (default: 3)",
+    )
+    joint.add_argument(
+        "--endpoint-only",
+        action="store_true",
+        help="diagnostic mode: refine Peak/CAN/CPU endpoints without epsilon scan",
+    )
     analyze_restarts.add_argument("--batch-count", type=int, default=30)
     analyze_restarts.add_argument("--max-attempts", type=int, default=80)
     analyze_restarts.add_argument(
@@ -691,6 +702,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 joint_config = JointOptimizationConfig.from_values(
                     args.rho,
                     args.epsilon_points,
+                    args.max_refinement_passes,
+                    args.endpoint_only,
                 )
             except (TypeError, ValueError) as exc:
                 raise CanfdOptimizerError(f"invalid joint configuration: {exc}") from exc
@@ -729,10 +742,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                     anchor.cpu_proxy,
                     anchor.main_function_count,
                 )
+            if (
+                joint_result.refined_can_endpoint is not None
+                and joint_result.refined_cpu_endpoint is not None
+                and joint_result.refinement is not None
+            ):
+                logger.info(
+                    "Refinement passes=%d converged=%s reason=%s",
+                    joint_result.refinement.passes_run,
+                    joint_result.refinement.converged,
+                    joint_result.refinement.termination_reason,
+                )
+                logger.info(
+                    "Observed CAN endpoint Peak=%d Qss=%d CPU=%s",
+                    joint_result.refined_can_endpoint.peak,
+                    joint_result.refined_can_endpoint.qss,
+                    joint_result.refined_can_endpoint.cpu_proxy,
+                )
+                logger.info(
+                    "Observed CPU endpoint Peak=%d Qss=%d CPU=%s",
+                    joint_result.refined_cpu_endpoint.peak,
+                    joint_result.refined_cpu_endpoint.qss,
+                    joint_result.refined_cpu_endpoint.cpu_proxy,
+                )
             for index, solution in enumerate(joint_result.pareto_solutions):
                 logger.info(
-                    "Pareto[%d] source=%s Peak=%d Qss=%d CPU=%s "
-                    "MainFunctions=%d hash=%s",
+                    "Pareto[%d] source=%s Peak=%d Qss=%d CPU=%s MainFunctions=%d hash=%s",
                     index,
                     solution.source,
                     solution.peak,
@@ -741,6 +776,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                     solution.main_function_count,
                     solution.assignment_hash,
                 )
+            if joint_result.recommendation is not None:
+                logger.info(
+                    "Recommendation method=%s hash=%s",
+                    joint_result.recommendation.method,
+                    joint_result.recommendation.solution_hash,
+                )
+                if joint_result.recommendation.has_recommendation:
+                    logger.info(
+                        "Recommended Qss=%s CPU=%s Peak=%s MainFunctions=%s",
+                        joint_result.recommendation.qss,
+                        joint_result.recommendation.cpu_proxy,
+                        joint_result.recommendation.peak,
+                        joint_result.recommendation.main_function_count,
+                    )
             logger.info("Joint JSON report written to %s", result_path)
         elif args.command == "compare":
             _run_comparison_bundle(output, loaded, config, args.seed, report_prefix)
