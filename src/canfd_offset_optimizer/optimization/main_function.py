@@ -35,7 +35,7 @@ def _require_plain_int(value: object, field_name: str) -> int:
     return value
 
 
-def _normalize_rho(value: RhoInput) -> Fraction:
+def normalize_rho(value: RhoInput) -> Fraction:
     """! @brief 把公开 API 的 rho 转为严格正的精确有理数。
 
     @details
@@ -156,11 +156,7 @@ class MainFunctionSolveResult:
             (group.group_proxy_cost for group in self.groups), start=Fraction()
         ):
             raise ValueError("cpu_proxy must equal the sum of group_proxy_cost")
-        keys = [
-            message.message_key
-            for group in self.groups
-            for message in group.messages
-        ]
+        keys = [message.message_key for group in self.groups for message in group.messages]
         if len(keys) != len(set(keys)):
             raise ValueError("each message must occur in exactly one group")
 
@@ -260,20 +256,12 @@ def _solve_histogram_exact(
         index = lowbit.bit_length() - 1
         previous = mask ^ lowbit
         subset_gcd[mask] = (
-            d_values[index]
-            if previous == 0
-            else gcd(subset_gcd[previous], d_values[index])
+            d_values[index] if previous == 0 else gcd(subset_gcd[previous], d_values[index])
         )
         subset_count[mask] = subset_count[previous] + counts[index]
-        subset_cost[mask] = (
-            (rho + subset_count[mask])
-            * _MICROSECONDS_PER_SECOND
-            / subset_gcd[mask]
-        )
+        subset_cost[mask] = (rho + subset_count[mask]) * _MICROSECONDS_PER_SECOND / subset_gcd[mask]
         subset_signature[mask] = tuple(
-            d_values[bit_index]
-            for bit_index in range(type_count)
-            if mask & (1 << bit_index)
+            d_values[bit_index] for bit_index in range(type_count) if mask & (1 << bit_index)
         )
 
     dp_cost = [Fraction()] * state_count
@@ -289,9 +277,7 @@ def _solve_histogram_exact(
             group_mask = submask | anchor
             remaining = mask ^ group_mask
             candidate_cost = subset_cost[group_mask] + dp_cost[remaining]
-            candidate_groups = tuple(
-                sorted((subset_signature[group_mask],) + dp_groups[remaining])
-            )
+            candidate_groups = tuple(sorted((subset_signature[group_mask],) + dp_groups[remaining]))
             if (
                 best_cost is None
                 or best_groups is None
@@ -366,37 +352,26 @@ def solve_main_function_partition(
     keys = [message.message_key for message in items]
     if len(keys) != len(set(keys)):
         raise ValueError("message_key values must be unique")
-    normalized_rho = _normalize_rho(rho)
+    normalized_rho = normalize_rho(rho)
 
     by_d: dict[int, list[MainFunctionMessage]] = {}
     for message in items:
         by_d.setdefault(message.d_us, []).append(message)
     for bucket in by_d.values():
         bucket.sort(key=lambda message: message.message_key)
-    histogram = tuple(
-        (d_us, len(by_d[d_us]))
-        for d_us in sorted(by_d)
-    )
+    histogram = tuple((d_us, len(by_d[d_us])) for d_us in sorted(by_d))
 
     type_solution = _solve_histogram_cached(histogram, normalized_rho)
     groups: list[MainFunctionGroup] = []
     for d_types in type_solution.groups:
         group_messages = tuple(
             sorted(
-                (
-                    message
-                    for d_us in d_types
-                    for message in by_d[d_us]
-                ),
+                (message for d_us in d_types for message in by_d[d_us]),
                 key=lambda message: message.message_key,
             )
         )
         timebase_us = calculate_group_timebase_us(group_messages)
-        group_cost = (
-            (normalized_rho + len(group_messages))
-            * _MICROSECONDS_PER_SECOND
-            / timebase_us
-        )
+        group_cost = (normalized_rho + len(group_messages)) * _MICROSECONDS_PER_SECOND / timebase_us
         groups.append(
             MainFunctionGroup(
                 messages=group_messages,

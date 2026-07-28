@@ -25,6 +25,7 @@ from .diagnostics.restart_study import DEFAULT_CHECKPOINTS, run_restart_study
 from .diagnostics.tolerance_study import DEFAULT_TOLERANCES, run_tolerance_scan
 from .diagnostics.triple_ablation import run_triple_ablation
 from .exceptions import CanfdOptimizerError
+from .joint_service import run_joint_optimization
 from .models import (
     AlgorithmComparisonResult,
     ObjectiveMode,
@@ -37,6 +38,7 @@ from .optimization.comparison import (
     extract_peak_optimization_result,
 )
 from .optimization.gcls import run_gcls
+from .optimization.joint import JointOptimizationConfig
 from .parsers.project_loader import LoadedProject, load_project
 from .reporting.comparison_plotter import write_comparison_plots
 from .reporting.comparison_writer import (
@@ -46,6 +48,7 @@ from .reporting.comparison_writer import (
 from .reporting.congestion_plotter import write_congestion_plots
 from .reporting.csv_writer import write_csv_reports
 from .reporting.filenames import infer_report_prefix
+from .reporting.joint_writer import write_joint_result
 from .reporting.objective_mode_plotter import write_objective_mode_plot
 from .reporting.objective_mode_writer import (
     write_all_network_objective_report,
@@ -69,6 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     optimize = subparsers.add_parser("optimize", help="optimize periodic message offsets")
+    joint = subparsers.add_parser(
+        "joint",
+        help="compute CAN/CPU anchors and an exact epsilon-constraint Pareto set",
+    )
     compare = subparsers.add_parser("compare", help="compare optimization stages")
     compare_weights = subparsers.add_parser(
         "compare-weights",
@@ -93,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     all_commands = (
         optimize,
+        joint,
         compare,
         compare_weights,
         analyze_restarts,
@@ -138,6 +146,17 @@ def build_parser() -> argparse.ArgumentParser:
             choices=tuple(mode.value for mode in ObjectiveMode),
             help="override objective.mode for this run",
         )
+    joint.add_argument(
+        "--rho",
+        default="1",
+        help="positive exact MainFunction fixed-call cost, for example 1 or 0.25",
+    )
+    joint.add_argument(
+        "--epsilon-points",
+        type=int,
+        default=21,
+        help="number of exact CPU budgets including both anchors (default: 21)",
+    )
     analyze_restarts.add_argument("--batch-count", type=int, default=30)
     analyze_restarts.add_argument("--max-attempts", type=int, default=80)
     analyze_restarts.add_argument(
@@ -179,9 +198,7 @@ def _with_restart_override(config: ProjectConfig, restarts: int | None) -> Proje
     )
 
 
-def _with_restart_override_loaded(
-    loaded: LoadedProject, restarts: int | None
-) -> LoadedProject:
+def _with_restart_override_loaded(loaded: LoadedProject, restarts: int | None) -> LoadedProject:
     """Apply ``--restarts`` while preserving its requested value and source for reports."""
     if restarts is None:
         return loaded
@@ -227,16 +244,14 @@ def _with_restart_policy_overrides(
     mode = RestartMode(mode_value)
     if mode is RestartMode.FIXED:
         if total_attempts is None or total_attempts <= 0:
-            raise ValueError(
-                "--restart-mode fixed requires positive --restart-attempts"
-            )
+            raise ValueError("--restart-mode fixed requires positive --restart-attempts")
         selected = RestartPolicy.fixed(total_attempts, source_kind="cli")
     else:
         if total_attempts is not None:
-            raise ValueError(
-                "--restart-attempts is only valid with --restart-mode fixed"
-            )
-        selected = replace(existing, mode=RestartMode.ADAPTIVE, total_attempts=None, source_kind="cli")
+            raise ValueError("--restart-attempts is only valid with --restart-mode fixed")
+        selected = replace(
+            existing, mode=RestartMode.ADAPTIVE, total_attempts=None, source_kind="cli"
+        )
     sources = dict(loaded.network.field_sources)
     sources["restart_policy"] = "CLI --restart-mode override"
     overrides = dict(loaded.network.cli_overrides)
@@ -247,9 +262,7 @@ def _with_restart_policy_overrides(
         loaded,
         config=replace(
             loaded.config,
-            optimization=replace(
-                loaded.config.optimization, restart_policy=selected
-            ),
+            optimization=replace(loaded.config.optimization, restart_policy=selected),
         ),
         network=replace(
             loaded.network,
@@ -278,9 +291,7 @@ def _with_objective_mode(loaded: LoadedProject, mode: ObjectiveMode) -> LoadedPr
     overrides = dict(loaded.network.cli_overrides)
     overrides["objective_mode_experiment"] = mode.value
     if loaded.config.objective.mode is not mode:
-        warnings += (
-            f"compare-weights selects physical objective.mode={mode.value}",
-        )
+        warnings += (f"compare-weights selects physical objective.mode={mode.value}",)
     return replace(
         loaded,
         config=replace(
@@ -348,9 +359,7 @@ def _run_comparison_bundle(
         report_prefix,
     )
     write_congestion_plots(output, loaded.network, result, report_prefix)
-    write_comparison_summary(
-        output, loaded.network, config, result, report_prefix
-    )
+    write_comparison_summary(output, loaded.network, config, result, report_prefix)
     write_restart_jsonl(
         output / "results" / f"{report_prefix}_restart_records.jsonl",
         result.restart_records,
@@ -364,9 +373,7 @@ def _run_comparison_bundle(
     )
     if result.peak_reference_restart_records:
         write_restart_jsonl(
-            output
-            / "results"
-            / f"{report_prefix}_peak_reference_restart_records.jsonl",
+            output / "results" / f"{report_prefix}_peak_reference_restart_records.jsonl",
             result.peak_reference_restart_records,
             experiment_id=(
                 f"{report_prefix}-{loaded.network.weight_mode.value}-peak-reference-{seed}"
@@ -385,9 +392,7 @@ def _additional_log_file(path: Path) -> Iterator[None]:
     """Mirror one weight-mode run into its own complete log file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(path, encoding="utf-8", mode="w")
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()
     root.addHandler(handler)
     try:
@@ -445,8 +450,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 channel_override=args.channel,
                 objective_mode_override=(
                     ObjectiveMode.BALANCED
-                    if args.command
-                    in {"analyze-candidate-pools", "analyze-triple-ablation"}
+                    if args.command in {"analyze-candidate-pools", "analyze-triple-ablation"}
                     else ObjectiveMode.PEAK
                 ),
             )
@@ -475,9 +479,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 try:
                     checkpoints = tuple(
-                        int(value.strip())
-                        for value in args.checkpoints.split(",")
-                        if value.strip()
+                        int(value.strip()) for value in args.checkpoints.split(",") if value.strip()
                     )
                 except ValueError as exc:
                     raise CanfdOptimizerError(
@@ -526,9 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif args.command == "analyze-candidate-pools":
                 try:
                     pool_sizes = tuple(
-                        int(value.strip())
-                        for value in args.pool_sizes.split(",")
-                        if value.strip()
+                        int(value.strip()) for value in args.pool_sizes.split(",") if value.strip()
                     )
                 except ValueError as exc:
                     raise CanfdOptimizerError(
@@ -653,9 +653,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if output.name.casefold() == report_prefix.casefold():
                 aggregate_path = write_all_network_offsets_report(output.parent)
                 logger.info("All-network message table written to %s", aggregate_path)
-                objective_aggregate_path = write_all_network_objective_report(
-                    output.parent
-                )
+                objective_aggregate_path = write_all_network_objective_report(output.parent)
                 logger.info(
                     "All-network objective table written to %s",
                     objective_aggregate_path,
@@ -669,8 +667,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         objective_mode_override = (
             ObjectiveMode(args.objective_mode)
-            if args.command in {"optimize", "compare"}
-            and args.objective_mode is not None
+            if args.command in {"optimize", "compare"} and args.objective_mode is not None
             else None
         )
         loaded = load_project(
@@ -689,7 +686,63 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         config = loaded.config
         _log_loaded(loaded)
-        if args.command == "compare":
+        if args.command == "joint":
+            try:
+                joint_config = JointOptimizationConfig.from_values(
+                    args.rho,
+                    args.epsilon_points,
+                )
+            except (TypeError, ValueError) as exc:
+                raise CanfdOptimizerError(f"invalid joint configuration: {exc}") from exc
+            joint_result = run_joint_optimization(
+                loaded,
+                report_prefix,
+                seed=args.seed,
+                joint_config=joint_config,
+            )
+            result_path = write_joint_result(
+                output,
+                joint_result,
+                report_prefix,
+            )
+            logger.info(
+                "Joint optimization status=%s Pareto=%d evaluations=%d solver_calls=%d",
+                joint_result.status,
+                len(joint_result.pareto_solutions),
+                joint_result.performance.joint_evaluations,
+                joint_result.performance.solver_calls,
+            )
+            logger.info(
+                "Joint Peak reference=%d budget=%d",
+                joint_result.peak_reference.peak,
+                joint_result.peak_budget,
+            )
+            for anchor_name, anchor in (
+                ("CAN", joint_result.can_anchor),
+                ("CPU", joint_result.cpu_anchor),
+            ):
+                logger.info(
+                    "%s anchor Peak=%d Qss=%d CPU=%s MainFunctions=%d",
+                    anchor_name,
+                    anchor.peak,
+                    anchor.qss,
+                    anchor.cpu_proxy,
+                    anchor.main_function_count,
+                )
+            for index, solution in enumerate(joint_result.pareto_solutions):
+                logger.info(
+                    "Pareto[%d] source=%s Peak=%d Qss=%d CPU=%s "
+                    "MainFunctions=%d hash=%s",
+                    index,
+                    solution.source,
+                    solution.peak,
+                    solution.qss,
+                    solution.cpu_proxy,
+                    solution.main_function_count,
+                    solution.assignment_hash,
+                )
+            logger.info("Joint JSON report written to %s", result_path)
+        elif args.command == "compare":
             _run_comparison_bundle(output, loaded, config, args.seed, report_prefix)
         else:
             result = run_gcls(
@@ -715,9 +768,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 config.model.average_load_limit,
                 report_prefix,
             )
-            write_summary(
-                output, loaded.network, config, result, report_prefix
-            )
+            write_summary(output, loaded.network, config, result, report_prefix)
             write_restart_jsonl(
                 output / "results" / f"{report_prefix}_restart_records.jsonl",
                 result.restart_records,
@@ -731,9 +782,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if result.peak_reference_restart_records:
                 write_restart_jsonl(
-                    output
-                    / "results"
-                    / f"{report_prefix}_peak_reference_restart_records.jsonl",
+                    output / "results" / f"{report_prefix}_peak_reference_restart_records.jsonl",
                     result.peak_reference_restart_records,
                     experiment_id=(
                         f"{report_prefix}-{loaded.network.weight_mode.value}-"
@@ -762,3 +811,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(f"unexpected error: {exc} (details: {log_path})", file=sys.stderr)
         return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

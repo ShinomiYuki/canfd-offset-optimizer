@@ -20,17 +20,42 @@ class SearchState:
     @invariant 数组非负；每条已应用报文恰好有一个合法 Offset；稳态总量守恒。
     """
 
-    def __init__(self, messages: tuple[CanMessage, ...], slot_map: SlotMap) -> None:
+    def __init__(
+        self,
+        messages: tuple[CanMessage, ...],
+        slot_map: SlotMap,
+        fixed_messages: tuple[CanMessage, ...] = (),
+        fixed_offsets: Mapping[str, int] | None = None,
+    ) -> None:
         self.messages = messages
+        self.fixed_messages = fixed_messages
         self.slot_map = slot_map
         self._by_name = {message.name: message for message in messages}
         if len(self._by_name) != len(messages):
             raise OptimizationError("message names must be unique")
+        fixed_by_name = {message.name: message for message in fixed_messages}
+        if len(fixed_by_name) != len(fixed_messages):
+            raise OptimizationError("fixed message names must be unique")
+        if self._by_name.keys() & fixed_by_name.keys():
+            raise OptimizationError("decision and fixed message sets must be disjoint")
+        selected_fixed_offsets = dict(fixed_offsets or {})
+        if selected_fixed_offsets.keys() != fixed_by_name.keys():
+            raise OptimizationError("fixed_offsets must assign every fixed message exactly once")
+        self.fixed_offsets = selected_fixed_offsets
         self.steady_slot_loads = [0] * slot_map.steady_window.slot_count
         self.startup_slot_loads = [0] * slot_map.startup_window.slot_count
         self.steady_slot_counts = [0] * slot_map.steady_window.slot_count
         self.startup_slot_counts = [0] * slot_map.startup_window.slot_count
         self.current_offsets: dict[str, int] = {}
+        for message in fixed_messages:
+            offset_us = selected_fixed_offsets[message.name]
+            if offset_us not in message.allowed_offsets_us:
+                raise OptimizationError(f"illegal fixed offset {offset_us} for {message.name}")
+            try:
+                hits = self.slot_map.for_candidate(message, offset_us)
+            except ValueError as exc:
+                raise OptimizationError(str(exc)) from exc
+            self._change_contribution(message, hits.steady, hits.startup, 1)
 
     def apply(self, message: CanMessage, offset_us: int) -> None:
         """! @brief 将尚未分配的报文贡献加入候选 Offset。
@@ -86,7 +111,12 @@ class SearchState:
 
     def clone(self) -> SearchState:
         """! @brief 返回可独立修改的逐元素状态副本。"""
-        cloned = SearchState(self.messages, self.slot_map)
+        cloned = SearchState(
+            self.messages,
+            self.slot_map,
+            self.fixed_messages,
+            self.fixed_offsets,
+        )
         cloned.steady_slot_loads = self.steady_slot_loads.copy()
         cloned.startup_slot_loads = self.startup_slot_loads.copy()
         cloned.steady_slot_counts = self.steady_slot_counts.copy()
@@ -127,7 +157,17 @@ class SearchState:
             raise OptimizationError("state does not contain a complete assignment")
         expected_steady_load = 0
         expected_steady_count = 0
-        rebuilt = SearchState(self.messages, self.slot_map)
+        rebuilt = SearchState(
+            self.messages,
+            self.slot_map,
+            self.fixed_messages,
+            self.fixed_offsets,
+        )
+        for message in self.fixed_messages:
+            fixed_offset = self.fixed_offsets[message.name]
+            release_count = len(self.slot_map.for_candidate(message, fixed_offset).steady)
+            expected_steady_count += release_count
+            expected_steady_load += release_count * message.frame_time_us
         for message in self.messages:
             offset = self.current_offsets.get(message.name)
             if offset is None:
@@ -135,7 +175,11 @@ class SearchState:
             if offset not in message.allowed_offsets_us:
                 raise OptimizationError(f"illegal current offset for {message.name}")
             release_count = len(self.slot_map.for_candidate(message, offset).steady)
-            expected_cycles = self.slot_map.steady_window.slot_count * self.slot_map.steady_window.slot_width_us // message.cycle_time_us
+            expected_cycles = (
+                self.slot_map.steady_window.slot_count
+                * self.slot_map.steady_window.slot_width_us
+                // message.cycle_time_us
+            )
             if release_count != expected_cycles:
                 raise OptimizationError(f"steady release conservation failed for {message.name}")
             expected_steady_count += release_count
@@ -190,8 +234,7 @@ class SearchState:
                         f"precomputed slot index {slot} is invalid for {message.name}"
                     )
                 if direction < 0 and (
-                    loads[slot] < occurrences * message.frame_time_us
-                    or counts[slot] < occurrences
+                    loads[slot] < occurrences * message.frame_time_us or counts[slot] < occurrences
                 ):
                     raise OptimizationError(
                         f"removing {message.name} would make slot state negative"

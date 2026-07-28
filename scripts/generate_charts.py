@@ -5,6 +5,7 @@ Generates:
 2. Peak vs Balanced vs Variance for DK (Qss/peak trade-off)
 3. Peak vs Balanced vs Variance for IC (biggest variance Qss improvement)
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 

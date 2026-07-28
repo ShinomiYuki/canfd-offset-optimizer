@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ..models import CanMessage
 from ..timeline.slot_map import SlotMap
 from ..timeline.state import SearchState
@@ -33,6 +35,9 @@ def greedy_construct(
     slot_map: SlotMap,
     policy: ObjectivePolicy | int | None,
     ordered_messages: tuple[CanMessage, ...] | None = None,
+    *,
+    fixed_messages: tuple[CanMessage, ...] = (),
+    fixed_offsets: Mapping[str, int] | None = None,
 ) -> tuple[SearchState, int]:
     """! @brief 对每条报文选择令当前词典序目标最小的候选 Offset。
 
@@ -42,7 +47,7 @@ def greedy_construct(
     order = greedy_order(messages) if ordered_messages is None else ordered_messages
     if set(order) != set(messages) or len(order) != len(messages):
         raise ValueError("ordered_messages must be a permutation of messages")
-    state = SearchState(messages, slot_map)
+    state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
     evaluations = 0
     for message in order:
         best_offset: int | None = None

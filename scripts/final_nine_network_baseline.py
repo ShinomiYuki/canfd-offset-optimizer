@@ -13,6 +13,7 @@
 - candidate_pool_size = 1 (默认关闭)
 - 3-opt = off
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ import json
 import math
 import sys
 import time
-from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,13 +29,7 @@ _PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT / "src"))
 
 # -- project imports --------------------------------------------------------
-from canfd_offset_optimizer.config import (
-    ObjectiveConfig,
-    OptimizationConfig,
-    ProjectConfig,
-    RestartMode,
-    RestartPolicy,
-)
+from canfd_offset_optimizer.config import ObjectiveConfig
 from canfd_offset_optimizer.models import (
     AlgorithmComparisonResult,
     ComparisonStageResult,
@@ -307,9 +301,9 @@ def main() -> None:
     print("=" * 70)
     print("  Final Nine-Network Baseline Regression")
     print("=" * 70)
-    print(f"  Commit: 0e3e6d6")
+    print("  Commit: 0e3e6d6")
     print(f"  Seed:   {SEED}")
-    print(f"  Config: adaptive 20/10/20/80, balanced tolerance 0.05")
+    print("  Config: adaptive 20/10/20/80, balanced tolerance 0.05")
     print(f"  Networks: {', '.join(NETWORKS)}")
     print()
 
@@ -529,7 +523,7 @@ def _write_report(results: list[dict], metadata: dict, path: Path) -> None:
     lines.append("")
     lines.append(f"**生成时间：** {metadata['finished_at']}")
     lines.append(f"**Commit：** `{metadata['commit'][:8]}`")
-    lines.append(f"**配置：** seed=0, adaptive 20/10/20/80, balanced tolerance 5%")
+    lines.append("**配置：** seed=0, adaptive 20/10/20/80, balanced tolerance 5%")
     lines.append("")
 
     # Summary table

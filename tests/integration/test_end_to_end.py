@@ -69,6 +69,40 @@ def test_cli_generates_complete_output(tmp_path: Path) -> None:
     assert tuple(summary["objective_after"]) <= tuple(summary["objective_before"])
 
 
+def test_joint_cli_generates_exact_audited_json(tmp_path: Path) -> None:
+    output = tmp_path / "joint-output"
+    assert main(
+        [
+            "joint",
+            "--dbc",
+            str(FIXTURES / "dbc" / "four_messages.dbc"),
+            "--arxml",
+            str(FIXTURES / "arxml"),
+            "--config",
+            str(FIXTURES / "config" / "project.yaml"),
+            "--output",
+            str(output),
+            "--seed",
+            "42",
+            "--restarts",
+            "0",
+            "--rho",
+            "0.5",
+            "--epsilon-points",
+            "3",
+        ]
+    ) == 0
+    summary_path = output / "results" / "joint-output_joint_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["schema_version"] == 1
+    assert summary["configuration"]["rho"]["exact"] == "1/2"
+    assert summary["configuration"]["epsilon_points"] == 3
+    assert summary["anchors"]["peak_reference"]["assignments"]
+    assert summary["anchors"]["can_anchor"]["main_function"]["groups"]
+    assert summary["performance"]["joint_evaluations"] > 0
+    assert (output / "logs" / "run.log").is_file()
+
+
 def test_candidate_pool_diagnostic_cli_generates_audit_outputs(tmp_path: Path) -> None:
     output = tmp_path / "candidate_pool"
     assert main(

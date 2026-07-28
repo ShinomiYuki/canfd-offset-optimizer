@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from math import ceil
@@ -128,9 +129,7 @@ def _peak_candidate_archive(
     ]
     best_hash = hash_offset_assignments(best_assignments)
     if all(candidate.assignment_hash != best_hash for candidate in candidates):
-        candidates.append(
-            _peak_candidate(messages, best_assignments, best_objective, -1, None)
-        )
+        candidates.append(_peak_candidate(messages, best_assignments, best_objective, -1, None))
     unique: dict[str, PeakCandidate] = {}
     for candidate in candidates:
         previous = unique.get(candidate.assignment_hash)
@@ -275,11 +274,13 @@ def _run_gcls_with_policy(
     peak_reference_result: OptimizationResult | None = None,
     restart_policy: RestartPolicy | None = None,
     restart_observer: Callable[[RestartRecord], None] | None = None,
+    fixed_messages: tuple[CanMessage, ...] = (),
+    fixed_offsets: Mapping[str, int] | None = None,
 ) -> OptimizationResult:
     started = perf_counter()
     selected_restart_policy = restart_policy or config.restart_policy
     attempt_limit = selected_restart_policy.attempt_limit
-    baseline_state = SearchState(messages, slot_map)
+    baseline_state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
     for message in messages:
         original = message.original_offset_us
         baseline_offset = (
@@ -291,9 +292,7 @@ def _run_gcls_with_policy(
     initial_score = score_state(baseline_state, policy)
     # 先把合法原始配置也推进到同一局部最优条件；这样既不会推荐更差结果，
     # 也不会因直接保留一个未经搜索的基线而破坏最终 1-opt 不变量。
-    total = relocate_single_messages(
-        baseline_state, policy, greedy_order(messages)
-    )
+    total = relocate_single_messages(baseline_state, policy, greedy_order(messages))
     total += conflict_pair_search(
         baseline_state,
         policy,
@@ -317,7 +316,7 @@ def _run_gcls_with_policy(
         return _is_balanced_candidate_eligible(score, reference_objective)
 
     if incumbent_assignments is not None:
-        incumbent_state = SearchState(messages, slot_map)
+        incumbent_state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
         incumbent_state.apply_assignments(incumbent_assignments)
         # The untouched strict-peak assignment is the guaranteed feasible fallback.
         incumbent_initial_score = score_state(incumbent_state, policy)
@@ -332,9 +331,7 @@ def _run_gcls_with_policy(
         ):
             best_state = incumbent_state.clone()
             best_score = incumbent_initial_score
-        incumbent_stats = relocate_single_messages(
-            incumbent_state, policy, greedy_order(messages)
-        )
+        incumbent_stats = relocate_single_messages(incumbent_state, policy, greedy_order(messages))
         incumbent_stats += conflict_pair_search(
             incumbent_state,
             policy,
@@ -365,7 +362,14 @@ def _run_gcls_with_policy(
         attempt_started = perf_counter()
         actual_seed = seed + attempt
         order = greedy_order(messages) if attempt == 0 else _restart_order(messages, actual_seed)
-        state, evaluations = greedy_construct(messages, slot_map, policy, order)
+        state, evaluations = greedy_construct(
+            messages,
+            slot_map,
+            policy,
+            order,
+            fixed_messages=fixed_messages,
+            fixed_offsets=fixed_offsets,
+        )
         greedy_score = score_state(state, policy)
         if first_greedy_score is None:
             first_greedy_score = greedy_score
@@ -384,20 +388,18 @@ def _run_gcls_with_policy(
         score = score_state(state, policy)
         attempt_assignments = _snapshot_assignments(state)
         record = RestartRecord(
-                attempt_index=attempt,
-                attempt_kind=(
-                    RestartAttemptKind.DETERMINISTIC
-                    if attempt == 0
-                    else RestartAttemptKind.RANDOM
-                ),
-                seed=actual_seed,
-                objective=score,
-                assignments=attempt_assignments,
-                assignment_hash=hash_offset_assignments(attempt_assignments),
-                elapsed_seconds=perf_counter() - attempt_started,
-                evaluation_count=stats.evaluations,
-                accepted_moves=stats.accepted_moves,
-            )
+            attempt_index=attempt,
+            attempt_kind=(
+                RestartAttemptKind.DETERMINISTIC if attempt == 0 else RestartAttemptKind.RANDOM
+            ),
+            seed=actual_seed,
+            objective=score,
+            assignments=attempt_assignments,
+            assignment_hash=hash_offset_assignments(attempt_assignments),
+            elapsed_seconds=perf_counter() - attempt_started,
+            evaluation_count=stats.evaluations,
+            accepted_moves=stats.accepted_moves,
+        )
         records.append(record)
         if restart_observer is not None:
             restart_observer(record)
@@ -501,6 +503,14 @@ def _peak_budget(reference_peak_us: int, objective: ObjectiveConfig) -> int:
     return reference_peak_us + int(tolerance.value)
 
 
+def calculate_peak_budget_us(
+    reference_peak_us: int,
+    objective: ObjectiveConfig,
+) -> int:
+    """! @brief 复用正式 Balanced 语义计算 Peak hard guardrail。"""
+    return _peak_budget(reference_peak_us, objective)
+
+
 def _run_balanced_candidate_pool(
     messages: tuple[CanMessage, ...],
     slot_map: SlotMap,
@@ -509,6 +519,8 @@ def _run_balanced_candidate_pool(
     reference: OptimizationResult,
     candidates: tuple[PeakCandidate, ...],
     restart_observer: Callable[[RestartRecord], None] | None,
+    fixed_messages: tuple[CanMessage, ...] = (),
+    fixed_offsets: Mapping[str, int] | None = None,
 ) -> OptimizationResult:
     """Run one configured Balanced local search from each selected Peak candidate."""
     started = perf_counter()
@@ -517,7 +529,7 @@ def _run_balanced_candidate_pool(
     if not candidates:
         raise ValueError("candidate-pool search requires at least one candidate")
 
-    baseline_state = SearchState(messages, slot_map)
+    baseline_state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
     for message in messages:
         original = message.original_offset_us
         baseline_state.apply(
@@ -539,7 +551,7 @@ def _run_balanced_candidate_pool(
 
     for pool_index, candidate in enumerate(candidates):
         attempt_started = perf_counter()
-        state = SearchState(messages, slot_map)
+        state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
         state.apply_assignments(
             {item.message_name: item.offset_us for item in candidate.assignments}
         )
@@ -609,9 +621,7 @@ def _run_balanced_candidate_pool(
         if restart_observer is not None:
             restart_observer(restart_record)
 
-        eligible = _is_balanced_candidate_eligible(
-            objective_after, reference.objective
-        )
+        eligible = _is_balanced_candidate_eligible(objective_after, reference.objective)
         improves_best = best_score is None or objective_after < best_score
         if best_score is not None and objective_after == best_score:
             assert best_state is not None
@@ -665,6 +675,9 @@ def run_gcls(
     objective_config: ObjectiveConfig | None = None,
     peak_reference_result: OptimizationResult | None = None,
     restart_observer: Callable[[RestartRecord], None] | None = None,
+    *,
+    fixed_messages: tuple[CanMessage, ...] = (),
+    fixed_offsets: Mapping[str, int] | None = None,
 ) -> OptimizationResult:
     """! @brief 按固定目标模式运行 GCLS；balanced 自动执行严格峰值预阶段。
 
@@ -698,6 +711,8 @@ def run_gcls(
             incumbent_assignments,
             restart_policy=selected_restart_policy,
             restart_observer=restart_observer,
+            fixed_messages=fixed_messages,
+            fixed_offsets=fixed_offsets,
         )
     reference = deepcopy(
         peak_reference_result
@@ -708,18 +723,17 @@ def run_gcls(
             ObjectivePolicy(ObjectiveMode.PEAK, load_threshold),
             seed,
             restart_observer=restart_observer,
+            fixed_messages=fixed_messages,
+            fixed_offsets=fixed_offsets,
         )
     )
     if reference.objective.mode is not ObjectiveMode.PEAK:
         raise ValueError("balanced peak reference must use peak objective mode")
     expected_reference_seeds = tuple(
-        seed + attempt
-        for attempt in range(reference.restart_execution.actual_attempts)
+        seed + attempt for attempt in range(reference.restart_execution.actual_attempts)
     )
     if tuple(record.seed for record in reference.restart_records) != expected_reference_seeds:
-        raise ValueError(
-            "balanced peak reference must use the same seed sequence"
-        )
+        raise ValueError("balanced peak reference must use the same seed sequence")
     budget = _peak_budget(reference.objective.steady_peak, objective)
     candidates = select_peak_candidates(
         reference,
@@ -734,15 +748,13 @@ def run_gcls(
         reference,
         candidates,
         restart_observer,
+        fixed_messages,
+        fixed_offsets,
     )
-    failures = _balanced_guardrail_failures(
-        balanced.objective, reference.objective, budget
-    )
+    failures = _balanced_guardrail_failures(balanced.objective, reference.objective, budget)
     if failures:
-        fallback_policy = ObjectivePolicy(
-            ObjectiveMode.BALANCED, load_threshold, budget
-        )
-        fallback_state = SearchState(messages, slot_map)
+        fallback_policy = ObjectivePolicy(ObjectiveMode.BALANCED, load_threshold, budget)
+        fallback_state = SearchState(messages, slot_map, fixed_messages, fixed_offsets)
         fallback_state.apply_assignments(reference.offset_by_name())
         fallback_objective = score_state(fallback_state, fallback_policy)
         balanced = replace(
@@ -760,14 +772,11 @@ def run_gcls(
     )
     if remaining_failures:
         raise RuntimeError(
-            "strict-peak fallback failed balanced guarantees: "
-            + "; ".join(remaining_failures)
+            "strict-peak fallback failed balanced guarantees: " + "; ".join(remaining_failures)
         )
     return replace(
         balanced,
-        evaluation_count=(
-            balanced.evaluation_count + reference.evaluation_count
-        ),
+        evaluation_count=(balanced.evaluation_count + reference.evaluation_count),
         accepted_moves=balanced.accepted_moves + reference.accepted_moves,
         elapsed_seconds=balanced.elapsed_seconds + reference.elapsed_seconds,
         peak_reference_objective=reference.objective,
