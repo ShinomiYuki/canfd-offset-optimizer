@@ -1,0 +1,10 @@
+﻿network,sender,protocol,total,periodic_tx,routing_excluded,eligible,joint_decision,joint_fixed,start_delay_explicit,start_delay_default,start_delay_unknown,timing_complete,eligible_set_sha256
+CH,FLZCU,CAN_FD,68,9,0,9,8,1,9,0,0,True,850e0a8f3c5589190d4cb85c7b1e4375efeb99388d964af62438e19fbf5f85d8
+DA,FLZCU,CAN_FD,50,17,0,17,17,0,17,0,0,True,46ab43d52f2ff13232430ff073c07abbec45dd36ee04f709f9e6d929955ffb6b
+DK,FLZCU,CAN_FD,71,25,0,25,16,9,25,0,0,True,0698aa0bfb1132e1df8ff751a3566992eb1473c0bc8a787ecc6ca3e2b713580e
+EP,FLZCU,CAN_FD,89,6,0,6,6,0,6,0,0,True,725aa962ae6b39c1e1578fc71ff3a81b9117a9e2ab29505c25f72487fddc7d9f
+GL,FLZCU,CAN_FD,90,25,0,25,23,2,25,0,0,True,5197ac0958af7c2a4ee84e3369d1f6db97a5c6fc26cb0948f5bd5fc5648ffebd
+IC,FLZCU,CAN_FD,85,24,0,24,20,4,24,0,0,True,a06ec53a6ae0f34843559c3bacc44ac2201c40b927cb69aa7d0581d4fe2c03ac
+LC,FLZCU,CAN_FD,21,8,0,8,8,0,8,0,0,True,1bc0dd2611dd89aef1e9307d99f0e20d210e5f6ccc90b0d0a4f7ea2faa55f873
+PT,FLZCU,CAN_FD,43,11,0,11,11,0,11,0,0,True,59bd4b369b5b38aa2ab7780c6064e23c416b20f315d0ec28d5300aed21fe02b6
+SU,FLZCU,CAN_FD,19,7,0,7,7,0,7,0,0,True,eafa9a6a91ad9fdcdcd0bc0af6f82bdbbaa06977b3bd132a5bb1ad191d3217af

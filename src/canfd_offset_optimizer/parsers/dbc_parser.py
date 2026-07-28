@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import importlib
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from ..exceptions import InputFileError, MissingFieldError, UnsupportedMessageError
 from ..models import CAN_FD_PAYLOAD_LENGTHS
@@ -18,7 +18,9 @@ from ..models import CAN_FD_PAYLOAD_LENGTHS
 
 DBC_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "cycle_time": ("GenMsgCycleTime", "CycleTime", "MsgCycleTime"),
-    "start_delay": ("GenMsgStartDelayTime", "GenMsgDelayTime", "MsgStartDelayTime"),
+    # Offset 的最终业务语义只认 GenMsgStartDelayTime。GenMsgDelayTime
+    # 与 MsgStartDelayTime 不是 alias，不能参与 Original baseline。
+    "start_delay": ("GenMsgStartDelayTime",),
     "send_type": ("GenMsgSendType", "SendType", "MsgSendType"),
     "frame_format": ("VFrameFormat", "FrameFormat", "BusType"),
 }
@@ -37,6 +39,7 @@ class ParsedDbcMessage:
     original_offset_us: int | None
     definition_index: int
     field_sources: tuple[tuple[str, str], ...]
+    start_delay_source: Literal["explicit", "default", "unknown"] = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,14 @@ class DbcParseResult:
 
     messages: tuple[ParsedDbcMessage, ...]
     warnings: tuple[str, ...] = ()
+    selected_sender: str | None = None
+    candidate_senders: tuple[str, ...] = ()
+    total_message_count: int = 0
+    selected_sender_tx_count: int = 0
+    periodic_tx_count: int = 0
+    start_delay_explicit_count: int = 0
+    start_delay_default_count: int = 0
+    start_delay_unknown_count: int = 0
 
 
 def _attribute_value(
@@ -57,6 +68,16 @@ def _attribute_value(
         if attribute is not None:
             return cast(object, getattr(attribute, "value", attribute)), name
     return None, None
+
+
+def _attribute_default(database: Any, name: str) -> object | None:
+    """返回 DBC ``BA_DEF_DEF_`` 的原始默认值；未声明时返回 None。"""
+    dbc_specifics = getattr(database, "dbc", None)
+    definitions = getattr(dbc_specifics, "attribute_definitions", {})
+    definition = definitions.get(name)
+    if definition is None:
+        return None
+    return cast(object, getattr(definition, "default_value", None))
 
 
 def _milliseconds_to_us(value: object) -> int | None:
@@ -106,6 +127,14 @@ def _is_fd_message(message: Any) -> bool:
     return bool(getattr(message, "is_fd", False))
 
 
+def _concrete_senders(message: Any) -> tuple[str, ...]:
+    """返回稳定去重后的具体发送节点集合。"""
+    senders = tuple(str(sender) for sender in (getattr(message, "senders", ()) or ()))
+    return tuple(
+        dict.fromkeys(sender for sender in senders if sender and sender != "Vector__XXX")
+    )
+
+
 def _tx_sender(message: Any) -> str | None:
     """! @brief 返回第一个具体发送节点；外部占位发送方返回 None。
 
@@ -113,14 +142,13 @@ def _tx_sender(message: Any) -> str | None:
     Vector DBC 常用 `Vector__XXX` 作为外部发送方占位符；这类报文是当前 ECU
     的 RX 报文。具体发送节点不依赖 BU_ 列表是否完整。
     """
-    senders = tuple(str(sender) for sender in (getattr(message, "senders", ()) or ()))
-    concrete = tuple(sender for sender in senders if sender and sender != "Vector__XXX")
+    concrete = _concrete_senders(message)
     if not concrete:
         return None
     return concrete[0]
 
 
-def parse_dbc(path: Path) -> DbcParseResult:
+def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
     """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
 
     @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
@@ -134,10 +162,44 @@ def parse_dbc(path: Path) -> DbcParseResult:
         database = cantools.database.load_file(str(path), strict=False)
     except Exception as exc:  # 外部解析库可能按格式失败点抛出多种异常，统一转为领域错误。
         raise InputFileError(f"cannot parse DBC {path}: {exc}") from exc
+    candidate_senders = tuple(
+        sorted(
+            {
+                sender
+                for message in database.messages
+                for sender in _concrete_senders(message)
+            }
+        )
+    )
+    normalized_sender: str | None = None
+    if selected_sender is not None:
+        normalized_sender = selected_sender.strip()
+        if not normalized_sender:
+            raise InputFileError(f"{path}: selected_sender must not be empty")
+        if normalized_sender not in candidate_senders:
+            raise InputFileError(
+                f"{path}: selected_sender {normalized_sender!r} does not exist; "
+                f"candidate senders: {', '.join(candidate_senders) or '(none)'}"
+            )
+
     parsed: list[ParsedDbcMessage] = []
     warnings: list[str] = []
+    selected_sender_tx_count = 0
+    periodic_tx_count = 0
+    start_delay_explicit_count = 0
+    start_delay_default_count = 0
+    start_delay_unknown_count = 0
+    start_delay_default = _attribute_default(database, "GenMsgStartDelayTime")
     for definition_index, message in enumerate(database.messages):
-        sender = _tx_sender(message)
+        concrete_senders = _concrete_senders(message)
+        sender: str | None
+        if normalized_sender is not None:
+            if normalized_sender not in concrete_senders:
+                continue
+            sender = normalized_sender
+            selected_sender_tx_count += 1
+        else:
+            sender = _tx_sender(message)
         # cantools represents the reserved Vector__XXX sender as an empty list.
         if sender is None:
             continue
@@ -148,6 +210,7 @@ def parse_dbc(path: Path) -> DbcParseResult:
                     f"{path}: message {message.name} is cyclic but has no valid cycle time"
                 )
             continue
+        periodic_tx_count += 1
         if not _is_fd_message(message):
             raise UnsupportedMessageError(
                 f"{path}: message {message.name} is not a CAN FD data frame"
@@ -173,9 +236,18 @@ def parse_dbc(path: Path) -> DbcParseResult:
             raise UnsupportedMessageError(
                 f"{path}: message {message.name} has unsupported CAN ID 0x{raw_id:X}"
             )
-        original, original_source = _attribute_value(
-            message, DBC_ATTRIBUTES["start_delay"]
-        )
+        original, original_attribute = _attribute_value(message, ("GenMsgStartDelayTime",))
+        if original_attribute is not None:
+            original_source: Literal["explicit", "default", "unknown"] = "explicit"
+            start_delay_explicit_count += 1
+        elif start_delay_default is not None:
+            original = start_delay_default
+            original_attribute = "GenMsgStartDelayTime BA_DEF_DEF_"
+            original_source = "default"
+            start_delay_default_count += 1
+        else:
+            original_source = "unknown"
+            start_delay_unknown_count += 1
         original_offset_us = None
         if original is not None:
             original_offset_us = _milliseconds_to_us(original)
@@ -191,9 +263,9 @@ def parse_dbc(path: Path) -> DbcParseResult:
             ("payload_bytes", f"{source_prefix}:BO_"),
             ("sender_ecu", f"{source_prefix}:BO_"),
         ]
-        if original_source is not None:
+        if original_attribute is not None:
             field_sources.append(
-                ("original_offset_us", f"{source_prefix}:{original_source}")
+                ("original_offset_us", f"{source_prefix}:{original_attribute}")
             )
         parsed.append(
             ParsedDbcMessage(
@@ -206,8 +278,29 @@ def parse_dbc(path: Path) -> DbcParseResult:
                 original_offset_us=original_offset_us,
                 definition_index=definition_index,
                 field_sources=tuple(field_sources),
+                start_delay_source=original_source,
             )
         )
     if not parsed:
-        raise InputFileError(f"{path}: no periodic CAN FD TX messages were found")
-    return DbcParseResult(tuple(parsed), tuple(warnings))
+        sender_context = (
+            f" for selected_sender {normalized_sender!r}"
+            if normalized_sender is not None
+            else ""
+        )
+        raise InputFileError(
+            f"{path}: no periodic CAN FD TX messages were found{sender_context}"
+        )
+    return DbcParseResult(
+        messages=tuple(parsed),
+        warnings=tuple(warnings),
+        selected_sender=normalized_sender,
+        candidate_senders=candidate_senders,
+        total_message_count=len(database.messages),
+        selected_sender_tx_count=(
+            selected_sender_tx_count if normalized_sender is not None else len(parsed)
+        ),
+        periodic_tx_count=periodic_tx_count,
+        start_delay_explicit_count=start_delay_explicit_count,
+        start_delay_default_count=start_delay_default_count,
+        start_delay_unknown_count=start_delay_unknown_count,
+    )

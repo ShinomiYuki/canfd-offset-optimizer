@@ -31,3 +31,11 @@ output/diagnostics_smoke/*
 .vscode/
 /docs/严格代码审查与验收报告_2026-07-16.md
 .codex_tmp/
+
+# Local TeX compiler bundle/cache.
+docs/.tectonic-bin/
+docs/tectonic-*.zip
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc

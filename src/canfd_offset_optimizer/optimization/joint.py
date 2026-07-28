@@ -312,6 +312,48 @@ class JointRefinementSummary:
     termination_reason: str
     passes: tuple[JointRefinementPass, ...]
 
+    @property
+    def objective_front_stable(self) -> bool:
+        """Return whether the final two passes have identical objective frontiers."""
+        if len(self.passes) < 2:
+            return False
+        previous, current = self.passes[-2:]
+        return (
+            previous.peak_objective.as_tuple(),
+            previous.peak_budget,
+            previous.can_qss,
+            previous.can_cpu_proxy,
+            previous.cpu_qss,
+            previous.cpu_cpu_proxy,
+            previous.pareto_objectives,
+        ) == (
+            current.peak_objective.as_tuple(),
+            current.peak_budget,
+            current.can_qss,
+            current.can_cpu_proxy,
+            current.cpu_qss,
+            current.cpu_cpu_proxy,
+            current.pareto_objectives,
+        )
+
+    @property
+    def assignment_front_stable(self) -> bool:
+        """Return whether objectives and their final assignments are identical."""
+        if len(self.passes) < 2 or not self.objective_front_stable:
+            return False
+        previous, current = self.passes[-2:]
+        return (
+            previous.peak_reference_hash,
+            previous.can_endpoint_hash,
+            previous.cpu_endpoint_hash,
+            previous.pareto_hashes,
+        ) == (
+            current.peak_reference_hash,
+            current.can_endpoint_hash,
+            current.cpu_endpoint_hash,
+            current.pareto_hashes,
+        )
+
 
 def build_joint_domain(
     messages: tuple[CanMessage, ...],

@@ -39,6 +39,17 @@ def test_load_project_config_normalizes_milliseconds(tmp_path: Path) -> None:
     assert config.objective.peak_tolerance.value == 0.05
 
 
+def test_offset_upper_bound_need_not_land_on_candidate_grid() -> None:
+    config = OptimizationConfig(
+        offset_min_us=15_000,
+        offset_max_us=103_000,
+        offset_step_us=5_000,
+    )
+
+    assert config.allowed_offsets_us == tuple(range(15_000, 100_001, 5_000))
+    assert 103_000 not in config.allowed_offsets_us
+
+
 def test_objective_config_parses_absolute_peak_tolerance(tmp_path: Path) -> None:
     path = tmp_path / "project.yaml"
     path.write_text(

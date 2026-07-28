@@ -1,0 +1,282 @@
+schema_version: 1
+paper_ready_preflight: true
+generated_at_utc: '2026-07-28T06:40:10.751653+00:00'
+branch: main
+source_head_commit: 80b9ae3ec18d4c7f6ebce2eca02a6fb7b4f6922a
+source_worktree_status: "D docs/一种离散时隙上的周期报文Offset均衡分配方法.pdf\n D docs/一种离散时隙上的周期报文Offset均衡分配方法.tex\n\
+  \ M src/canfd_offset_optimizer/config.py\n M src/canfd_offset_optimizer/optimization/joint.py\n\
+  \ M src/canfd_offset_optimizer/parsers/dbc_parser.py\n M src/canfd_offset_optimizer/parsers/project_loader.py\n\
+  \ M src/canfd_offset_optimizer/reporting/joint_writer.py\n M tests/unit/test_config.py\n\
+  \ M tests/unit/test_dbc_parser.py\n M tests/unit/test_joint.py\n M tests/unit/test_joint_analysis.py\n\
+  ?? docs/03_gui_backend_contract.md\n?? docs/04_gui_user_guide.md\n?? docs/FINAL_REPORT.md\n\
+  ?? docs/final_nine_network_report.md\n?? docs/old-1.pdf\n?? docs/old-1.tex\n?? docs/old-2.pdf\n\
+  ?? docs/old-2.tex\n?? docs/paper_claim_evidence_matrix.md\n?? docs/paper_final_outline_audit.md\n\
+  ?? scripts/final_paper_nine_network.py\n?? src/canfd_offset_optimizer/final_experiment.py\n\
+  ?? src/canfd_offset_optimizer/parsers/routing_parser.py\n?? tests/unit/test_final_experiment.py\n\
+  ?? tests/unit/test_routing_parser.py"
+environment:
+  python: 3.14.4 (tags/v3.14.4:23116f9, Apr  7 2026, 14:10:54) [MSC v.1944 64 bit
+    (AMD64)]
+  os: Windows-11-10.0.22621-SP0
+  pyproject_sha256: f179f827efcbc11ae47fd654a5280b19977065ed7b4f216a657ca1eaa7ee17d2
+shared_inputs:
+  routing_excel_path: input\网关路由配置表V02_V4.7_to_V4.8.xlsx
+  routing_excel_sha256: d4eabfd6725ff7f2d0db8d3c6c49a75be7ae898c651bee22846761cbc0ee84fc
+  routing_sheet: 直接报文路由
+  routing_match: normalized target network + numeric CAN ID + extended flag
+  arxml_dir: input\arxml
+  arxml_files:
+  - path: input\arxml\T13J_GW.arxml
+    sha256: 67152910ba5880e65504096cb6b38968f4eaf6aa7683a7952effce92d0bbe2b9
+  config_path: input\config\project.yaml
+  config_sha256: c5cfa3fbeaea6519f149e6f85672385c4fe793ced5a02b2439e570f97177f611
+locked_semantics:
+  sender: explicit selected_sender; selected_sender in message.senders
+  routing_exclusion: target network + CAN ID + extended flag before optimization
+  offset_candidates: min + k*step <= max; max is not appended
+  original_offset: GenMsgStartDelayTime explicit, then declared default; no aliases
+  protocol_scope: nine-network main experiment is uniformly CAN_FD
+  weight_mode: frame_time_us
+optimization:
+  slot_width_us: 5000
+  offset_min_us: 15000
+  offset_max_us: 100000
+  offset_step_us: 5000
+  allowed_offsets_us:
+  - 15000
+  - 20000
+  - 25000
+  - 30000
+  - 35000
+  - 40000
+  - 45000
+  - 50000
+  - 55000
+  - 60000
+  - 65000
+  - 70000
+  - 75000
+  - 80000
+  - 85000
+  - 90000
+  - 95000
+  - 100000
+  can_only_seed: 0
+  can_only_restart:
+    mode: adaptive
+    total_attempts: null
+    min_attempts: 20
+    check_interval: 10
+    patience_attempts: 20
+    max_attempts: 80
+    source_kind: structured
+    legacy_additional_restarts: null
+  balanced_tolerance:
+    type: relative
+    value: 0.05
+  joint:
+    rho: 1/1
+    rho_interpretation: uncalibrated default scenario
+    attempts: 3
+    epsilon_points: 41
+    max_refinement_passes: 3
+    base_seed: 0
+networks:
+- network: CH
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 68
+  selected_tx: 12
+  periodic_tx: 9
+  routing_excluded: 0
+  eligible: 9
+  joint_decision: 8
+  joint_fixed: 1
+  start_delay_explicit: 9
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 850e0a8f3c5589190d4cb85c7b1e4375efeb99388d964af62438e19fbf5f85d8
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_CH Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: b5b9bc86f83d12c2cd50519c3a8c0770461ac94219470f4b2aaba984d349856e
+  routing_target_network: CHCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_CHMessagelis_7a0ed425
+  routing_exclusions: []
+- network: DA
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 50
+  selected_tx: 20
+  periodic_tx: 17
+  routing_excluded: 0
+  eligible: 17
+  joint_decision: 17
+  joint_fixed: 0
+  start_delay_explicit: 17
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 46ab43d52f2ff13232430ff073c07abbec45dd36ee04f709f9e6d929955ffb6b
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_DA Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: e90d81191f7793a4e1e240a43f510e238b2c45267643f00b7ecf775301575013
+  routing_target_network: DACAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_DAMessagelis_75db032f
+  routing_exclusions: []
+- network: DK
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 71
+  selected_tx: 29
+  periodic_tx: 25
+  routing_excluded: 0
+  eligible: 25
+  joint_decision: 16
+  joint_fixed: 9
+  start_delay_explicit: 25
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 0698aa0bfb1132e1df8ff751a3566992eb1473c0bc8a787ecc6ca3e2b713580e
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_DK Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: 57ceef0806f7de9ac498bec0dfe3e8413537fb6a7ff6f2be66b350cc2bcd6711
+  routing_target_network: DKCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_DKMessagelis_97745bab
+  routing_exclusions: []
+- network: EP
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 89
+  selected_tx: 9
+  periodic_tx: 6
+  routing_excluded: 0
+  eligible: 6
+  joint_decision: 6
+  joint_fixed: 0
+  start_delay_explicit: 6
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 725aa962ae6b39c1e1578fc71ff3a81b9117a9e2ab29505c25f72487fddc7d9f
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_EP Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: c8fe17c6f0f8b3e737d1e8df0bf047d1ecfdcacc03f3a365c7c57b0905089843
+  routing_target_network: EPCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_EPMessagelis_8106544b
+  routing_exclusions: []
+- network: GL
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 90
+  selected_tx: 31
+  periodic_tx: 25
+  routing_excluded: 0
+  eligible: 25
+  joint_decision: 23
+  joint_fixed: 2
+  start_delay_explicit: 25
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 5197ac0958af7c2a4ee84e3369d1f6db97a5c6fc26cb0948f5bd5fc5648ffebd
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_GL Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: b0d5062ee2f97a761b09074044347785e648a8493767582ccf6f75049910586b
+  routing_target_network: GLCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_GLMessagelis_c9d19cd8
+  routing_exclusions: []
+- network: IC
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 85
+  selected_tx: 27
+  periodic_tx: 24
+  routing_excluded: 0
+  eligible: 24
+  joint_decision: 20
+  joint_fixed: 4
+  start_delay_explicit: 24
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: a06ec53a6ae0f34843559c3bacc44ac2201c40b927cb69aa7d0581d4fe2c03ac
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_IC Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: 855c41c9d46bc32fbaf33cd3a6150883302d5a3c68a4b74234cc9fd7a6404b3f
+  routing_target_network: ICCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_ICMessagelis_b318bb00
+  routing_exclusions: []
+- network: LC
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 21
+  selected_tx: 11
+  periodic_tx: 8
+  routing_excluded: 0
+  eligible: 8
+  joint_decision: 8
+  joint_fixed: 0
+  start_delay_explicit: 8
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 1bc0dd2611dd89aef1e9307d99f0e20d210e5f6ccc90b0d0a4f7ea2faa55f873
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_LC Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: 2df6ac82f1cde79c75ad256abcf3a548ed8649286cb28c243ac731229f138497
+  routing_target_network: LCCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_LCMessagelis_2bbbcc10
+  routing_exclusions: []
+- network: PT
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 43
+  selected_tx: 14
+  periodic_tx: 11
+  routing_excluded: 0
+  eligible: 11
+  joint_decision: 11
+  joint_fixed: 0
+  start_delay_explicit: 11
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: 59bd4b369b5b38aa2ab7780c6064e23c416b20f315d0ec28d5300aed21fe02b6
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_PT Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: 42343291bbd9dae26fce0ae1a924612d73f8ee0cda8e4e1485902a35d2895ab4
+  routing_target_network: PTCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_PTMessagelis_a564bd25
+  routing_exclusions: []
+- network: SU
+  sender: FLZCU
+  candidate_senders:
+  - FLZCU
+  protocol: CAN_FD
+  total: 19
+  selected_tx: 10
+  periodic_tx: 7
+  routing_excluded: 0
+  eligible: 7
+  joint_decision: 7
+  joint_fixed: 0
+  start_delay_explicit: 7
+  start_delay_default: 0
+  start_delay_unknown: 0
+  timing_complete: true
+  eligible_set_sha256: eafa9a6a91ad9fdcdcd0bc0af6f82bdbbaa06977b3bd132a5bb1ad191d3217af
+  dbc_path: input\dbc\E0X_PT_Car FLZCU_VCU_SU Message list V1.2 Draft_202310071102_REEV(横置).dbc
+  dbc_sha256: cfdca055350b7e08aac9fb59a24e4adbb171f58b303c46eb4926b953a517616d
+  routing_target_network: SUCAN
+  channel: CT_E0X_PT_CarFLZCU_VCU_SUMessagelis_1374b015
+  routing_exclusions: []

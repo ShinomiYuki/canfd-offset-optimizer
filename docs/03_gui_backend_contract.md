@@ -1,0 +1,264 @@
+# GUI Backend Contract
+
+## 1. 接入状态
+
+当前 `app.py` 默认注入 `RealBackend`。真实 adapter 实现
+`canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 与纯数据服务
+`sender_selection.py`、`heatmap_details.py` 允许接触核心 parser/model/SlotMap 类型，并立即转换为
+GUI 不可变 DTO；窗口、worker 和 widgets 不得直接导入核心类型。
+
+## 2. 调用协议
+
+```python
+class OptimizationBackend(Protocol):
+    def import_inputs(
+        self,
+        sources: tuple[Path, ...],
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+    ) -> ImportSession: ...
+
+    def inspect_workspace(
+        self,
+        session: ImportSession,
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+    ) -> WorkspaceInspection: ...
+
+    def apply_sender_selection(
+        self,
+        inspection: WorkspaceInspection,
+        selection: SenderNodeSelectionConfig,
+    ) -> WorkspaceInspection: ...
+
+    def optimize_all_networks(
+        self,
+        request: GuiBatchOptimizationRequest,
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+    ) -> BatchOptimizationResult: ...
+```
+
+方法均同步，由 GUI worker 在专用 `QThread` 调用。Backend 不得创建或操作 QObject/widget，不得
+返回可变核心对象，不得直接更新界面。
+
+## 3. 导入契约
+
+Backend 接受多个文件/目录入口，递归发现文件并复制到独立 `user_input` 会话。`ImportRecord`
+必须记录原始绝对路径、工作区相对路径、检测类型、状态、大小、SHA-256、时间和 parser 使用标志。
+重复文件去重；冲突文件稳定改名；不得覆盖或修改原始文件。`.xlsx` 归类为
+`routing_table` 并复制到会话 `routing/` 目录。清单必须可供后续审计。
+
+## 4. 检查契约
+
+检查只能读取 `ImportSession` 工作区副本。`WorkspaceInspection` 必须明确：
+
+- 全部名称唯一的 `NetworkSummary`；
+- 缺失的必需输入；
+- 阻塞错误和非阻塞 warnings；
+- 每个网段的帧协议、具体可用权重和自动/固定权重能力。
+- 路由报文表逐行匹配报告，以及每个网段的基础资格数、路由排除数和最终资格数；
+- 每个 DBC 的稳定 `dbc_id`、内容 SHA-256、发送节点清单、逐报文资格审计和 DBC 集合 revision；
+- 未确认的 `SenderNodeSelectionConfig`。首次导入不得自动选择任何节点，也不得把发现网段数当作可优化网段数。
+
+每个 `NetworkSummary` 必须区分 `network_id`、`network_name`、`display_name` 和 `source_file`。
+`network_id` 是稳定唯一查询键；简洁 `network_name` 用于概览显示；完整文件名只属于来源信息。
+对于 `<车型>_<网段>_Matrix_<协议/版本>.dbc` 命名，必须将 `_Matrix` 前的网段片段规范化为
+`network_name`，例如 `..._ADAS BUS_Matrix_...` 映射为 `ADAS_BUS`；不得将整个文件名误作网段名。
+
+DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导入器必须把随程序发布、内容与仓库
+`input/config/project.yaml` 一致的默认配置复制到会话 `config/project.yaml`，并在 manifest 与警告中
+标明来源；一个用户配置优先于默认配置，多个用户配置仍阻塞。CAN FD 没有可用 ARXML 时只提供
+`payload_bytes`。生产适配器通过
+核心 parser 发现 Controller `SHORT-NAME`，再以 DBC 来源签名进行唯一关联；匹配歧义时不得猜测，
+对应 CAN FD 网段只开放 `payload_bytes`。Classic CAN 固定使用
+`payload_bytes_approximation`，不参与 CAN FD 权重选择。GUI 原样显示 `DA` 等网段名，不扩写。
+
+
+## 4.1 DBC 本机发送节点选择契约
+
+每个 DBC 必须按 `dbc_id = hash(工作区相对路径 + 文件 SHA-256)` 独立保存选择。正式配置对象为
+`SenderNodeSelectionConfig`，包含 `selected_transmitters_by_dbc`、`excluded_dbc_ids`、`confirmed`
+和 `dbc_revision`。每个 DBC 必须选择至少一个具体发送节点，或明确标记“该 DBC 不参与本次优化”。
+节点名仅去除首尾空白并精确匹配；不做 contains、大小写猜测或 ECU 名称硬编码。`Vector__XXX`、
+空节点和未知节点进入审计，但不能作为本机节点选择。
+
+多 transmitter 报文按集合交集判定，只要报文发送节点与当前 DBC 的选择集合有交集就命中，且同一
+报文只计数一次。正式顺序固定为：
+
+```text
+selected transmitter intersection
+    → core base eligibility
+    → routing target network + CAN ID exclusion
+    → OptimizationRequest / GCLS
+```
+
+`RealBackend` 将 `selected_transmitters` 传给 `load_project`/`parse_dbc`，随后才重建路由排除后的
+`NetworkModel`。因此其他 ECU 的 Matrix 报文不可能进入 OptimizationRequest、GCLS、assignment、
+负载曲线或 DBC replacement。检查阶段可以预先解析路由表并保存匹配标记，但正式候选应用顺序不变。
+
+DBC 集合或内容变化后通过 revision 重新协调：只有 `dbc_id` 完全一致的条目可保留；新增或 hash
+变化的 DBC 回到未处理，只要存在未处理项就撤销 confirmed。不得仅按文件名复用选择。
+
+## 5. 批量请求与结果
+
+`GuiBatchOptimizationRequest.can_fd_weight` 是 CAN FD 网段共享的权重选择；
+`classic_can_weight` 显式记录且当前固定为 `payload_bytes`。模式、tolerance、restart、
+candidate pool、3-opt 和输出根目录仍由批次共享。Backend 必须按每个网段真实的
+`frame_protocol` 选择对应权重，并在结果中写入实际的 `bus_type`、`weight_mode` 和 `mode`；
+不得用项目级单一权重覆盖全部网段，也不得把 Classic Byte 权重标成 μs。
+
+路由排除由独立 `RouteMessageTableParser` 解析 `.xlsx`，以精确映射后的
+`RouteMessageKey(target_network_id, can_id)` 为唯一主键。报文名不参与主键；名称不同仍排除并记录
+warning。存在 `直接报文路由` Sheet 时必须优先且只读取该 Sheet，使用目标报文名称、目标 CAN ID
+和目标 CAN 通道，并将 `DACAN` 一类通道名的末尾 `CAN` 去除后映射到 DBC 网段；源网段字段不生成
+排除记录。不存在该 Sheet、但存在 `Routing(FLZCU)` 时必须只读取该左域 Sheet：从
+`Service Subscriber Data` 取得目标报文名和目标 CAN ID，将 `Service Subscriber Subnet`
+横向矩阵中非空的 `FL_CAN_*`/`FL_CANFD_*` 列展开并映射到 DBC 网段名；不得混入
+`Routing(FRZCU)` 或 LIN 订阅目标。两种权威 Sheet 均不存在时才使用简化平铺表头契约；权威
+Sheet 存在但结构无效时必须报错，不得回退。
+解析和匹配在 `WorkspaceInspection` 阶段完成，早于 GUI 批量请求创建；RealBackend 在
+`load_project` 后立即重建只含最终资格报文的核心 `NetworkModel`、时间窗和 `SlotMap`，之后才创建
+baseline `SearchState` 并调用 `run_gcls`。因此路由报文不可能进入 assignment、GCLS 搜索空间、
+DBC Offset replacement 或原始/优化后的可优化报文负载曲线。
+
+同一工程包含多个独立的 Classic CAN 与 CAN FD 物理网段属于正常情况，不得因此禁用
+mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligible Classic CAN 与 CAN FD
+时仍应只跳过该网段，并保留清晰的单位不一致诊断。
+
+`BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
+`results_by_network_id` 映射。最终状态是
+`succeeded/failed/skipped/cancelled`。成功项包含完整 `GuiOptimizationResult`；失败项包含用户可读
+错误；部分失败不能丢失成功结果。批量根目录固定提供 `logs/`、`plots/`、`results/` 和 `dbc/`；
+批次根目录名必须是纯微秒时间戳。`results/networks_summary.csv` 汇总所有网段，成功网段创建 Offset
+明细和图表并尝试生成 DBC 副本，
+失败、跳过和取消网段仍必须写独立日志。`results/routing_exclusion_summary.csv` 保留每个 Excel
+来源行；`results/message_eligibility.csv` 保存每条 DBC 报文的发送节点、所选节点命中、周期、路由
+命中、最终状态和排除原因；`run_config.json.sender_node_selection` 保存确认状态、revision 及每个
+DBC 的选择/明确排除。网段 CSV/日志保存
+`base_eligible_message_count`、`routing_excluded_count`、`final_eligible_message_count`。
+
+指标、Offset、负载数组、attempts 和停止原因全部由 backend/service 提供，GUI 不重新计算。
+`GuiOptimizationResult.steady_heatmap/startup_heatmap` 进一步提供原始与优化后共享时间轴的只读
+`HeatmapWindowDetail`。每个 `HeatmapSlotDetail` 包含 slot index、起止时间、核心累计负载、核心
+释放计数和 `HeatmapMessageDetail` 成员；成员包含报文名、完整 CAN ID、帧格式、周期及该状态的
+Offset。`heatmap_details.py` 仅使用已经过滤完成的 `NetworkModel`、核心预计算 `SlotMap` 和两组
+assignment 构造成员索引，并对照核心 load/count 数组校验，不复制负载权重或释放公式。
+
+`GuiOptimizationResult.load_window_metadata` 是负载曲线、热力图、明细与 PNG 共用的只读时间
+语义，包含 `slot_width_us`、稳态/启动时隙数，并明确提供真实 `steady_hyperperiod_us` 和
+`startup_duration_us`。稳态曲线按用户选择的 1、2、4 或 10 个完整真实超周期重复 DTO 数组，
+不得假定所有网段均为 500 ms；启动数组不得重复。
+
+批量行与详细结果的 network_id、名称和来源必须一致；不得共享可变 metrics/assignment 容器，
+也不得用最后完成的结果填充其他网段。Qt Widget 只消费上述 DTO/ViewModel，禁止从颜色或负载值
+反推帧数与成员。
+
+### 5.1 协议级保守占用诊断契约
+
+正式入口是 `timing/conservative_service.py::estimate_conservative_bus_service_time()`。输入为核心 `FrameProtocol`、`is_extended`、DBC `payload_bytes`、网段 Nominal/Data Bitrate 和报文 `effective_brs`；输出 `ConservativeFrameEstimate`，同时暴露 Nominal/Data phase accounting bits。该 DTO 只属于结果诊断，禁止写入 `CanMessage.frame_time_us`、weight mode、objective、assignment 或 GCLS 搜索结构。Optimizer 的 `frame_time_us` 继续由 `timing/frame_time.py` 独立计算。
+
+#### 时序数据与有效 BRS
+
+`NetworkTimingConfig` 按 `network_id` 保存：
+
+```text
+nominal_bitrate_bps
+data_bitrate_bps
+default_brs
+nominal_source / data_source / brs_source
+DBC per-message BRS coverage metadata
+```
+
+`dbc_parser.py` 负责读取 DBC 显式全局 `Baudrate`、受支持且唯一的显式 Data Bitrate 属性，以及 BO_ `CANFD_BRS` 的显式值/有效 `BA_DEF_DEF_`。不得从空白 `BS_:`、文件名、Payload、其他网段或经验值猜测。`effective_brs` 固定使用 `DBC per-message > user network default > unavailable`；一个网段允许 ON/OFF 混合。
+
+Classic CAN 只要求 Nominal。CAN FD BRS OFF 只要求 Nominal；BRS ON 要求 Nominal + Data；BRS unknown 或 BRS ON 缺 Data 时返回 `UNAVAILABLE`。这些缺失不得阻止 Offset 优化。Data Bitrate 必须为正数；Data < Nominal 允许保存并按原值计算，但 GUI 必须提示少见配置。ARXML 不属于本诊断的必需输入。
+
+#### 协议模型
+
+共同 dynamic stuffing 上界：`S(N)=floor((N-1)/4)`。Classic CAN 模型保持不变：
+
+```text
+Standard dynamic = 34 + 8D
+Extended dynamic = 54 + 8D
+total = dynamic + S(dynamic) + 13
+```
+
+其中 `+13 = CRC delimiter + ACK slot/delimiter + EOF + 3-bit Intermission`。Standard Classic 8 B、500 kbit/s 仍为 `270 μs`。
+
+CAN FD BRS OFF 使用原整帧 Nominal 公式：
+
+```text
+Standard dynamic = 22 + 8D
+Extended dynamic = 41 + 8D
+CRC field = 27 bit (CRC17) or 32 bit (CRC21), including fixed stuff
+total = dynamic + S(dynamic) + CRC field + 13
+```
+
+CAN FD BRS ON 必须 phase-aware：
+
+```text
+P = 17 Standard or 36 Extended       # SOF through BRS
+Q = 5 + 8D                           # ESI, DLC, Payload
+nominal_full_bits = (P - 1) + S(P) + 12
+data_full_bits = Q + ceil(Q/4) + CRC_field
+transition_guard = 2 × (1/Nominal + 1/Data)
+service_us = ceil(nominal_duration + data_duration + transition_guard)
+```
+
+切速发生在 BRS sample point，切回发生在 CRC delimiter sample point。DTO 没有 sample-point segment 长度，因此不能虚构比例，也不能把 transition bit 强行归到某个整数 phase。实现用精确 `Fraction` duration 表示边界 guard：两个 transition bit 分别在相邻速率各取一次完整 bit-time 上界。Data suffix 使用可继承 stuffing history 的 `ceil(Q/4)` 上界；CRC17/CRC21、Stuff Bit Count、parity、fixed stuff、ACK、EOF 和 Intermission 必须保留。
+
+#### DTO、缓存与 presentation
+
+`HeatmapMessageDetail` 保存 DBC/effective BRS、来源、报文级时间、总/phase bit bounds、状态和原因。`HeatmapSlotDetail` 对 original/optimized 各自正式 members 严格求和；不得重新扫描 DBC 或加入已排除报文。空时隙为 0，全部不可计算为 `None/保守 —`，部分可计算为已知和/`保守 ≥xxx μs*`。
+
+Estimator cache key 必须包含 message identity、network_id、协议/格式/Payload、Nominal、Data、effective BRS 和 estimator version。修改任何时序参数只刷新 presentation，不调用 RealBackend/GCLS，assignment/objective/Offset 不变。
+
+热力图第二行单位严格由 optimizer weight 决定：`payload_bytes → B/slot`，`frame_time_us → μs/slot`；第三行固定为独立保守微秒值。不得增加 occupancy/utilization/load-rate 百分比。`run_config.json` 必须审计 Nominal/Data/BRS、各自来源、DBC BRS coverage 和 diagnostic-only 策略。
+## 6. 进度、取消与错误
+
+`ProgressUpdate` 可表达 import/inspect/prepare/network/finalize 阶段、当前网段、序号、attempt、
+网段状态、耗时和总体进度。进度不得泄露搜索缓存或 parser 内部类型。
+
+取消使用 `CancellationToken`。当前网段应在安全检查点停止，已完成网段保留，后续网段标记跳过，
+并抛出携带 `BatchOptimizationResult` 的 `BatchOptimizationCancelled`。禁止强制终止线程。
+
+可预期错误抛 `BackendError`；意外异常由 worker 转换为安全主消息和独立技术详情。禁止吞异常、
+返回空半成品或把工程失败伪装成全部网段失败。
+
+网络选择首先提交稳定 `network_id`，随后独立绑定 Offset、负载曲线和热力图面板。单面板展示
+异常必须记录完整 traceback、让该面板绑定目标网段并显示明确错误，同时继续刷新其他面板、日志
+和详情；禁止异常从 Qt slot 泄漏，也禁止让未失败面板静默保留上一网段。
+
+## 7. 真实 Adapter 当前实现
+
+1. `parse_dbc` 是网段和周期 CAN TX 报文资格及 Classic/FD 协议分类的唯一来源；同一物理网段
+   混合 eligible Classic/FD 时必须拒绝。
+2. `load_project` 提供报文、原始 Offset、候选集合、权重和时间窗。
+3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
+4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。
+5. 每个 restart observer 回调检查取消 token 并发送结构化进度；批量结果保留部分成功项。
+6. 成功后自动导出当前网段的稳态负载图和热力图。负载曲线默认重复 4 个真实稳态超周期；热力图必须使用
+   核心 slot count 快照和主分支固定拥挤分级，并且只展示一个真实窗口，不重复数组。每个非空格
+   依次显示帧数、当前权重负载和独立的协议级保守占用时间；GUI 热力图使用固定可读单格宽度和
+   水平滚动；PNG 手动导出必须渲染完整内容画布而非 viewport，并对超过
+   平台单图限制的宽度失败关闭、显示明确错误。
+7. DBC Offset 唯一映射为 `GenMsgStartDelayTime`。Parser 只接受该属性的显式消息赋值或
+   `BA_DEF_DEF_` 默认值；`GenMsgDelayTime`、`MsgStartDelayTime` 不得作为 fallback。
+   `CanMessage` / GUI assignment DTO 必须保留只读的属性名及 `explicit`、`default`、
+   `unavailable` 来源审计。
+8. DBC 输出必须从导入工作区副本生成，且必须存在
+   `BA_DEF_ BO_ "GenMsgStartDelayTime"`。已有 StartDelay 只允许在原位置字节级替换数字 token；
+   缺少显式赋值的参与优化报文补充 StartDelay `BA_` 时，必须放在已有消息级 `BA_` block 末尾并
+   位于首个严格 `VAL_` 记录前。不得将新增 `BA_` 统一追加到 EOF。没有 `VAL_` 时使用已有 `BA_`
+   block、属性 schema block 的稳定锚点，且不得重排已有 section。
+9. 同一报文 StartDelay 存在多条同值声明时，必须保留全部声明并同步替换所有数字 token，
+   `replaced_count` 仍按报文数统计并产生 duplicate warning；重复声明值冲突、缺少合法定义或写后
+   回读不一致时将 DBC 导出降级为警告。Writer 必须额外断言所有 `GenMsgDelayTime` 赋值
+   byte-for-byte 不变。不得调用会重排 DBC 的整库序列化，不得覆盖原始用户文件。核心优化成功项
+   仍必须携带完整 `GuiOptimizationResult`，通过
+   `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
+   basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
+8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是受审计的优化适配边界；
+   `sender_selection.py` 仅负责 DBC 发送节点资格，`heatmap_details.py` 仅把正式 SlotMap 命中转换为
+   只读时隙成员 DTO。后续公共 service 就绪后应替换这些核心导入，不影响 GUI contracts/widgets。

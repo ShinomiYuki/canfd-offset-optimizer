@@ -218,14 +218,11 @@ class OptimizationConfig:
             raise ConfigurationError("offset range is invalid")
         if self.offset_max_us == 0:
             raise ConfigurationError("offset_max_us must be positive for startup analysis")
-        if (self.offset_max_us - self.offset_min_us) % self.offset_step_us:
-            raise ConfigurationError("offset range must be divisible by offset step")
         if (
             self.offset_min_us % self.slot_width_us
-            or self.offset_max_us % self.slot_width_us
             or self.offset_step_us % self.slot_width_us
         ):
-            raise ConfigurationError("offset range and step must align to slot_width_us")
+            raise ConfigurationError("offset minimum and step must align to slot_width_us")
         if not self.pair_neighbor_steps or any(
             isinstance(step, bool) or not isinstance(step, int) or step <= 0
             for step in self.pair_neighbor_steps
@@ -242,7 +239,12 @@ class OptimizationConfig:
 
     @property
     def allowed_offsets_us(self) -> tuple[int, ...]:
-        """! @brief 生成闭区间内严格递增的合法 Offset。"""
+        """! @brief 生成不超过上界的严格递增 Offset 栅格。
+
+        @details
+        ``offset_max_us`` 是上界而非必须命中的候选点；当范围不能被步长整除时，
+        返回最后一个不大于上界的 ``offset_min_us + k * offset_step_us``。
+        """
         return tuple(
             range(self.offset_min_us, self.offset_max_us + 1, self.offset_step_us)
         )

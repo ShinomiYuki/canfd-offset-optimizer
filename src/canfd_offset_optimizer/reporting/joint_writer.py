@@ -125,6 +125,8 @@ def joint_result_dict(result: JointOptimizationResult) -> dict[str, object]:
             "passes_run": result.refinement.passes_run,
             "max_passes": result.refinement.max_passes,
             "converged": result.refinement.converged,
+            "objective_front_stable": result.refinement.objective_front_stable,
+            "assignment_front_stable": result.refinement.assignment_front_stable,
             "termination_reason": result.refinement.termination_reason,
             "passes": [
                 {

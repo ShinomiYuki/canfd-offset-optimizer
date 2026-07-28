@@ -57,6 +57,21 @@ def test_straight_chord_uses_ideal_point_fallback() -> None:
     assert result.knee_score == 0
 
 
+def test_all_negative_internal_chord_scores_use_ideal_point_fallback() -> None:
+    front = (
+        _point(0, 100, "can"),
+        _point(40, 80, "above-chord-1"),
+        _point(60, 60, "above-chord-2"),
+        _point(100, 0, "cpu"),
+    )
+
+    result = select_joint_recommendation(front)
+
+    assert result.method == "ideal_point_fallback"
+    assert result.knee_score is not None
+    assert result.knee_score < 0
+
+
 def test_unique_and_two_point_fronts_have_strict_defined_behavior() -> None:
     unique = select_joint_recommendation((_point(10, 20, "only"),))
     assert unique.method == "unique_solution"

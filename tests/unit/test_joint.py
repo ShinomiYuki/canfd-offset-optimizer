@@ -316,6 +316,8 @@ def test_refinement_converges_or_reports_bounded_limit() -> None:
     assert converged.refinement.passes_run == 2
     assert converged.refinement.termination_reason == "refinement_converged"
     assert converged.refinement.passes[0].signature == (converged.refinement.passes[1].signature)
+    assert converged.refinement.objective_front_stable
+    assert converged.refinement.assignment_front_stable
 
     limited = optimize_can_cpu_balanced(
         "limited",
@@ -328,6 +330,8 @@ def test_refinement_converges_or_reports_bounded_limit() -> None:
     assert not limited.refinement.converged
     assert limited.refinement.passes_run == 1
     assert limited.refinement.termination_reason == "refinement_limit_reached"
+    assert not limited.refinement.objective_front_stable
+    assert not limited.refinement.assignment_front_stable
 
 
 def test_joint_attempt_schedule_is_prefix_preserving() -> None:
@@ -496,6 +500,8 @@ def test_joint_json_preserves_exact_fractions_and_full_audit(tmp_path) -> None:
     assert payload["candidate_archive"]["assignment_count"] > 0
     assert payload["stage_results"]
     assert payload["refinement"]["passes_run"] >= 1
+    assert isinstance(payload["refinement"]["objective_front_stable"], bool)
+    assert isinstance(payload["refinement"]["assignment_front_stable"], bool)
     assert payload["refinement"]["termination_reason"] in {
         "refinement_converged",
         "refinement_limit_reached",

@@ -1,0 +1,1077 @@
+{
+  "elapsed_total_seconds": 19.492806700000074,
+  "eligible_message_count": 17,
+  "eligible_set_sha256": "46ab43d52f2ff13232430ff073c07abbec45dd36ee04f709f9e6d929955ffb6b",
+  "network": "DA",
+  "original_source": "GenMsgStartDelayTime explicit/default only",
+  "schema_version": 1,
+  "stages": {
+    "balanced": {
+      "accepted_moves": 163,
+      "assignment_sha256": "84fdf6f22da797f07ab2fd432455e263fdbba19135e6150dff1bb23f91dfbbfd",
+      "assignments": [
+        {
+          "can_id": 571,
+          "definition_index": 20,
+          "message_name": "FLZCU_1",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1120,
+          "definition_index": 21,
+          "message_name": "FLZCU_3",
+          "offset_us": 15000
+        },
+        {
+          "can_id": 859,
+          "definition_index": 22,
+          "message_name": "FLZCU_5",
+          "offset_us": 65000
+        },
+        {
+          "can_id": 1260,
+          "definition_index": 23,
+          "message_name": "FLZCU_7",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 1043,
+          "definition_index": 24,
+          "message_name": "FLZCU_8",
+          "offset_us": 20000
+        },
+        {
+          "can_id": 1181,
+          "definition_index": 25,
+          "message_name": "FLZCU_9",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 1030,
+          "definition_index": 26,
+          "message_name": "FLZCU_12",
+          "offset_us": 95000
+        },
+        {
+          "can_id": 1076,
+          "definition_index": 27,
+          "message_name": "FLZCU_13",
+          "offset_us": 25000
+        },
+        {
+          "can_id": 1071,
+          "definition_index": 28,
+          "message_name": "FLZCU_15",
+          "offset_us": 35000
+        },
+        {
+          "can_id": 919,
+          "definition_index": 29,
+          "message_name": "FLZCU_16",
+          "offset_us": 55000
+        },
+        {
+          "can_id": 1257,
+          "definition_index": 30,
+          "message_name": "FLZCU_28",
+          "offset_us": 75000
+        },
+        {
+          "can_id": 1072,
+          "definition_index": 31,
+          "message_name": "FLZCU_31",
+          "offset_us": 85000
+        },
+        {
+          "can_id": 517,
+          "definition_index": 32,
+          "message_name": "FLZCU_58",
+          "offset_us": 100000
+        },
+        {
+          "can_id": 1256,
+          "definition_index": 33,
+          "message_name": "FRZCU_8",
+          "offset_us": 45000
+        },
+        {
+          "can_id": 699,
+          "definition_index": 34,
+          "message_name": "RZCU_2",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1258,
+          "definition_index": 35,
+          "message_name": "RZCU_7",
+          "offset_us": 80000
+        },
+        {
+          "can_id": 1035,
+          "definition_index": 38,
+          "message_name": "VCC_1",
+          "offset_us": 100000
+        }
+      ],
+      "evaluation_count": 31404,
+      "kind": "algorithm",
+      "name": "gcls",
+      "objective": {
+        "Qss": 1288061,
+        "max_release_count": 2,
+        "mode": "balanced",
+        "peak_budget_us": 428,
+        "startup_Qss": 575537,
+        "startup_peak_us": 407,
+        "steady_peak_us": 407,
+        "violation_count": 0,
+        "violation_excess": 0
+      },
+      "peak_budget_us": 428,
+      "restart_attempts": 1,
+      "restart_stop_reason": "peak_candidate_pool_exhausted",
+      "runtime_seconds": 0.6500755000015488,
+      "startup_slot_counts": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        2,
+        1
+      ],
+      "startup_slot_loads": [
+        0,
+        0,
+        0,
+        125,
+        125,
+        125,
+        0,
+        327,
+        125,
+        125,
+        0,
+        407,
+        125,
+        125,
+        0,
+        247,
+        125,
+        165,
+        250,
+        165
+      ],
+      "steady_slot_counts": [
+        2,
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1
+      ],
+      "steady_slot_loads": [
+        250,
+        407,
+        250,
+        250,
+        250,
+        125,
+        250,
+        327,
+        250,
+        125,
+        250,
+        407,
+        250,
+        125,
+        250,
+        247,
+        250,
+        165,
+        250,
+        165
+      ],
+      "strict_peak_reference_us": 407
+    },
+    "greedy": {
+      "accepted_moves": 0,
+      "assignment_sha256": "89b597ee51ec0cae3857703ac967eaedbc16f88d77cd7bbbd98eb39b5187daf5",
+      "assignments": [
+        {
+          "can_id": 571,
+          "definition_index": 20,
+          "message_name": "FLZCU_1",
+          "offset_us": 85000
+        },
+        {
+          "can_id": 1120,
+          "definition_index": 21,
+          "message_name": "FLZCU_3",
+          "offset_us": 30000
+        },
+        {
+          "can_id": 859,
+          "definition_index": 22,
+          "message_name": "FLZCU_5",
+          "offset_us": 65000
+        },
+        {
+          "can_id": 1260,
+          "definition_index": 23,
+          "message_name": "FLZCU_7",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 1043,
+          "definition_index": 24,
+          "message_name": "FLZCU_8",
+          "offset_us": 20000
+        },
+        {
+          "can_id": 1181,
+          "definition_index": 25,
+          "message_name": "FLZCU_9",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 1030,
+          "definition_index": 26,
+          "message_name": "FLZCU_12",
+          "offset_us": 95000
+        },
+        {
+          "can_id": 1076,
+          "definition_index": 27,
+          "message_name": "FLZCU_13",
+          "offset_us": 25000
+        },
+        {
+          "can_id": 1071,
+          "definition_index": 28,
+          "message_name": "FLZCU_15",
+          "offset_us": 35000
+        },
+        {
+          "can_id": 919,
+          "definition_index": 29,
+          "message_name": "FLZCU_16",
+          "offset_us": 55000
+        },
+        {
+          "can_id": 1257,
+          "definition_index": 30,
+          "message_name": "FLZCU_28",
+          "offset_us": 75000
+        },
+        {
+          "can_id": 1072,
+          "definition_index": 31,
+          "message_name": "FLZCU_31",
+          "offset_us": 100000
+        },
+        {
+          "can_id": 517,
+          "definition_index": 32,
+          "message_name": "FLZCU_58",
+          "offset_us": 100000
+        },
+        {
+          "can_id": 1256,
+          "definition_index": 33,
+          "message_name": "FRZCU_8",
+          "offset_us": 45000
+        },
+        {
+          "can_id": 699,
+          "definition_index": 34,
+          "message_name": "RZCU_2",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1258,
+          "definition_index": 35,
+          "message_name": "RZCU_7",
+          "offset_us": 50000
+        },
+        {
+          "can_id": 1035,
+          "definition_index": 38,
+          "message_name": "VCC_1",
+          "offset_us": 15000
+        }
+      ],
+      "evaluation_count": 306,
+      "kind": "algorithm",
+      "name": "greedy",
+      "objective": {
+        "Qss": 1368561,
+        "max_release_count": 2,
+        "mode": "peak",
+        "peak_budget_us": null,
+        "startup_Qss": 532687,
+        "startup_peak_us": 407,
+        "steady_peak_us": 532,
+        "violation_count": 0,
+        "violation_excess": 0
+      },
+      "restart_attempts": null,
+      "restart_stop_reason": null,
+      "runtime_seconds": 0.008485400001518428,
+      "startup_slot_counts": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        1,
+        0,
+        1,
+        1,
+        1
+      ],
+      "startup_slot_loads": [
+        0,
+        0,
+        0,
+        125,
+        125,
+        125,
+        125,
+        327,
+        125,
+        125,
+        125,
+        407,
+        125,
+        125,
+        0,
+        247,
+        0,
+        125,
+        125,
+        165
+      ],
+      "steady_slot_counts": [
+        2,
+        2,
+        1,
+        2,
+        2,
+        2,
+        2,
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "steady_slot_loads": [
+        290,
+        532,
+        125,
+        250,
+        250,
+        250,
+        250,
+        327,
+        250,
+        250,
+        250,
+        407,
+        250,
+        250,
+        125,
+        247,
+        125,
+        125,
+        125,
+        165
+      ]
+    },
+    "original": {
+      "accepted_moves": 0,
+      "assignment_sha256": "d5f2893efbafd828897b9b55ba6e2a00b82fb0841b2d11714879087331211868",
+      "assignments": [
+        {
+          "can_id": 571,
+          "definition_index": 20,
+          "message_name": "FLZCU_1",
+          "offset_us": 25000
+        },
+        {
+          "can_id": 1120,
+          "definition_index": 21,
+          "message_name": "FLZCU_3",
+          "offset_us": 50000
+        },
+        {
+          "can_id": 859,
+          "definition_index": 22,
+          "message_name": "FLZCU_5",
+          "offset_us": 30000
+        },
+        {
+          "can_id": 1260,
+          "definition_index": 23,
+          "message_name": "FLZCU_7",
+          "offset_us": 75000
+        },
+        {
+          "can_id": 1043,
+          "definition_index": 24,
+          "message_name": "FLZCU_8",
+          "offset_us": 20000
+        },
+        {
+          "can_id": 1181,
+          "definition_index": 25,
+          "message_name": "FLZCU_9",
+          "offset_us": 55000
+        },
+        {
+          "can_id": 1030,
+          "definition_index": 26,
+          "message_name": "FLZCU_12",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 1076,
+          "definition_index": 27,
+          "message_name": "FLZCU_13",
+          "offset_us": 45000
+        },
+        {
+          "can_id": 1071,
+          "definition_index": 28,
+          "message_name": "FLZCU_15",
+          "offset_us": 35000
+        },
+        {
+          "can_id": 919,
+          "definition_index": 29,
+          "message_name": "FLZCU_16",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 1257,
+          "definition_index": 30,
+          "message_name": "FLZCU_28",
+          "offset_us": 65000
+        },
+        {
+          "can_id": 1072,
+          "definition_index": 31,
+          "message_name": "FLZCU_31",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 517,
+          "definition_index": 32,
+          "message_name": "FLZCU_58",
+          "offset_us": 15000
+        },
+        {
+          "can_id": 1256,
+          "definition_index": 33,
+          "message_name": "FRZCU_8",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 699,
+          "definition_index": 34,
+          "message_name": "RZCU_2",
+          "offset_us": 30000
+        },
+        {
+          "can_id": 1258,
+          "definition_index": 35,
+          "message_name": "RZCU_7",
+          "offset_us": 70000
+        },
+        {
+          "can_id": 1035,
+          "definition_index": 38,
+          "message_name": "VCC_1",
+          "offset_us": 15000
+        }
+      ],
+      "evaluation_count": 0,
+      "kind": "baseline",
+      "name": "original",
+      "objective": {
+        "Qss": 1583871,
+        "max_release_count": 2,
+        "mode": "peak",
+        "peak_budget_us": null,
+        "startup_Qss": 1552621,
+        "startup_peak_us": 572,
+        "steady_peak_us": 572,
+        "violation_count": 0,
+        "violation_excess": 0
+      },
+      "restart_attempts": null,
+      "restart_stop_reason": null,
+      "runtime_seconds": 6.239999856916256e-05,
+      "startup_slot_counts": [
+        0,
+        0,
+        0,
+        2,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        2,
+        1
+      ],
+      "startup_slot_loads": [
+        0,
+        0,
+        0,
+        250,
+        125,
+        125,
+        250,
+        452,
+        572,
+        250,
+        250,
+        250,
+        290,
+        372,
+        250,
+        250,
+        125,
+        125,
+        532,
+        125
+      ],
+      "steady_slot_counts": [
+        0,
+        1,
+        1,
+        2,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        2,
+        1
+      ],
+      "steady_slot_loads": [
+        0,
+        125,
+        125,
+        250,
+        125,
+        125,
+        250,
+        452,
+        572,
+        250,
+        250,
+        250,
+        290,
+        372,
+        250,
+        250,
+        125,
+        125,
+        532,
+        125
+      ]
+    },
+    "peak": {
+      "accepted_moves": 163,
+      "assignment_sha256": "84fdf6f22da797f07ab2fd432455e263fdbba19135e6150dff1bb23f91dfbbfd",
+      "assignments": [
+        {
+          "can_id": 571,
+          "definition_index": 20,
+          "message_name": "FLZCU_1",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1120,
+          "definition_index": 21,
+          "message_name": "FLZCU_3",
+          "offset_us": 15000
+        },
+        {
+          "can_id": 859,
+          "definition_index": 22,
+          "message_name": "FLZCU_5",
+          "offset_us": 65000
+        },
+        {
+          "can_id": 1260,
+          "definition_index": 23,
+          "message_name": "FLZCU_7",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 1043,
+          "definition_index": 24,
+          "message_name": "FLZCU_8",
+          "offset_us": 20000
+        },
+        {
+          "can_id": 1181,
+          "definition_index": 25,
+          "message_name": "FLZCU_9",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 1030,
+          "definition_index": 26,
+          "message_name": "FLZCU_12",
+          "offset_us": 95000
+        },
+        {
+          "can_id": 1076,
+          "definition_index": 27,
+          "message_name": "FLZCU_13",
+          "offset_us": 25000
+        },
+        {
+          "can_id": 1071,
+          "definition_index": 28,
+          "message_name": "FLZCU_15",
+          "offset_us": 35000
+        },
+        {
+          "can_id": 919,
+          "definition_index": 29,
+          "message_name": "FLZCU_16",
+          "offset_us": 55000
+        },
+        {
+          "can_id": 1257,
+          "definition_index": 30,
+          "message_name": "FLZCU_28",
+          "offset_us": 75000
+        },
+        {
+          "can_id": 1072,
+          "definition_index": 31,
+          "message_name": "FLZCU_31",
+          "offset_us": 85000
+        },
+        {
+          "can_id": 517,
+          "definition_index": 32,
+          "message_name": "FLZCU_58",
+          "offset_us": 100000
+        },
+        {
+          "can_id": 1256,
+          "definition_index": 33,
+          "message_name": "FRZCU_8",
+          "offset_us": 45000
+        },
+        {
+          "can_id": 699,
+          "definition_index": 34,
+          "message_name": "RZCU_2",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1258,
+          "definition_index": 35,
+          "message_name": "RZCU_7",
+          "offset_us": 80000
+        },
+        {
+          "can_id": 1035,
+          "definition_index": 38,
+          "message_name": "VCC_1",
+          "offset_us": 100000
+        }
+      ],
+      "evaluation_count": 30049,
+      "kind": "algorithm",
+      "name": "gcls",
+      "objective": {
+        "Qss": 1288061,
+        "max_release_count": 2,
+        "mode": "peak",
+        "peak_budget_us": null,
+        "startup_Qss": 575537,
+        "startup_peak_us": 407,
+        "steady_peak_us": 407,
+        "violation_count": 0,
+        "violation_excess": 0
+      },
+      "restart_attempts": 30,
+      "restart_stop_reason": "patience_exhausted",
+      "runtime_seconds": 0.6022355999994033,
+      "startup_slot_counts": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        2,
+        1
+      ],
+      "startup_slot_loads": [
+        0,
+        0,
+        0,
+        125,
+        125,
+        125,
+        0,
+        327,
+        125,
+        125,
+        0,
+        407,
+        125,
+        125,
+        0,
+        247,
+        125,
+        165,
+        250,
+        165
+      ],
+      "steady_slot_counts": [
+        2,
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1
+      ],
+      "steady_slot_loads": [
+        250,
+        407,
+        250,
+        250,
+        250,
+        125,
+        250,
+        327,
+        250,
+        125,
+        250,
+        407,
+        250,
+        125,
+        250,
+        247,
+        250,
+        165,
+        250,
+        165
+      ]
+    },
+    "variance": {
+      "accepted_moves": 11,
+      "assignment_sha256": "84fdf6f22da797f07ab2fd432455e263fdbba19135e6150dff1bb23f91dfbbfd",
+      "assignments": [
+        {
+          "can_id": 571,
+          "definition_index": 20,
+          "message_name": "FLZCU_1",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1120,
+          "definition_index": 21,
+          "message_name": "FLZCU_3",
+          "offset_us": 15000
+        },
+        {
+          "can_id": 859,
+          "definition_index": 22,
+          "message_name": "FLZCU_5",
+          "offset_us": 65000
+        },
+        {
+          "can_id": 1260,
+          "definition_index": 23,
+          "message_name": "FLZCU_7",
+          "offset_us": 60000
+        },
+        {
+          "can_id": 1043,
+          "definition_index": 24,
+          "message_name": "FLZCU_8",
+          "offset_us": 20000
+        },
+        {
+          "can_id": 1181,
+          "definition_index": 25,
+          "message_name": "FLZCU_9",
+          "offset_us": 40000
+        },
+        {
+          "can_id": 1030,
+          "definition_index": 26,
+          "message_name": "FLZCU_12",
+          "offset_us": 95000
+        },
+        {
+          "can_id": 1076,
+          "definition_index": 27,
+          "message_name": "FLZCU_13",
+          "offset_us": 25000
+        },
+        {
+          "can_id": 1071,
+          "definition_index": 28,
+          "message_name": "FLZCU_15",
+          "offset_us": 35000
+        },
+        {
+          "can_id": 919,
+          "definition_index": 29,
+          "message_name": "FLZCU_16",
+          "offset_us": 55000
+        },
+        {
+          "can_id": 1257,
+          "definition_index": 30,
+          "message_name": "FLZCU_28",
+          "offset_us": 75000
+        },
+        {
+          "can_id": 1072,
+          "definition_index": 31,
+          "message_name": "FLZCU_31",
+          "offset_us": 85000
+        },
+        {
+          "can_id": 517,
+          "definition_index": 32,
+          "message_name": "FLZCU_58",
+          "offset_us": 100000
+        },
+        {
+          "can_id": 1256,
+          "definition_index": 33,
+          "message_name": "FRZCU_8",
+          "offset_us": 45000
+        },
+        {
+          "can_id": 699,
+          "definition_index": 34,
+          "message_name": "RZCU_2",
+          "offset_us": 90000
+        },
+        {
+          "can_id": 1258,
+          "definition_index": 35,
+          "message_name": "RZCU_7",
+          "offset_us": 80000
+        },
+        {
+          "can_id": 1035,
+          "definition_index": 38,
+          "message_name": "VCC_1",
+          "offset_us": 100000
+        }
+      ],
+      "evaluation_count": 58068,
+      "kind": "algorithm",
+      "name": "gcls",
+      "objective": {
+        "Qss": 1288061,
+        "max_release_count": 2,
+        "mode": "variance",
+        "peak_budget_us": null,
+        "startup_Qss": 575537,
+        "startup_peak_us": 407,
+        "steady_peak_us": 407,
+        "violation_count": 0,
+        "violation_excess": 0
+      },
+      "restart_attempts": 30,
+      "restart_stop_reason": "fixed_limit",
+      "runtime_seconds": 1.8463046999968356,
+      "startup_slot_counts": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        2,
+        1
+      ],
+      "startup_slot_loads": [
+        0,
+        0,
+        0,
+        125,
+        125,
+        125,
+        0,
+        327,
+        125,
+        125,
+        0,
+        407,
+        125,
+        125,
+        0,
+        247,
+        125,
+        165,
+        250,
+        165
+      ],
+      "steady_slot_counts": [
+        2,
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2,
+        1
+      ],
+      "steady_slot_loads": [
+        250,
+        407,
+        250,
+        250,
+        250,
+        125,
+        250,
+        327,
+        250,
+        125,
+        250,
+        407,
+        250,
+        125,
+        250,
+        247,
+        250,
+        165,
+        250,
+        165
+      ]
+    }
+  }
+}

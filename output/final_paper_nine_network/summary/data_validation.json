@@ -1,0 +1,51 @@
+{
+  "paper_ready": true,
+  "validated_at_utc": "2026-07-28T07:19:47.571725+00:00",
+  "networks": [
+    {
+      "network": "CH",
+      "status": "pass"
+    },
+    {
+      "network": "DA",
+      "status": "pass"
+    },
+    {
+      "network": "DK",
+      "status": "pass"
+    },
+    {
+      "network": "EP",
+      "status": "pass"
+    },
+    {
+      "network": "GL",
+      "status": "pass"
+    },
+    {
+      "network": "IC",
+      "status": "pass"
+    },
+    {
+      "network": "LC",
+      "status": "pass"
+    },
+    {
+      "network": "PT",
+      "status": "pass"
+    },
+    {
+      "network": "SU",
+      "status": "pass"
+    }
+  ],
+  "checks": [
+    "manifest eligible-set hash matches both experiment paths",
+    "CAN-only assignments are complete, unique, legal, and exclude routes",
+    "Original equals StartDelay-only input values",
+    "joint fixed/decision rule and assignments are valid",
+    "Peak and epsilon constraints hold",
+    "observed Pareto set is non-dominated",
+    "MainFunction coverage, TimeBase divisibility, and exact CPU sums hold"
+  ]
+}

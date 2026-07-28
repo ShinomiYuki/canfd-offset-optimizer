@@ -15,7 +15,25 @@ from ..models import CanMessage, ChannelConfig, NetworkModel, ObjectiveMode, Wei
 from ..timeline.slot_map import SlotMap, build_windows, precompute_slot_map
 from ..timing.frame_time import estimate_frame_weight
 from .arxml_parser import ArxmlChannelData, parse_arxml_directory
-from .dbc_parser import parse_dbc
+from .dbc_parser import DbcParseResult, ParsedDbcMessage, parse_dbc
+from .routing_parser import (
+    RouteMessageEntry,
+    RouteMessageKey,
+    RoutingTable,
+    normalize_target_network,
+    parse_routing_excel,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingExclusion:
+    """一条被正式排除在研究对象之外的目标侧路由报文。"""
+
+    message_name: str
+    can_id: int
+    is_extended: bool
+    route_row_number: int
+    routing_message_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +43,13 @@ class LoadedProject:
     config: ProjectConfig
     network: NetworkModel
     slot_map: SlotMap
+    dbc_parse_result: DbcParseResult | None = None
+    routing_table: RoutingTable | None = None
+    routing_target_network: str | None = None
+    routing_exclusions: tuple[RoutingExclusion, ...] = ()
+    eligible_start_delay_explicit_count: int = 0
+    eligible_start_delay_default_count: int = 0
+    eligible_start_delay_unknown_count: int = 0
 
 
 def _merge_field(
@@ -58,15 +83,77 @@ def load_project(
     weight_mode_override: WeightMode | None = None,
     channel_override: str | None = None,
     objective_mode_override: ObjectiveMode | None = None,
+    selected_sender: str | None = None,
+    routing_excel_path: Path | None = None,
+    routing_target_network: str | None = None,
+    require_original_offsets: bool = False,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
     @raises MissingFieldError 精确权重模式缺少 bitrate/BRS 且无 YAML 覆盖时抛出。
     """
+    if (routing_excel_path is None) != (routing_target_network is None):
+        raise ConfigurationError(
+            "routing_excel_path and routing_target_network must be provided together"
+        )
     config = load_project_config(config_path)
-    dbc = parse_dbc(dbc_path)
+    dbc = parse_dbc(dbc_path, selected_sender=selected_sender)
     warnings = list(dbc.warnings)
     sources: dict[str, str] = {}
+    routing_table: RoutingTable | None = None
+    canonical_routing_target: str | None = None
+    route_exclusions: list[RoutingExclusion] = []
+    selected_dbc_messages: tuple[ParsedDbcMessage, ...] = dbc.messages
+    if routing_excel_path is not None and routing_target_network is not None:
+        routing_table = parse_routing_excel(routing_excel_path)
+        canonical_routing_target = normalize_target_network(routing_target_network)
+        entries_by_key: dict[RouteMessageKey, RouteMessageEntry] = {}
+        for entry in routing_table.entries_for_target(canonical_routing_target):
+            entries_by_key.setdefault(entry.key, entry)
+        retained: list[ParsedDbcMessage] = []
+        for raw in dbc.messages:
+            key = RouteMessageKey(
+                canonical_routing_target,
+                raw.can_id,
+                raw.is_extended,
+            )
+            matched = entries_by_key.get(key)
+            if matched is None:
+                retained.append(raw)
+                continue
+            route_exclusions.append(
+                RoutingExclusion(
+                    raw.name,
+                    raw.can_id,
+                    raw.is_extended,
+                    matched.row_number,
+                    matched.message_name,
+                )
+            )
+        selected_dbc_messages = tuple(retained)
+        sources["routing_excel"] = str(routing_table.path)
+        sources["routing_sheet"] = routing_table.sheet_name
+        sources["routing_target_network"] = canonical_routing_target
+        warnings.append(
+            f"routing exclusion removed {len(route_exclusions)} selected periodic TX "
+            f"messages for target {canonical_routing_target}"
+        )
+    if not selected_dbc_messages:
+        raise InputFileError(
+            f"{dbc_path}: routing exclusion removed every selected periodic TX message"
+        )
+    unknown_originals = tuple(
+        raw.name for raw in selected_dbc_messages if raw.original_offset_us is None
+    )
+    if require_original_offsets and unknown_originals:
+        names = ", ".join(unknown_originals[:10])
+        suffix = " ..." if len(unknown_originals) > 10 else ""
+        raise MissingFieldError(
+            f"{dbc_path}: {len(unknown_originals)} eligible messages have unknown "
+            f"GenMsgStartDelayTime: {names}{suffix}"
+        )
+    if selected_sender is not None:
+        sources["selected_sender"] = selected_sender.strip()
     cli_overrides: dict[str, str] = {}
     restart_policy = config.optimization.restart_policy
     if restart_policy.legacy_additional_restarts is not None:
@@ -240,7 +327,7 @@ def load_project(
     )
     messages: list[CanMessage] = []
     approximation_warning: str | None = None
-    for raw in dbc.messages:
+    for raw in selected_dbc_messages:
         try:
             estimate = estimate_frame_weight(
                 raw.payload_bytes, raw.is_extended, channel, config.model.weight_mode
@@ -274,8 +361,8 @@ def load_project(
                 f"message {raw.name} original Offset {raw.original_offset_us} us is not "
                 f"legal; baseline uses {min(config.optimization.allowed_offsets_us)} us"
             )
-        for key, value in raw.field_sources:
-            sources[f"message.{raw.name}.{key}"] = value
+        for field_key, value in raw.field_sources:
+            sources[f"message.{raw.name}.{field_key}"] = value
     if approximation_warning:
         warnings.append(approximation_warning)
     try:
@@ -287,7 +374,12 @@ def load_project(
         )
     except ValueError as exc:
         raise ConfigurationError(f"invalid optimization timeline: {exc}") from exc
-    input_files = (dbc_path, config_path, *arxml_files)
+    input_files = (
+        dbc_path,
+        config_path,
+        *arxml_files,
+        *((routing_excel_path,) if routing_excel_path is not None else ()),
+    )
     network = NetworkModel(
         messages=tuple(messages),
         channel=channel,
@@ -319,4 +411,21 @@ def load_project(
             input_files=network.input_files,
             cli_overrides=network.cli_overrides,
         )
-    return LoadedProject(config, network, precompute_slot_map(network.messages, startup, steady))
+    return LoadedProject(
+        config=config,
+        network=network,
+        slot_map=precompute_slot_map(network.messages, startup, steady),
+        dbc_parse_result=dbc,
+        routing_table=routing_table,
+        routing_target_network=canonical_routing_target,
+        routing_exclusions=tuple(route_exclusions),
+        eligible_start_delay_explicit_count=sum(
+            raw.start_delay_source == "explicit" for raw in selected_dbc_messages
+        ),
+        eligible_start_delay_default_count=sum(
+            raw.start_delay_source == "default" for raw in selected_dbc_messages
+        ),
+        eligible_start_delay_unknown_count=sum(
+            raw.start_delay_source == "unknown" for raw in selected_dbc_messages
+        ),
+    )
