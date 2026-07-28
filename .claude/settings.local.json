@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m canfd_offset_optimizer compare --help)",
+      "Bash(python scripts/final_nine_network_baseline.py)",
+      "Bash(python -u -c ' *)"
+    ]
+  }
+}

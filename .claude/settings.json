@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest -q --ignore=src/canfd_offset_optimizer/gui -p no:qt)",
+      "Bash(python -m pytest tests/unit/test_project_loader.py::test_approximate_weight_forces_peak_objective_and_audits_override -v)"
+    ]
+  }
+}
