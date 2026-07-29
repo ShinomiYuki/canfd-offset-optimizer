@@ -34,7 +34,7 @@ from ..models import (
     hash_steady_phases,
     steady_phase_vector,
 )
-from ..timeline.slot_map import SlotMap
+from ..timeline.slot_map import SlotMap, precompute_slot_map
 from ..timeline.state import SearchState
 from .greedy import greedy_construct, greedy_order
 from .local_search import (
@@ -44,6 +44,50 @@ from .local_search import (
 )
 from .objective import ObjectivePolicy, score_state, slot_load_threshold_us
 from .triple_search import conflict_triple_search
+
+
+def _original_baseline_score(
+    messages: tuple[CanMessage, ...],
+    slot_map: SlotMap,
+    policy: ObjectivePolicy,
+    fixed_messages: tuple[CanMessage, ...] = (),
+    fixed_offsets: Mapping[str, int] | None = None,
+) -> ObjectiveValue:
+    """Score real input Offsets without changing the optimization candidate domain.
+
+    Joint optimization represents long-period fixed traffic with the formal
+    singleton domain ``(0,)``.  That business rule is authoritative over any
+    historical DBC Offset carried by the source message.
+    """
+    baseline_messages = tuple(
+        replace(
+            message,
+            allowed_offsets_us=(
+                (0,)
+                if message.allowed_offsets_us == (0,)
+                else (
+                    message.original_offset_us
+                    if message.original_offset_us is not None
+                    else min(message.allowed_offsets_us),
+                )
+            ),
+        )
+        for message in messages
+    )
+    baseline_map = precompute_slot_map(
+        baseline_messages + fixed_messages,
+        slot_map.startup_window,
+        slot_map.steady_window,
+    )
+    state = SearchState(
+        baseline_messages,
+        baseline_map,
+        fixed_messages,
+        fixed_offsets,
+    )
+    for message in baseline_messages:
+        state.apply(message, message.allowed_offsets_us[0])
+    return score_state(state, policy)
 
 
 def _restart_order(messages: tuple[CanMessage, ...], seed: int) -> tuple[CanMessage, ...]:
@@ -289,7 +333,13 @@ def _run_gcls_with_policy(
             else min(message.allowed_offsets_us)
         )
         baseline_state.apply(message, baseline_offset)
-    initial_score = score_state(baseline_state, policy)
+    initial_score = _original_baseline_score(
+        messages,
+        slot_map,
+        policy,
+        fixed_messages,
+        fixed_offsets,
+    )
     # 先把合法原始配置也推进到同一局部最优条件；这样既不会推荐更差结果，
     # 也不会因直接保留一个未经搜索的基线而破坏最终 1-opt 不变量。
     total = relocate_single_messages(baseline_state, policy, greedy_order(messages))
@@ -538,7 +588,13 @@ def _run_balanced_candidate_pool(
             if original is not None and original in message.allowed_offsets_us
             else min(message.allowed_offsets_us),
         )
-    initial_score = score_state(baseline_state, policy)
+    initial_score = _original_baseline_score(
+        messages,
+        slot_map,
+        policy,
+        fixed_messages,
+        fixed_offsets,
+    )
     ordered_messages = tuple(
         sorted(messages, key=lambda item: (item.definition_index, item.can_id, item.name))
     )
@@ -685,8 +741,6 @@ def run_gcls(
     """
     objective = objective_config or ObjectiveConfig(mode=ObjectiveMode.PEAK)
     mode = objective.mode
-    if weight_mode is not WeightMode.FRAME_TIME_US and mode is not ObjectiveMode.PEAK:
-        mode = ObjectiveMode.PEAK
     load_threshold = (
         slot_load_threshold_us(config.slot_width_us, average_load_limit)
         if weight_mode is WeightMode.FRAME_TIME_US

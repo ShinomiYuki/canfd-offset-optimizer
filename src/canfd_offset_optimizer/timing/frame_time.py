@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models import CAN_FD_PAYLOAD_LENGTHS, ChannelConfig, WeightMode
+from ..models import (
+    CAN_FD_PAYLOAD_LENGTHS,
+    ChannelConfig,
+    FrameProtocol,
+    WeightMode,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +38,7 @@ def estimate_frame_weight(
     is_extended: bool,
     channel: ChannelConfig,
     mode: WeightMode,
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD,
 ) -> FrameTimeEstimate:
     """! @brief 按显式模式返回正整数权重。
 
@@ -43,9 +49,18 @@ def estimate_frame_weight(
     BRS 开启时在 BRS 之后使用 data bitrate，并把尾段保守地计入 nominal phase。
     该模式不声称是逐位精确仿真。
     """
-    if payload_bytes not in CAN_FD_PAYLOAD_LENGTHS:
+    valid_lengths = (
+        frozenset(range(9))
+        if frame_protocol is FrameProtocol.CLASSIC_CAN
+        else CAN_FD_PAYLOAD_LENGTHS
+    )
+    if payload_bytes not in valid_lengths:
+        if frame_protocol is FrameProtocol.CAN_FD:
+            raise ValueError(
+                f"payload_bytes={payload_bytes} is not representable by a CAN FD DLC"
+            )
         raise ValueError(
-            f"payload_bytes={payload_bytes} is not representable by a CAN FD DLC"
+            f"payload_bytes={payload_bytes} is invalid for {frame_protocol.value}"
         )
     if mode is WeightMode.UNIT:
         return FrameTimeEstimate(1, mode, 0, 0, 0, "unit weight is an approximation")
@@ -56,7 +71,16 @@ def estimate_frame_weight(
             0,
             0,
             0,
-            "payload_bytes weight ignores CAN FD protocol overhead and bitrate",
+            (
+                "classic_weight_model = \"payload_bytes_approximation\"; "
+                "relative balancing only; no physical bus-load interpretation"
+                if frame_protocol is FrameProtocol.CLASSIC_CAN
+                else "payload_bytes weight ignores CAN FD protocol overhead and bitrate"
+            ),
+        )
+    if frame_protocol is FrameProtocol.CLASSIC_CAN:
+        raise ValueError(
+            "precise Classic CAN frame_time_us is not implemented; use payload_bytes"
         )
     if channel.nominal_bitrate is None or channel.brs is None:
         raise ValueError("frame_time_us mode requires nominal bitrate and BRS")

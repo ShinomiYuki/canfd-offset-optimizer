@@ -158,7 +158,12 @@ def test_offset_larger_than_cycle_changes_startup_but_not_steady_conservation() 
     assert delayed.startup == ()
 
 
-def test_approximate_weight_mode_disables_the_physical_microsecond_threshold() -> None:
+@pytest.mark.parametrize(
+    "mode", (ObjectiveMode.PEAK, ObjectiveMode.BALANCED, ObjectiveMode.VARIANCE)
+)
+def test_approximate_weight_preserves_mode_without_physical_threshold(
+    mode: ObjectiveMode,
+) -> None:
     message = _message("dense", 1, 1, 1, (5_000,), 0)
     startup, steady, _ = build_windows((message,), 5_000, 5_000)
     slot_map = precompute_slot_map((message,), startup, steady)
@@ -171,9 +176,9 @@ def test_approximate_weight_mode_disables_the_physical_microsecond_threshold() -
             random_restarts=0,
         ),
         weight_mode=WeightMode.UNIT,
-        objective_config=ObjectiveConfig(ObjectiveMode.VARIANCE),
+        objective_config=ObjectiveConfig(mode),
     )
-    assert result.objective.mode is ObjectiveMode.PEAK
+    assert result.objective.mode is mode
     assert result.objective.steady_peak == 5_000
     assert result.objective.violation_count == 0
     assert result.objective.violation_excess == 0

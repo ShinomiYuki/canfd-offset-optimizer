@@ -10,19 +10,24 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import importlib
 from pathlib import Path
+import re
 from typing import Any, Literal, cast
 
 from ..exceptions import InputFileError, MissingFieldError, UnsupportedMessageError
-from ..models import CAN_FD_PAYLOAD_LENGTHS
+from ..models import CAN_FD_PAYLOAD_LENGTHS, FrameProtocol
 
 
 DBC_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "cycle_time": ("GenMsgCycleTime", "CycleTime", "MsgCycleTime"),
-    # Offset 的最终业务语义只认 GenMsgStartDelayTime。GenMsgDelayTime
-    # 与 MsgStartDelayTime 不是 alias，不能参与 Original baseline。
+    # Offset has one formal business meaning: the first cyclic transmission delay.
+    # GenMsgDelayTime and MsgStartDelayTime are independent attributes and must
+    # never be used as an Offset fallback.
     "start_delay": ("GenMsgStartDelayTime",),
     "send_type": ("GenMsgSendType", "SendType", "MsgSendType"),
     "frame_format": ("VFrameFormat", "FrameFormat", "BusType"),
+    # Vector's CANFD_BRS is a BO_ attribute. Explicit assignments and its
+    # BA_DEF_DEF_ value both have normal DBC effective-value semantics.
+    "brs": ("CANFD_BRS",),
 }
 
 
@@ -40,6 +45,12 @@ class ParsedDbcMessage:
     definition_index: int
     field_sources: tuple[tuple[str, str], ...]
     start_delay_source: Literal["explicit", "default", "unknown"] = "unknown"
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    transmitter_nodes: tuple[str, ...] = ()
+    original_offset_attribute: str | None = None
+    original_offset_source: str = "unavailable"
+    dbc_brs: bool | None = None
+    dbc_brs_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +67,92 @@ class DbcParseResult:
     start_delay_explicit_count: int = 0
     start_delay_default_count: int = 0
     start_delay_unknown_count: int = 0
+    nominal_bitrate_bps: int | None = None
+    nominal_bitrate_source: str | None = None
+    data_bitrate_bps: int | None = None
+    data_bitrate_source: str | None = None
+
+
+_DBC_NOMINAL_BITRATE_ATTRIBUTE = re.compile(
+    r'^\s*BA_\s+"Baudrate"\s+([0-9]+)\s*;\s*$', re.MULTILINE
+)
+_DBC_DATA_BITRATE_ATTRIBUTE = re.compile(
+    r'^\s*BA_\s+"(CANFD_DataBitrate|CANFD_Baudrate|DataBitrate|DataBaudrate)"'
+    r'\s+([0-9]+)\s*;\s*$',
+    re.MULTILINE,
+)
+
+
+def read_dbc_nominal_bitrate(path: Path) -> int | None:
+    """Read an explicit global DBC ``Baudrate`` attribute in bit/s.
+
+    cantools accepts the standard DBC ``BS_:`` declaration as an empty section;
+    it exposes a bus baudrate only from the explicit database-level attribute
+    ``BA_ "Baudrate" <bit/s>;``. Attribute defaults, blank ``BS_:`` sections,
+    filenames and project defaults are deliberately not treated as confirmed
+    network timing.
+    """
+
+    if not path.is_file():
+        return None
+    source = path.read_bytes().decode("latin-1")
+    values = tuple(
+        int(match.group(1))
+        for match in _DBC_NOMINAL_BITRATE_ATTRIBUTE.finditer(source)
+    )
+    if not values:
+        return None
+    if any(value <= 0 for value in values) or len(set(values)) != 1:
+        raise InputFileError(
+            f"{path}: conflicting or non-positive DBC Baudrate attribute"
+        )
+    return values[0]
+
+
+def read_dbc_data_bitrate(path: Path) -> tuple[int | None, str | None]:
+    """Read an explicit global CAN FD data-rate attribute when unambiguous.
+
+    DBC has no universal data-rate field. The accepted names are narrowly
+    limited to explicit database-level attributes used by common engineering
+    exports; defaults, filenames and message attributes are not inferred.
+    """
+
+    if not path.is_file():
+        return None, None
+    source = path.read_bytes().decode("latin-1")
+    matches = tuple(_DBC_DATA_BITRATE_ATTRIBUTE.finditer(source))
+    if not matches:
+        return None, None
+    values = tuple(int(match.group(2)) for match in matches)
+    if any(value <= 0 for value in values) or len(set(values)) != 1:
+        raise InputFileError(
+            f"{path}: conflicting or non-positive DBC CAN FD data bitrate attribute"
+        )
+    names = tuple(dict.fromkeys(match.group(1) for match in matches))
+    return values[0], "DBC:" + "/".join(names)
+
+
+def _normalize_brs(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(int(value)) if value in (0, 1) else None
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "on", "true", "enabled", "enable"}:
+        return True
+    if normalized in {"0", "off", "false", "disabled", "disable"}:
+        return False
+    return None
+
+
+def _message_brs(database: Any, message: Any) -> tuple[bool | None, str | None]:
+    value, source = _attribute_value(message, DBC_ATTRIBUTES["brs"])
+    if value is None:
+        value, source = _attribute_default(database, DBC_ATTRIBUTES["brs"])
+    normalized = _normalize_brs(value) if value is not None else None
+    if normalized is None:
+        return None, None
+    return normalized, source
 
 
 def _attribute_value(
@@ -70,14 +167,20 @@ def _attribute_value(
     return None, None
 
 
-def _attribute_default(database: Any, name: str) -> object | None:
-    """返回 DBC ``BA_DEF_DEF_`` 的原始默认值；未声明时返回 None。"""
+def _attribute_default(
+    database: Any, names: tuple[str, ...]
+) -> tuple[object | None, str | None]:
+    """Return the first message-attribute default after explicit lookup failed."""
     dbc_specifics = getattr(database, "dbc", None)
     definitions = getattr(dbc_specifics, "attribute_definitions", {})
-    definition = definitions.get(name)
-    if definition is None:
-        return None
-    return cast(object, getattr(definition, "default_value", None))
+    for name in names:
+        definition = definitions.get(name)
+        if definition is None or getattr(definition, "kind", None) != "BO_":
+            continue
+        value = getattr(definition, "default_value", None)
+        if value is not None:
+            return cast(object, value), f"{name}:BA_DEF_DEF_"
+    return None, None
 
 
 def _milliseconds_to_us(value: object) -> int | None:
@@ -115,6 +218,30 @@ def _is_declared_periodic(message: Any) -> bool:
     return any(token in normalized for token in ("cyclic", "periodic", "cycle"))
 
 
+def _is_explicitly_event_driven(message: Any) -> bool:
+    value, _ = _attribute_value(message, DBC_ATTRIBUTES["send_type"])
+    if value is None:
+        return False
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # Vector GenMsgSendType commonly uses 0=cyclic and 1=event.
+        return int(value) != 0
+    normalized = str(value).lower().replace("-", "").replace("_", "")
+    return any(token in normalized for token in ("event", "spontaneous", "onchange"))
+
+
+def _is_excluded_traffic_class(message: Any) -> bool:
+    """Exclude diagnostic, NM and calibration traffic without network-name rules."""
+    name = str(getattr(message, "name", ""))
+    words = tuple(part for part in re.split(r"[^A-Za-z0-9]+", name.upper()) if part)
+    upper = name.upper()
+    return (
+        "DIAG" in upper
+        or "XCP" in upper
+        or "CALIBRATION" in upper
+        or any(word == "NM" or word.startswith("NM") for word in words)
+    )
+
+
 def _is_fd_message(message: Any) -> bool:
     """! @brief 优先使用集中映射的格式属性，回退到 cantools 帧标志。"""
     value, _ = _attribute_value(message, DBC_ATTRIBUTES["frame_format"])
@@ -127,47 +254,53 @@ def _is_fd_message(message: Any) -> bool:
     return bool(getattr(message, "is_fd", False))
 
 
-def _concrete_senders(message: Any) -> tuple[str, ...]:
-    """返回稳定去重后的具体发送节点集合。"""
-    senders = tuple(str(sender) for sender in (getattr(message, "senders", ()) or ()))
-    return tuple(
-        dict.fromkeys(sender for sender in senders if sender and sender != "Vector__XXX")
-    )
-
-
-def _tx_sender(message: Any) -> str | None:
-    """! @brief 返回第一个具体发送节点；外部占位发送方返回 None。
+def transmitter_nodes(message: Any) -> tuple[str, ...]:
+    """返回报文的全部具体发送节点，保留 DBC 顺序并去重。
 
     @details
-    Vector DBC 常用 `Vector__XXX` 作为外部发送方占位符；这类报文是当前 ECU
-    的 RX 报文。具体发送节点不依赖 BU_ 列表是否完整。
+    `Vector__XXX`、空节点和纯空白节点均不是可选本机发送节点。节点名只做
+    首尾空白清理，不进行大小写、内部空白、substring 或别名匹配。
     """
-    concrete = _concrete_senders(message)
-    if not concrete:
-        return None
-    return concrete[0]
+    result: list[str] = []
+    for raw_sender in getattr(message, "senders", ()) or ():
+        sender = str(raw_sender).strip()
+        if not sender or sender == "Vector__XXX" or sender in result:
+            continue
+        result.append(sender)
+    return tuple(result)
 
 
-def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
-    """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
+def message_cycle_time_us(message: Any) -> int | None:
+    """Return the same normalized positive cycle used by formal DBC parsing."""
+    return _cycle_us(message)[0]
 
-    @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
-    @raises InputFileError 文件不存在或 cantools 无法解析时抛出。
-    """
+
+def message_frame_protocol(message: Any) -> FrameProtocol:
+    """Return the same frame protocol classification used by formal parsing."""
+    return FrameProtocol.CAN_FD if _is_fd_message(message) else FrameProtocol.CLASSIC_CAN
+
+
+def message_is_declared_periodic(message: Any) -> bool:
+    """Return whether DBC send-type metadata explicitly declares cyclic traffic."""
+    return _is_declared_periodic(message)
+
+
+def parse_loaded_dbc(
+    database: Any,
+    path: Path,
+    *,
+    allowed_offsets_us: tuple[int, ...] | None = None,
+    selected_sender: str | None = None,
+    selected_transmitters: frozenset[str] | None = None,
+) -> DbcParseResult:
+    """Apply formal DBC eligibility to an already loaded cantools database."""
     path = path.resolve()
-    if not path.is_file():
-        raise InputFileError(f"DBC file does not exist: {path}")
-    cantools = importlib.import_module("cantools")
-    try:
-        database = cantools.database.load_file(str(path), strict=False)
-    except Exception as exc:  # 外部解析库可能按格式失败点抛出多种异常，统一转为领域错误。
-        raise InputFileError(f"cannot parse DBC {path}: {exc}") from exc
     candidate_senders = tuple(
         sorted(
             {
                 sender
                 for message in database.messages
-                for sender in _concrete_senders(message)
+                for sender in transmitter_nodes(message)
             }
         )
     )
@@ -181,7 +314,17 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
                 f"{path}: selected_sender {normalized_sender!r} does not exist; "
                 f"candidate senders: {', '.join(candidate_senders) or '(none)'}"
             )
-
+    selected = (
+        None
+        if selected_transmitters is None
+        else frozenset(name.strip() for name in selected_transmitters if name.strip())
+    )
+    if normalized_sender is not None:
+        if selected is not None and selected != frozenset({normalized_sender}):
+            raise InputFileError(
+                "selected_sender and selected_transmitters specify different senders"
+            )
+        selected = frozenset({normalized_sender})
     parsed: list[ParsedDbcMessage] = []
     warnings: list[str] = []
     selected_sender_tx_count = 0
@@ -189,20 +332,16 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
     start_delay_explicit_count = 0
     start_delay_default_count = 0
     start_delay_unknown_count = 0
-    start_delay_default = _attribute_default(database, "GenMsgStartDelayTime")
     for definition_index, message in enumerate(database.messages):
-        concrete_senders = _concrete_senders(message)
-        sender: str | None
-        if normalized_sender is not None:
-            if normalized_sender not in concrete_senders:
-                continue
-            sender = normalized_sender
-            selected_sender_tx_count += 1
-        else:
-            sender = _tx_sender(message)
+        senders = transmitter_nodes(message)
         # cantools represents the reserved Vector__XXX sender as an empty list.
-        if sender is None:
+        if not senders:
             continue
+        if selected is not None and not selected.intersection(senders):
+            continue
+        sender = normalized_sender if normalized_sender is not None else senders[0]
+        if normalized_sender is not None:
+            selected_sender_tx_count += 1
         cycle_us, cycle_source = _cycle_us(message)
         if cycle_us is None:
             if _is_declared_periodic(message):
@@ -211,19 +350,30 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
                 )
             continue
         periodic_tx_count += 1
-        if not _is_fd_message(message):
-            raise UnsupportedMessageError(
-                f"{path}: message {message.name} is not a CAN FD data frame"
-            )
+        frame_protocol = (
+            FrameProtocol.CAN_FD
+            if _is_fd_message(message)
+            else FrameProtocol.CLASSIC_CAN
+        )
+        dbc_brs, dbc_brs_source = (
+            _message_brs(database, message)
+            if frame_protocol is FrameProtocol.CAN_FD
+            else (None, None)
+        )
         length = getattr(message, "length", None)
+        valid_lengths = (
+            CAN_FD_PAYLOAD_LENGTHS
+            if frame_protocol is FrameProtocol.CAN_FD
+            else frozenset(range(9))
+        )
         if (
             isinstance(length, bool)
             or not isinstance(length, int)
-            or length not in CAN_FD_PAYLOAD_LENGTHS
+            or length not in valid_lengths
         ):
             raise MissingFieldError(
                 f"{path}: message {message.name} has payload length {length!r} "
-                "that is not representable by a CAN FD DLC"
+                f"that is invalid for {frame_protocol.value}"
             )
         is_extended = bool(getattr(message, "is_extended_frame", False))
         raw_id = int(message.frame_id)
@@ -236,18 +386,25 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
             raise UnsupportedMessageError(
                 f"{path}: message {message.name} has unsupported CAN ID 0x{raw_id:X}"
             )
-        original, original_attribute = _attribute_value(message, ("GenMsgStartDelayTime",))
-        if original_attribute is not None:
-            original_source: Literal["explicit", "default", "unknown"] = "explicit"
-            start_delay_explicit_count += 1
-        elif start_delay_default is not None:
-            original = start_delay_default
-            original_attribute = "GenMsgStartDelayTime BA_DEF_DEF_"
-            original_source = "default"
-            start_delay_default_count += 1
-        else:
-            original_source = "unknown"
-            start_delay_unknown_count += 1
+        original, original_source = _attribute_value(
+            message, DBC_ATTRIBUTES["start_delay"]
+        )
+        # BA_DEF_DEF_ is the effective value for every BO_ without an explicit
+        # StartDelay assignment. The rule is identical for Classic CAN and CAN FD.
+        if original is None:
+            original, original_source = _attribute_default(
+                database, DBC_ATTRIBUTES["start_delay"]
+            )
+        original_offset_source = (
+            "unavailable"
+            if original_source is None
+            else ("default" if original_source.endswith(":BA_DEF_DEF_") else "explicit")
+        )
+        start_delay_source: Literal["explicit", "default", "unknown"] = (
+            "unknown"
+            if original_offset_source == "unavailable"
+            else cast(Literal["explicit", "default"], original_offset_source)
+        )
         original_offset_us = None
         if original is not None:
             original_offset_us = _milliseconds_to_us(original)
@@ -255,6 +412,32 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
                 raise MissingFieldError(
                     f"{path}: message {message.name} has invalid original Offset"
                 )
+        if frame_protocol is FrameProtocol.CLASSIC_CAN and original_offset_us is None:
+            rendered = (
+                "missing"
+                if original_offset_us is None
+                else f"{original_offset_us / 1000:g} ms"
+            )
+            warnings.append(
+                f"Classic CAN message {message.name} was excluded: original Offset "
+                f"{rendered}; Classic CAN requires a real baseline Offset"
+            )
+            continue
+        if frame_protocol is FrameProtocol.CLASSIC_CAN and (
+            _is_explicitly_event_driven(message)
+            or _is_excluded_traffic_class(message)
+        ):
+            warnings.append(
+                f"Classic CAN message {message.name} was excluded as "
+                "event/diagnostic/NM traffic"
+            )
+            continue
+        if start_delay_source == "explicit":
+            start_delay_explicit_count += 1
+        elif start_delay_source == "default":
+            start_delay_default_count += 1
+        else:
+            start_delay_unknown_count += 1
         source_prefix = f"{path}:{message.name}"
         field_sources = [
             ("can_id", f"{source_prefix}:BO_"),
@@ -262,11 +445,14 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
             ("cycle_time_us", f"{source_prefix}:{cycle_source}"),
             ("payload_bytes", f"{source_prefix}:BO_"),
             ("sender_ecu", f"{source_prefix}:BO_"),
+            ("transmitter_nodes", f"{source_prefix}:cantools.Message.senders"),
         ]
-        if original_attribute is not None:
+        if original_source is not None:
             field_sources.append(
-                ("original_offset_us", f"{source_prefix}:{original_attribute}")
+                ("original_offset_us", f"{source_prefix}:{original_source}")
             )
+        if dbc_brs_source is not None:
+            field_sources.append(("dbc_brs", f"{source_prefix}:{dbc_brs_source}"))
         parsed.append(
             ParsedDbcMessage(
                 name=str(message.name),
@@ -278,7 +464,17 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
                 original_offset_us=original_offset_us,
                 definition_index=definition_index,
                 field_sources=tuple(field_sources),
-                start_delay_source=original_source,
+                start_delay_source=start_delay_source,
+                frame_protocol=frame_protocol,
+                transmitter_nodes=senders,
+                original_offset_attribute=(
+                    "GenMsgStartDelayTime" if original_source is not None else None
+                ),
+                original_offset_source=original_offset_source,
+                dbc_brs=dbc_brs,
+                dbc_brs_source=(
+                    f"DBC:{dbc_brs_source}" if dbc_brs_source is not None else None
+                ),
             )
         )
     if not parsed:
@@ -288,8 +484,16 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
             else ""
         )
         raise InputFileError(
-            f"{path}: no periodic CAN FD TX messages were found{sender_context}"
+            f"{path}: no eligible periodic TX messages were found{sender_context}"
         )
+    protocols = {message.frame_protocol for message in parsed}
+    if len(protocols) != 1:
+        raise UnsupportedMessageError(
+            f"{path}: one physical network mixes eligible Classic CAN and CAN FD "
+            "periodic TX messages; Byte and microsecond weights cannot be mixed"
+        )
+    nominal_bitrate_bps = read_dbc_nominal_bitrate(path)
+    data_bitrate_bps, data_bitrate_source = read_dbc_data_bitrate(path)
     return DbcParseResult(
         messages=tuple(parsed),
         warnings=tuple(warnings),
@@ -303,4 +507,39 @@ def parse_dbc(path: Path, selected_sender: str | None = None) -> DbcParseResult:
         start_delay_explicit_count=start_delay_explicit_count,
         start_delay_default_count=start_delay_default_count,
         start_delay_unknown_count=start_delay_unknown_count,
+        nominal_bitrate_bps=nominal_bitrate_bps,
+        nominal_bitrate_source=(
+            "DBC:Baudrate" if nominal_bitrate_bps is not None else None
+        ),
+        data_bitrate_bps=data_bitrate_bps,
+        data_bitrate_source=data_bitrate_source,
+    )
+
+
+def parse_dbc(
+    path: Path,
+    selected_sender: str | None = None,
+    *,
+    allowed_offsets_us: tuple[int, ...] | None = None,
+    selected_transmitters: frozenset[str] | None = None,
+) -> DbcParseResult:
+    """! @brief 解析一个 DBC，过滤事件报文并保留稳定定义顺序。
+
+    @raises MissingFieldError 声明为周期的报文缺少必要字段时抛出。
+    @raises InputFileError 文件不存在或 cantools 无法解析时抛出。
+    """
+    path = path.resolve()
+    if not path.is_file():
+        raise InputFileError(f"DBC file does not exist: {path}")
+    cantools = importlib.import_module("cantools")
+    try:
+        database = cantools.database.load_file(str(path), strict=False)
+    except Exception as exc:  # 外部解析库可能按格式失败点抛出多种异常，统一转为领域错误。
+        raise InputFileError(f"cannot parse DBC {path}: {exc}") from exc
+    return parse_loaded_dbc(
+        database,
+        path,
+        allowed_offsets_us=allowed_offsets_us,
+        selected_sender=selected_sender,
+        selected_transmitters=selected_transmitters,
     )

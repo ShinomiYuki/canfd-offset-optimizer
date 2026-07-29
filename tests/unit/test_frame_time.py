@@ -6,7 +6,7 @@
 
 import pytest
 
-from canfd_offset_optimizer.models import ChannelConfig, WeightMode
+from canfd_offset_optimizer.models import ChannelConfig, FrameProtocol, WeightMode
 from canfd_offset_optimizer.timing.frame_time import estimate_frame_weight
 
 
@@ -28,6 +28,29 @@ def test_approximation_modes_are_explicit() -> None:
     unit = estimate_frame_weight(16, False, unknown, WeightMode.UNIT)
     assert payload.frame_time_us == 16 and payload.warning
     assert unit.frame_time_us == 1 and unit.warning
+
+
+def test_classic_can_payload_length_is_the_temporary_weight() -> None:
+    unknown = ChannelConfig("classic", None, None, None)
+    estimate = estimate_frame_weight(
+        7,
+        False,
+        unknown,
+        WeightMode.PAYLOAD_BYTES,
+        FrameProtocol.CLASSIC_CAN,
+    )
+    assert estimate.frame_time_us == 7
+    assert 'classic_weight_model = "payload_bytes_approximation"' in (
+        estimate.warning or ""
+    )
+    with pytest.raises(ValueError, match="not implemented"):
+        estimate_frame_weight(
+            7,
+            False,
+            unknown,
+            WeightMode.FRAME_TIME_US,
+            FrameProtocol.CLASSIC_CAN,
+        )
 
 
 def test_iso_can_fd_estimate_has_auditable_phase_bit_counts() -> None:

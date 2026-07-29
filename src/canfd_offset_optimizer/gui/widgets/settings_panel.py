@@ -1,0 +1,526 @@
+"""Shared settings applied to every automatically discovered network."""
+
+from __future__ import annotations
+
+from enum import Enum
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ...config import OffsetSearchConfig
+from ...exceptions import ConfigurationError
+from ..contracts import (
+    FrameProtocol,
+    GuiBatchOptimizationRequest,
+    NetworkTimingConfig,
+    OptimizationMode,
+    RestartMode,
+    RestartSettings,
+    WeightMode,
+    WorkspaceInspection,
+)
+
+
+class SettingsPanel(QGroupBox):
+    """Expose a compact basic form and opt-in expert search settings."""
+
+    details_requested = Signal()
+    sender_selection_requested = Signal()
+    timing_configuration_requested = Signal()
+    validity_changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__("批量优化设置")
+        self._inspection: WorkspaceInspection | None = None
+        self._timing_configs: tuple[NetworkTimingConfig, ...] = ()
+
+        self.networks_label = QLabel("已发现网段：0 个")
+        self.networks_label.setWordWrap(True)
+        self.messages_label = QLabel(
+            "基础可优化报文：0 / 路由排除：0 / 实际参与优化：0"
+        )
+        self.messages_label.setWordWrap(True)
+        self.details_button = QPushButton("查看详情")
+        self.details_button.setEnabled(False)
+        network_summary = QWidget()
+        network_summary_layout = QHBoxLayout(network_summary)
+        network_summary_layout.setContentsMargins(0, 0, 0, 0)
+        network_summary_layout.addWidget(self.networks_label, 1)
+        network_summary_layout.addWidget(self.details_button)
+
+        self.sender_selection_label = QLabel("发送节点筛选：未完成")
+        self.sender_selection_label.setWordWrap(True)
+        self.sender_selection_button = QPushButton("选择发送节点")
+        self.sender_selection_button.setEnabled(False)
+        sender_selection_row = QWidget()
+        sender_selection_layout = QHBoxLayout(sender_selection_row)
+        sender_selection_layout.setContentsMargins(0, 0, 0, 0)
+        sender_selection_layout.addWidget(self.sender_selection_label, 1)
+        sender_selection_layout.addWidget(self.sender_selection_button)
+
+        self.timing_summary_label = QLabel("网段速率参数：已配置 0/0")
+        self.timing_summary_label.setWordWrap(True)
+        self.timing_config_button = QPushButton("配置")
+        self.timing_config_button.setEnabled(False)
+        self.timing_config_button.setToolTip(
+            "仅用于优化后的协议级保守占用时间诊断，不参与 GCLS。"
+        )
+        timing_row = QWidget()
+        timing_layout = QHBoxLayout(timing_row)
+        timing_layout.setContentsMargins(0, 0, 0, 0)
+        timing_layout.addWidget(self.timing_summary_label, 1)
+        timing_layout.addWidget(self.timing_config_button)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Peak（严格峰值）", OptimizationMode.PEAK)
+        self.mode_combo.addItem("Balanced（推荐）", OptimizationMode.BALANCED)
+        self.mode_combo.addItem("Variance（实验）", OptimizationMode.VARIANCE)
+        self.mode_combo.setCurrentIndex(1)
+
+        self.classic_weight_combo = QComboBox()
+        self.classic_weight_combo.addItem(
+            "Payload 长度（payload_bytes）", WeightMode.PAYLOAD_BYTES
+        )
+        self.classic_weight_combo.setEnabled(False)
+        self.classic_weight_combo.setToolTip(
+            "Classic CAN 当前暂使用 Payload 长度作为相对负载权重，"
+            "仅用于 Offset 均衡，不代表真实总线占用时间。"
+        )
+        self.can_fd_weight_combo = QComboBox()
+        # Compatibility alias used by existing integrations; this is now the
+        # visible, CAN-FD-specific selector rather than one project-wide weight.
+        self.weight_combo = self.can_fd_weight_combo
+
+        self.offset_min_spin = self._offset_spin(minimum=0, value=15)
+        self.offset_max_spin = self._offset_spin(minimum=0, value=100)
+        self.offset_step_spin = self._offset_spin(minimum=1, value=5)
+        offset_range = QWidget()
+        offset_range_layout = QHBoxLayout(offset_range)
+        offset_range_layout.setContentsMargins(0, 0, 0, 0)
+        offset_range_layout.setSpacing(6)
+        offset_range_layout.addWidget(self.offset_min_spin)
+        offset_range_layout.addWidget(QLabel("～"))
+        offset_range_layout.addWidget(self.offset_max_spin)
+        offset_range_layout.addWidget(QLabel("ms"))
+        offset_range_layout.addStretch(1)
+
+        offset_step = QWidget()
+        offset_step_layout = QHBoxLayout(offset_step)
+        offset_step_layout.setContentsMargins(0, 0, 0, 0)
+        offset_step_layout.setSpacing(6)
+        offset_step_layout.addWidget(self.offset_step_spin)
+        offset_step_layout.addWidget(QLabel("ms"))
+        offset_step_layout.addStretch(1)
+
+        self.offset_summary_label = QLabel()
+        self.offset_summary_label.setWordWrap(True)
+
+        basic = QFormLayout()
+        basic.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        basic.addRow(network_summary)
+        basic.addRow(sender_selection_row)
+        basic.addRow(timing_row)
+        basic.addRow(self.messages_label)
+        basic.addRow("模式：", self.mode_combo)
+        basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
+        basic.addRow("CAN FD 权重：", self.can_fd_weight_combo)
+        basic.addRow("Offset 范围：", offset_range)
+        basic.addRow("Offset 步长：", offset_step)
+        basic.addRow("", self.offset_summary_label)
+
+        self.advanced_button = QToolButton()
+        self.advanced_button.setText("高级搜索设置")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.setChecked(False)
+        self.advanced_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.advanced_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+
+        self.advanced_content = QWidget()
+        self.advanced_layout = QFormLayout(self.advanced_content)
+        self.advanced_layout.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+
+        self.tolerance_spin = QDoubleSpinBox()
+        self.tolerance_spin.setRange(0.0, 1.0)
+        self.tolerance_spin.setDecimals(3)
+        self.tolerance_spin.setSingleStep(0.01)
+        self.tolerance_spin.setValue(0.05)
+        self.tolerance_spin.setToolTip("Balanced 模式允许的峰值相对宽容量")
+
+        self.restart_combo = QComboBox()
+        self.restart_combo.addItem("自动（自适应）", RestartMode.ADAPTIVE)
+        self.restart_combo.addItem("固定次数", RestartMode.FIXED)
+        self.fixed_attempts_spin = QSpinBox()
+        self.fixed_attempts_spin.setRange(1, 10_000)
+        self.fixed_attempts_spin.setValue(21)
+        self.adaptive_min_spin = QSpinBox()
+        self.adaptive_min_spin.setRange(1, 10_000)
+        self.adaptive_min_spin.setValue(20)
+        self.adaptive_max_spin = QSpinBox()
+        self.adaptive_max_spin.setRange(1, 10_000)
+        self.adaptive_max_spin.setValue(80)
+
+        self.candidate_pool_combo = QComboBox()
+        for size in (1, 4, 8, 16, 32):
+            self.candidate_pool_combo.addItem(str(size), size)
+        self.triple_search_check = QCheckBox("启用冲突导向 3-opt")
+        self.triple_search_check.setChecked(False)
+        self.triple_warning_label = QLabel(
+            "高质量离线搜索，可能显著增加全部网段运行时间"
+        )
+        self.triple_warning_label.setWordWrap(True)
+
+        self.advanced_layout.addRow("Balanced tolerance：", self.tolerance_spin)
+        self.advanced_layout.addRow("Restart：", self.restart_combo)
+        self.advanced_layout.addRow("固定 attempts：", self.fixed_attempts_spin)
+        self.advanced_layout.addRow("自动最少 attempts：", self.adaptive_min_spin)
+        self.advanced_layout.addRow("自动最多 attempts：", self.adaptive_max_spin)
+        self.advanced_layout.addRow("Candidate pool：", self.candidate_pool_combo)
+        self.advanced_layout.addRow("", self.triple_search_check)
+        self.advanced_layout.addRow("", self.triple_warning_label)
+        self.advanced_content.setVisible(False)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(basic)
+        layout.addWidget(self.advanced_button)
+        layout.addWidget(self.advanced_content)
+
+        self.advanced_button.toggled.connect(self._toggle_advanced)
+        self.can_fd_weight_combo.currentIndexChanged.connect(
+            self._update_weight_controls
+        )
+        self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.details_button.clicked.connect(self.details_requested.emit)
+        self.sender_selection_button.clicked.connect(
+            self.sender_selection_requested.emit
+        )
+        self.timing_config_button.clicked.connect(
+            self.timing_configuration_requested.emit
+        )
+        for spin in (self.offset_min_spin, self.offset_max_spin, self.offset_step_spin):
+            spin.valueChanged.connect(self._update_offset_summary)
+        for control_signal in (
+            self.mode_combo.currentIndexChanged,
+            self.can_fd_weight_combo.currentIndexChanged,
+            self.offset_min_spin.valueChanged,
+            self.offset_max_spin.valueChanged,
+            self.offset_step_spin.valueChanged,
+            self.tolerance_spin.valueChanged,
+            self.restart_combo.currentIndexChanged,
+            self.fixed_attempts_spin.valueChanged,
+            self.adaptive_min_spin.valueChanged,
+            self.adaptive_max_spin.valueChanged,
+            self.candidate_pool_combo.currentIndexChanged,
+            self.triple_search_check.toggled,
+        ):
+            control_signal.connect(lambda *_args: self.validity_changed.emit())
+        self._update_offset_summary()
+        self._update_restart_controls()
+        self._update_mode_controls()
+
+    @staticmethod
+    def _offset_spin(*, minimum: int, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, 2_147_483_647)
+        spin.setValue(value)
+        return spin
+
+    def set_inspection(self, inspection: WorkspaceInspection) -> None:
+        self._inspection = inspection
+        existing = {config.network_id: config for config in self._timing_configs}
+        inspected = {
+            config.network_id: config
+            for config in inspection.network_timing_configs
+        }
+        self._timing_configs = tuple(
+            existing.get(
+                network.network_id,
+                inspected.get(
+                    network.network_id, NetworkTimingConfig(network.network_id)
+                ),
+            )
+            for network in inspection.networks
+        )
+        self._update_timing_summary()
+        self.timing_config_button.setEnabled(bool(inspection.networks))
+        discovered = len(inspection.networks)
+        optimizable = len(inspection.optimizable_networks)
+        if inspection.sender_selection_ready:
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：{optimizable} / "
+                f"已跳过：{discovered - optimizable}"
+            )
+            self.messages_label.setText(
+                f"基础可优化报文：{inspection.base_eligible_message_count} / "
+                f"路由排除：{inspection.routing_excluded_message_count} / "
+                f"实际参与优化：{inspection.final_eligible_message_count}"
+            )
+            selected_count = sum(
+                len(item.selected_transmitters)
+                for item in inspection.sender_selection_summaries
+            )
+            self.sender_selection_label.setText(
+                "发送节点筛选：已完成\n"
+                f"已处理 {len(inspection.sender_selection_summaries)} 个 DBC，"
+                f"已选择 {selected_count} 个节点"
+            )
+            self.sender_selection_button.setText("修改选择")
+        else:
+            self.networks_label.setText(
+                f"发现网段：{discovered} / 可优化：待发送节点筛选 / 已跳过：—"
+            )
+            self.messages_label.setText(
+                "基础可优化报文：待发送节点筛选 / 路由排除：— / 实际参与优化：—"
+            )
+            self.sender_selection_label.setText("发送节点筛选：未完成")
+            self.sender_selection_button.setText("选择发送节点")
+        self.sender_selection_button.setEnabled(inspection.can_select_senders)
+        self.details_button.setEnabled(True)
+        has_classic = any(
+            network.frame_protocol is FrameProtocol.CLASSIC_CAN
+            for network in inspection.optimizable_networks
+        )
+        has_fd = any(
+            network.frame_protocol is FrameProtocol.CAN_FD
+            for network in inspection.optimizable_networks
+        )
+        self.classic_weight_combo.setToolTip(
+            "Classic CAN 当前暂使用 Payload 长度作为相对负载权重，"
+            "仅用于 Offset 均衡，不代表真实总线占用时间。"
+            + ("" if has_classic else " 当前工程没有可优化的 Classic CAN 网段。")
+        )
+        self._set_weight_options(
+            self._automatic_fd_weight_options(inspection), has_fd=has_fd
+        )
+        self.mode_combo.setEnabled(
+            inspection.sender_selection_ready and bool(inspection.optimizable_networks)
+        )
+
+    @staticmethod
+    def _automatic_fd_weight_options(
+        inspection: WorkspaceInspection,
+    ) -> tuple[WeightMode, ...]:
+        fd_networks = tuple(
+            network
+            for network in inspection.optimizable_networks
+            if network.frame_protocol is FrameProtocol.CAN_FD
+        )
+        if not fd_networks:
+            return (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
+        common = {WeightMode.PAYLOAD_BYTES, WeightMode.FRAME_TIME_US}
+        for network in fd_networks:
+            common.intersection_update(network.available_weight_modes)
+        return tuple(
+            mode
+            for mode in (WeightMode.FRAME_TIME_US, WeightMode.PAYLOAD_BYTES)
+            if mode in common
+        )
+
+    def clear_inspection(self) -> None:
+        self._inspection = None
+        self.networks_label.setText("已发现网段：0 个")
+        self.messages_label.setText(
+            "基础可优化报文：0 / 路由排除：0 / 实际参与优化：0"
+        )
+        self.details_button.setEnabled(False)
+        self.sender_selection_label.setText("发送节点筛选：未完成")
+        self.sender_selection_button.setText("选择发送节点")
+        self.sender_selection_button.setEnabled(False)
+        self._timing_configs = ()
+        self._update_timing_summary()
+        self.timing_config_button.setEnabled(False)
+        self.can_fd_weight_combo.clear()
+
+    def build_request(self) -> GuiBatchOptimizationRequest:
+        if self._inspection is None:
+            raise ValueError("尚未完成工程工作区检查")
+        can_fd_weight = self._selected_weight_mode(required=True)
+        assert can_fd_weight is not None
+        try:
+            offset_search = OffsetSearchConfig(
+                self.offset_min_spin.value(),
+                self.offset_max_spin.value(),
+                self.offset_step_spin.value(),
+            )
+        except ConfigurationError as exc:
+            raise ValueError(str(exc)) from exc
+        return GuiBatchOptimizationRequest(
+            inspection=self._inspection,
+            can_fd_weight=can_fd_weight,
+            classic_can_weight=WeightMode.PAYLOAD_BYTES,
+            mode=self._selected_mode(),
+            balanced_tolerance=self.tolerance_spin.value(),
+            restart=RestartSettings(
+                mode=self._selected_restart_mode(),
+                fixed_attempts=self.fixed_attempts_spin.value(),
+                min_attempts=self.adaptive_min_spin.value(),
+                max_attempts=self.adaptive_max_spin.value(),
+            ),
+            candidate_pool_size=int(self.candidate_pool_combo.currentData()),
+            enable_triple_search=self.triple_search_check.isChecked(),
+            output_root=self._inspection.session.workspace_root / "user_output",
+            offset_search=offset_search,
+            sender_selection=self._inspection.sender_selection,
+            network_timing_configs=self._timing_configs,
+        )
+
+    def set_timing_configs(
+        self, configs: tuple[NetworkTimingConfig, ...]
+    ) -> None:
+        if self._inspection is None:
+            raise ValueError("尚未完成工程检查")
+        expected = {network.network_id for network in self._inspection.networks}
+        actual = {config.network_id for config in configs}
+        if len(actual) != len(configs) or actual != expected:
+            raise ValueError("网段速率配置必须与当前工程网段一一对应")
+        self._timing_configs = configs
+        self._update_timing_summary()
+
+    @property
+    def timing_configs(self) -> tuple[NetworkTimingConfig, ...]:
+        return self._timing_configs
+
+    def timing_config_for(self, network_id: str) -> NetworkTimingConfig:
+        return next(
+            (config for config in self._timing_configs if config.network_id == network_id),
+            NetworkTimingConfig(network_id),
+        )
+
+    def _update_timing_summary(self) -> None:
+        protocols = (
+            {
+                network.network_id: network.frame_protocol
+                for network in self._inspection.networks
+            }
+            if self._inspection is not None
+            else {}
+        )
+        configured = sum(
+            config.is_complete_for(protocols[config.network_id])
+            for config in self._timing_configs
+            if config.network_id in protocols
+        )
+        self.timing_summary_label.setText(
+            f"网段速率参数：已配置 {configured}/{len(self._timing_configs)}"
+        )
+
+    def can_build_request(self) -> bool:
+        if self._inspection is None or not self._inspection.can_optimize:
+            return False
+        try:
+            self.build_request()
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def _update_offset_summary(self) -> None:
+        try:
+            config = OffsetSearchConfig(
+                self.offset_min_spin.value(),
+                self.offset_max_spin.value(),
+                self.offset_step_spin.value(),
+            )
+        except ConfigurationError as exc:
+            self.offset_summary_label.setText(f"Offset 搜索范围无效：{exc}")
+            return
+        warning = (
+            "；候选较多，运行时间可能显著增加"
+            if config.candidate_count > 1_000
+            else ""
+        )
+        self.offset_summary_label.setText(
+            f"候选 {config.candidate_count} 个，"
+            f"实际最大值 {config.effective_max_offset_ms} ms{warning}"
+        )
+
+    def _set_weight_options(
+        self, modes: tuple[WeightMode, ...], *, has_fd: bool = True
+    ) -> None:
+        self.can_fd_weight_combo.blockSignals(True)
+        self.can_fd_weight_combo.clear()
+        labels = {
+            WeightMode.PAYLOAD_BYTES: "Payload 长度近似权重（payload_bytes）",
+            WeightMode.FRAME_TIME_US: "帧时间（frame_time_us）",
+        }
+        for mode in modes:
+            self.can_fd_weight_combo.addItem(labels[mode], mode)
+        preferred = (
+            WeightMode.FRAME_TIME_US
+            if WeightMode.FRAME_TIME_US in modes
+            else (modes[0] if modes else None)
+        )
+        if preferred is not None:
+            self._select_combo_value(self.can_fd_weight_combo, preferred)
+        self.can_fd_weight_combo.setEnabled(has_fd and len(modes) > 1)
+        self.can_fd_weight_combo.setToolTip(
+            "仅应用于 CAN FD 网段；默认使用帧时间权重。"
+            + ("" if has_fd else " 当前工程没有可优化的 CAN FD 网段。")
+        )
+        self.can_fd_weight_combo.blockSignals(False)
+        self._update_weight_controls()
+
+    def _selected_mode(self) -> OptimizationMode:
+        value = self.mode_combo.currentData()
+        return value if isinstance(value, OptimizationMode) else OptimizationMode(value)
+
+    def _selected_weight_mode(self, *, required: bool = False) -> WeightMode | None:
+        value = self.can_fd_weight_combo.currentData()
+        if value is None:
+            if required:
+                raise ValueError("当前工程没有全部 CAN FD 网段共同支持的权重")
+            return None
+        return value if isinstance(value, WeightMode) else WeightMode(value)
+
+    def _selected_restart_mode(self) -> RestartMode:
+        value = self.restart_combo.currentData()
+        return value if isinstance(value, RestartMode) else RestartMode(value)
+
+    @staticmethod
+    def _select_combo_value(combo: QComboBox, target: Enum) -> None:
+        for index in range(combo.count()):
+            value = combo.itemData(index)
+            if value == target or value == target.value:
+                combo.setCurrentIndex(index)
+                return
+
+    def _toggle_advanced(self, expanded: bool) -> None:
+        self.advanced_content.setVisible(expanded)
+        self.advanced_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+
+    def _update_restart_controls(self) -> None:
+        fixed = self._selected_restart_mode() is RestartMode.FIXED
+        self.advanced_layout.setRowVisible(self.fixed_attempts_spin, fixed)
+        self.advanced_layout.setRowVisible(self.adaptive_min_spin, not fixed)
+        self.advanced_layout.setRowVisible(self.adaptive_max_spin, not fixed)
+
+    def _update_weight_controls(self) -> None:
+        self._update_mode_controls()
+
+    def _on_mode_changed(self) -> None:
+        self._update_mode_controls()
+
+    def _update_mode_controls(self) -> None:
+        balanced = self._selected_mode() is OptimizationMode.BALANCED
+        show_tolerance = balanced
+        self.advanced_layout.setRowVisible(self.tolerance_spin, show_tolerance)
+        self.advanced_layout.setRowVisible(self.candidate_pool_combo, balanced)

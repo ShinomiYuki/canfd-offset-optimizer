@@ -9,9 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..config import ProjectConfig, load_project_config
+from ..config import OffsetSearchConfig, ProjectConfig, load_project_config
 from ..exceptions import ConfigurationError, InputFileError, MissingFieldError
-from ..models import CanMessage, ChannelConfig, NetworkModel, ObjectiveMode, WeightMode
+from ..models import (
+    CanMessage,
+    ChannelConfig,
+    FrameProtocol,
+    NetworkModel,
+    ObjectiveMode,
+    WeightMode,
+)
 from ..timeline.slot_map import SlotMap, build_windows, precompute_slot_map
 from ..timing.frame_time import estimate_frame_weight
 from .arxml_parser import ArxmlChannelData, parse_arxml_directory
@@ -87,6 +94,8 @@ def load_project(
     routing_excel_path: Path | None = None,
     routing_target_network: str | None = None,
     require_original_offsets: bool = False,
+    offset_search_override: OffsetSearchConfig | None = None,
+    selected_transmitters: frozenset[str] | None = None,
 ) -> LoadedProject:
     """! @brief 完成外部输入解析、优先级合并、权重和窗口构造。
 
@@ -95,10 +104,33 @@ def load_project(
     if (routing_excel_path is None) != (routing_target_network is None):
         raise ConfigurationError(
             "routing_excel_path and routing_target_network must be provided together"
-        )
+    )
     config = load_project_config(config_path)
-    dbc = parse_dbc(dbc_path, selected_sender=selected_sender)
+    if offset_search_override is not None:
+        config = replace(
+            config,
+            optimization=replace(
+                config.optimization,
+                offset_min_us=offset_search_override.min_offset_ms * 1_000,
+                offset_max_us=offset_search_override.max_offset_ms * 1_000,
+                offset_step_us=offset_search_override.offset_step_ms * 1_000,
+            ),
+        )
+    dbc = parse_dbc(
+        dbc_path,
+        selected_sender=selected_sender,
+        allowed_offsets_us=config.optimization.allowed_offsets_us,
+        selected_transmitters=selected_transmitters,
+    )
     warnings = list(dbc.warnings)
+    frame_protocol = dbc.messages[0].frame_protocol
+    if frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if weight_mode_override not in (None, WeightMode.PAYLOAD_BYTES):
+            warnings.append(
+                "Classic CAN automatically overrides requested weight to payload_bytes"
+            )
+        weight_mode_override = WeightMode.PAYLOAD_BYTES
+        warnings.append('classic_weight_model = "payload_bytes_approximation"')
     sources: dict[str, str] = {}
     routing_table: RoutingTable | None = None
     canonical_routing_target: str | None = None
@@ -219,18 +251,6 @@ def load_project(
             config,
             objective=replace(config.objective, mode=objective_mode_override),
         )
-    if (
-        config.model.weight_mode is not WeightMode.FRAME_TIME_US
-        and config.objective.mode is not ObjectiveMode.PEAK
-    ):
-        warnings.append(
-            f"objective.mode={config.objective.mode.value} requires frame_time_us; "
-            "approximate weight mode was forced to peak"
-        )
-        config = replace(
-            config,
-            objective=replace(config.objective, mode=ObjectiveMode.PEAK),
-        )
     channel_name = config.network.channel
     if not channel_name:
         raise ConfigurationError("network.channel must be specified to select an ARXML channel")
@@ -245,13 +265,9 @@ def load_project(
         else "project.yaml model.weight_mode"
     )
     sources["objective_mode"] = (
-        "forced peak for approximate weight mode"
-        if config.model.weight_mode is not WeightMode.FRAME_TIME_US
-        else (
-            "CLI --objective-mode override"
-            if objective_mode_override is not None
-            else "project.yaml objective.mode"
-        )
+        "CLI --objective-mode override"
+        if objective_mode_override is not None
+        else "project.yaml objective.mode"
     )
     arxml: ArxmlChannelData | None = None
     if not arxml_dir.is_dir():
@@ -330,7 +346,11 @@ def load_project(
     for raw in selected_dbc_messages:
         try:
             estimate = estimate_frame_weight(
-                raw.payload_bytes, raw.is_extended, channel, config.model.weight_mode
+                raw.payload_bytes,
+                raw.is_extended,
+                channel,
+                config.model.weight_mode,
+                raw.frame_protocol,
             )
         except ValueError as exc:
             raise MissingFieldError(
@@ -349,6 +369,11 @@ def load_project(
                 sender_ecu=raw.sender_ecu,
                 definition_index=raw.definition_index,
                 payload_bytes=raw.payload_bytes,
+                frame_protocol=raw.frame_protocol,
+                original_offset_attribute=raw.original_offset_attribute,
+                original_offset_source=raw.original_offset_source,
+                dbc_brs=raw.dbc_brs,
+                dbc_brs_source=raw.dbc_brs_source,
             )
         )
         if raw.original_offset_us is None:

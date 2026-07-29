@@ -70,11 +70,21 @@ def build_windows(
         raise ValueError(
             f"hyperperiod {hyperperiod} us exceeds cap {hyperperiod_cap_us} us"
         )
-    maximum_offset = max(max(message.allowed_offsets_us) for message in messages)
-    if maximum_offset <= 0:
-        raise ValueError("maximum allowed offset must be positive for startup analysis")
-    startup = TimeWindow(0, maximum_offset, slot_width_us)
-    steady = TimeWindow(maximum_offset, maximum_offset + hyperperiod, slot_width_us)
+    maximum_offset = max(
+        max(
+            max(message.allowed_offsets_us),
+            message.original_offset_us
+            if message.original_offset_us is not None
+            else 0,
+        )
+        for message in messages
+    )
+    window_boundary = max(
+        slot_width_us,
+        ((maximum_offset + slot_width_us - 1) // slot_width_us) * slot_width_us,
+    )
+    startup = TimeWindow(0, window_boundary, slot_width_us)
+    steady = TimeWindow(window_boundary, window_boundary + hyperperiod, slot_width_us)
     return startup, steady, hyperperiod
 
 

@@ -26,6 +26,13 @@ class FrameFormat(str, Enum):
     EXTENDED = "extended"
 
 
+class FrameProtocol(str, Enum):
+    """Protocol carried by a physical CAN network."""
+
+    CLASSIC_CAN = "classic_can"
+    CAN_FD = "can_fd"
+
+
 class WeightMode(str, Enum):
     """! @brief 报文权重的计算来源。"""
 
@@ -85,6 +92,11 @@ class CanMessage:
     sender_ecu: str
     definition_index: int
     payload_bytes: int = 8
+    frame_protocol: FrameProtocol = FrameProtocol.CAN_FD
+    original_offset_attribute: str | None = None
+    original_offset_source: str = "unavailable"
+    dbc_brs: bool | None = None
+    dbc_brs_source: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -96,9 +108,17 @@ class CanMessage:
             raise ValueError("cycle_time_us must be positive")
         if self.frame_time_us <= 0:
             raise ValueError("frame_time_us must be positive")
-        if self.payload_bytes not in CAN_FD_PAYLOAD_LENGTHS:
+        if not isinstance(self.frame_protocol, FrameProtocol):
+            raise ValueError("frame_protocol is unsupported")
+        valid_lengths = (
+            frozenset(range(9))
+            if self.frame_protocol is FrameProtocol.CLASSIC_CAN
+            else CAN_FD_PAYLOAD_LENGTHS
+        )
+        if self.payload_bytes not in valid_lengths:
             raise ValueError(
-                f"payload_bytes={self.payload_bytes} is not representable by a CAN FD DLC"
+                f"payload_bytes={self.payload_bytes} is invalid for "
+                f"{self.frame_protocol.value}"
             )
         if self.definition_index < 0:
             raise ValueError("definition_index must be non-negative")
@@ -112,6 +132,16 @@ class CanMessage:
             raise ValueError("allowed_offsets_us must be unique and strictly increasing")
         if self.original_offset_us is not None and self.original_offset_us < 0:
             raise ValueError("original_offset_us must be non-negative")
+        if self.original_offset_attribute not in (None, "GenMsgStartDelayTime"):
+            raise ValueError("original_offset_attribute is unsupported")
+        if self.original_offset_source not in {"explicit", "default", "unavailable"}:
+            raise ValueError("original_offset_source is unsupported")
+        if self.dbc_brs is not None and not isinstance(self.dbc_brs, bool):
+            raise ValueError("dbc_brs must be boolean when provided")
+        if (self.dbc_brs is None) != (self.dbc_brs_source is None):
+            raise ValueError("DBC BRS value and source must be provided together")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN and self.dbc_brs is not None:
+            raise ValueError("Classic CAN message must not carry BRS metadata")
 
     @property
     def frame_format(self) -> FrameFormat:
@@ -188,16 +218,24 @@ class NetworkModel:
         if self.startup_window.slot_width_us != self.steady_window.slot_width_us:
             raise ValueError("startup and steady windows must use the same slot width")
         maximum_offset = max(
-            max(message.allowed_offsets_us) for message in self.messages
-        )
-        if self.startup_window.end_us != maximum_offset:
-            raise ValueError("startup window must end at the maximum legal Offset")
-        if any(
-            offset % self.steady_window.slot_width_us
+            max(
+                max(message.allowed_offsets_us),
+                message.original_offset_us
+                if message.original_offset_us is not None
+                else 0,
+            )
             for message in self.messages
-            for offset in message.allowed_offsets_us
-        ):
-            raise ValueError("all legal Offsets must align to the slot width")
+        )
+        expected_boundary = max(
+            self.startup_window.slot_width_us,
+            (
+                (maximum_offset + self.startup_window.slot_width_us - 1)
+                // self.startup_window.slot_width_us
+            )
+            * self.startup_window.slot_width_us,
+        )
+        if self.startup_window.end_us != expected_boundary:
+            raise ValueError("startup window must cover the maximum legal Offset")
         if any(
             self.hyperperiod_us % message.cycle_time_us for message in self.messages
         ):
@@ -205,6 +243,20 @@ class NetworkModel:
         names = [message.name for message in self.messages]
         if len(names) != len(set(names)):
             raise ValueError("message names must be unique")
+        protocols = {message.frame_protocol for message in self.messages}
+        if len(protocols) != 1:
+            raise ValueError(
+                "one physical network must not mix eligible Classic CAN and CAN FD frames"
+            )
+        if (
+            next(iter(protocols)) is FrameProtocol.CLASSIC_CAN
+            and self.weight_mode is not WeightMode.PAYLOAD_BYTES
+        ):
+            raise ValueError("Classic CAN currently requires payload_bytes weight")
+
+    @property
+    def frame_protocol(self) -> FrameProtocol:
+        return self.messages[0].frame_protocol
 
     @property
     def average_load(self) -> float:
@@ -728,11 +780,16 @@ class OptimizationResult:
         )
         if any(value < 0 for array in arrays for value in array):
             raise ValueError("result load/count arrays must be non-negative")
-        if (
-            self.objective.mode is not ObjectiveMode.BALANCED
-            and (
-                self.objective > self.greedy_objective
-                or self.objective > self.initial_objective
+        original_is_candidate_baseline = all(
+            message.original_offset_us is None
+            or message.original_offset_us in message.allowed_offsets_us
+            for message in self.messages
+        )
+        if self.objective.mode is not ObjectiveMode.BALANCED and (
+            self.objective > self.greedy_objective
+            or (
+                original_is_candidate_baseline
+                and self.objective > self.initial_objective
             )
         ):
             raise ValueError("optimized objective must not be worse than its baselines")

@@ -9,6 +9,7 @@ htmlcov/
 venv/
 dist/
 build/
+release/
 *.egg-info/
 
 # Real project inputs may be confidential.
@@ -16,6 +17,14 @@ input/dbc/*
 !input/dbc/.gitkeep
 input/arxml/*
 !input/arxml/.gitkeep
+/docs/Communication Routing Table V4.8_202606121848_ZCU.xlsx
+/docs/网关路由配置表V02_V4.7_to_V4.8.xlsx
+
+# Local-only internal plans, reports, and prompt instructions.
+/docs/AGNETS.md
+/docs/PySide6 GUI 前置架构与实施计划.md
+/docs/gui_architecture_plan.md
+/docs/gui_real_backend_root_cause_report.md
 
 output/results/*
 !output/results/.gitkeep
@@ -42,3 +51,12 @@ docs/*.aux
 docs/*.log
 docs/*.out
 docs/*.toc
+user_input/
+user_output/
+
+# Local test and automation scratch directories.
+/.codex/
+/.codex_tmp/
+/.pytest_tmp/
+/.pytest-tmp-*/
+/test_tmp/

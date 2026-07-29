@@ -1,0 +1,337 @@
+from __future__ import annotations
+
+from dataclasses import replace
+import json
+from pathlib import Path
+
+import pytest
+
+from canfd_offset_optimizer.gui.contracts import (
+    CancellationToken,
+    CLASSIC_WEIGHT_MODEL,
+    FrameProtocol,
+    OptimizationMode,
+    RestartMode,
+    WeightMode,
+    WorkspaceInspection,
+)
+from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
+from canfd_offset_optimizer.gui.artifact_outputs import write_run_config_json
+from canfd_offset_optimizer.gui.widgets.settings_panel import SettingsPanel
+
+
+def test_arxml_project_can_choose_both_weight_modes(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    assert panel.weight_combo.count() == 2
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
+    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.BALANCED
+    assert panel.mode_combo.isEnabled()
+    request = panel.build_request()
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
+    assert request.offset_search.candidate_offsets_ms == tuple(range(15, 101, 5))
+
+
+def test_default_information_architecture_is_compact(qtbot) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    assert panel.advanced_content.isHidden()
+    assert not panel.advanced_button.isChecked()
+    assert panel.classic_weight_combo.isVisible()
+    assert not panel.classic_weight_combo.isEnabled()
+    assert panel.can_fd_weight_combo.isVisible()
+    assert not panel.advanced_content.isAncestorOf(panel.offset_min_spin)
+    assert not panel.advanced_content.isAncestorOf(panel.offset_max_spin)
+    assert not panel.advanced_content.isAncestorOf(panel.offset_step_spin)
+    assert panel.offset_summary_label.text() == "候选 18 个，实际最大值 100 ms"
+
+
+def test_advanced_rows_use_conditional_visibility_without_resetting_values(
+    qtbot,
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.advanced_button.setChecked(True)
+
+    panel.tolerance_spin.setValue(0.125)
+    assert panel.advanced_layout.isRowVisible(panel.tolerance_spin)
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.PEAK)
+    )
+    assert not panel.advanced_layout.isRowVisible(panel.tolerance_spin)
+    assert not panel.advanced_layout.isRowVisible(panel.candidate_pool_combo)
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    assert panel.advanced_layout.isRowVisible(panel.tolerance_spin)
+    assert panel.advanced_layout.isRowVisible(panel.candidate_pool_combo)
+    assert panel.tolerance_spin.value() == 0.125
+
+    assert not panel.advanced_layout.isRowVisible(panel.fixed_attempts_spin)
+    assert panel.advanced_layout.isRowVisible(panel.adaptive_min_spin)
+    assert panel.advanced_layout.isRowVisible(panel.adaptive_max_spin)
+    panel.adaptive_min_spin.setValue(31)
+    panel.restart_combo.setCurrentIndex(
+        panel.restart_combo.findData(RestartMode.FIXED)
+    )
+    assert panel.advanced_layout.isRowVisible(panel.fixed_attempts_spin)
+    assert not panel.advanced_layout.isRowVisible(panel.adaptive_min_spin)
+    assert not panel.advanced_layout.isRowVisible(panel.adaptive_max_spin)
+    panel.restart_combo.setCurrentIndex(
+        panel.restart_combo.findData(RestartMode.ADAPTIVE)
+    )
+    assert panel.adaptive_min_spin.value() == 31
+
+
+def test_collapsing_and_hiding_controls_preserves_request_semantics(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.advanced_button.setChecked(True)
+    panel.tolerance_spin.setValue(0.125)
+    panel.restart_combo.setCurrentIndex(
+        panel.restart_combo.findData(RestartMode.FIXED)
+    )
+    panel.fixed_attempts_spin.setValue(37)
+    panel.candidate_pool_combo.setCurrentIndex(
+        panel.candidate_pool_combo.findData(16)
+    )
+    panel.triple_search_check.setChecked(True)
+    panel.offset_min_spin.setValue(10)
+    panel.offset_max_spin.setValue(90)
+    panel.offset_step_spin.setValue(10)
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(OptimizationMode.PEAK))
+    panel.advanced_button.setChecked(False)
+
+    request = panel.build_request()
+    assert request.mode is OptimizationMode.PEAK
+    assert request.balanced_tolerance == 0.125
+    assert request.restart.mode is RestartMode.FIXED
+    assert request.restart.fixed_attempts == 37
+    assert request.candidate_pool_size == 16
+    assert request.enable_triple_search
+    assert request.offset_search.candidate_offsets_ms == tuple(range(10, 91, 10))
+
+
+def test_offset_search_controls_build_non_divisible_request(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(15)
+    panel.offset_max_spin.setValue(102)
+    panel.offset_step_spin.setValue(10)
+    request = panel.build_request()
+    assert request.offset_search.candidate_offsets_ms == tuple(range(15, 96, 10))
+    assert "9" in panel.offset_summary_label.text()
+
+
+def test_invalid_offset_range_blocks_request(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(200)
+    panel.offset_max_spin.setValue(100)
+    assert "无效" in panel.offset_summary_label.text()
+    with pytest.raises(ValueError, match="max_offset_ms"):
+        panel.build_request()
+
+
+def test_run_config_exports_effective_offset_search_metadata(
+    qtbot, inspection: WorkspaceInspection, tmp_path: Path
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.offset_min_spin.setValue(15)
+    panel.offset_max_spin.setValue(102)
+    panel.offset_step_spin.setValue(10)
+    path = write_run_config_json(panel.build_request(), tmp_path / "run_config.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "balanced"
+    assert payload["classic_can_weight"] == "payload_bytes"
+    assert payload["can_fd_weight"] == "frame_time_us"
+    assert payload["offset_search"] == {
+        "min_offset_ms": 15,
+        "max_offset_ms": 102,
+        "offset_step_ms": 10,
+        "effective_max_offset_ms": 95,
+        "candidate_count": 9,
+    }
+    policy = payload["conservative_bus_service_time_policy"]
+    assert policy["optimizer_weight"] is False
+    assert policy["can_fd_brs_on_phase_aware"] is True
+    assert policy["can_fd_brs_off_all_bits_at_nominal_bitrate"] is True
+    assert policy["requires_data_bitrate_when_brs_on"] is True
+    assert policy["requires_effective_brs"] is True
+
+
+def test_dbc_only_fd_payload_keeps_mode_selectable(
+    qtbot, workspace_root: Path, tmp_path: Path
+) -> None:
+    source = tmp_path / "dbc_only"
+    source.mkdir()
+    (source / "PT.dbc").write_text("PT", encoding="utf-8")
+    (source / "project.yaml").write_text("project: demo", encoding="utf-8")
+    backend = FixtureBackend(workspace_root=workspace_root, delay_seconds=0)
+    session = backend.import_inputs((source,), lambda _u: None, CancellationToken())
+    inspection = backend.inspect_workspace(session, lambda _u: None, CancellationToken())
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    assert panel.weight_combo.count() == 1
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.PAYLOAD_BYTES
+    assert not panel.weight_combo.isEnabled()
+    assert OptimizationMode(panel.mode_combo.currentData()) is OptimizationMode.BALANCED
+    assert panel.mode_combo.isEnabled()
+    request = panel.build_request()
+    assert request.can_fd_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_skipped_networks_do_not_remove_weights_supported_by_optimizable_networks(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    skipped = replace(
+        inspection.networks[0],
+        is_optimizable=False,
+        available_weight_modes=(),
+        unoptimizable_reason="经典 CAN，不参与优化",
+    )
+    mixed_inspection = replace(
+        inspection,
+        networks=(skipped, *inspection.networks[1:]),
+    )
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+
+    panel.set_inspection(mixed_inspection)
+
+    assert panel.weight_combo.count() == 2
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
+    request = panel.build_request()
+    assert request.inspection is mixed_inspection
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
+
+
+def test_classic_weight_is_fixed_while_fd_weight_remains_selectable(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic = replace(
+        inspection.networks[0],
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+        automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    mixed = replace(inspection, networks=(classic, *inspection.networks[1:]))
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(mixed)
+
+    assert panel.weight_combo.count() == 2
+    assert WeightMode(panel.weight_combo.currentData()) is WeightMode.FRAME_TIME_US
+    assert "仅应用于 CAN FD" in panel.weight_combo.toolTip()
+    assert panel.classic_weight_combo.count() == 1
+    assert not panel.classic_weight_combo.isEnabled()
+    assert panel.mode_combo.isEnabled()
+    for mode in (
+        OptimizationMode.PEAK,
+        OptimizationMode.BALANCED,
+        OptimizationMode.VARIANCE,
+    ):
+        panel.mode_combo.setCurrentIndex(panel.mode_combo.findData(mode))
+        assert OptimizationMode(panel.mode_combo.currentData()) is mode
+    request = panel.build_request()
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.can_fd_weight is WeightMode.FRAME_TIME_US
+    assert request.mode is OptimizationMode.VARIANCE
+
+
+def test_can_fd_weight_switch_propagates_without_disabling_mode(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(inspection)
+    panel.can_fd_weight_combo.setCurrentIndex(
+        panel.can_fd_weight_combo.findData(WeightMode.PAYLOAD_BYTES)
+    )
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    assert panel.mode_combo.isEnabled()
+    request = panel.build_request()
+    assert request.can_fd_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_classic_only_project_keeps_mode_selectable_and_fd_row_grey(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic_networks = tuple(
+        replace(
+            network,
+            frame_protocol=FrameProtocol.CLASSIC_CAN,
+            available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+            automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+            classic_weight_model=CLASSIC_WEIGHT_MODEL,
+        )
+        for network in inspection.networks
+    )
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(replace(inspection, networks=classic_networks))
+
+    assert not panel.classic_weight_combo.isEnabled()
+    assert not panel.can_fd_weight_combo.isEnabled()
+    assert panel.mode_combo.isEnabled()
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    request = panel.build_request()
+    assert request.classic_can_weight is WeightMode.PAYLOAD_BYTES
+    assert request.mode is OptimizationMode.BALANCED
+
+
+def test_mixed_protocol_batch_applies_weight_per_network(
+    qtbot, inspection: WorkspaceInspection
+) -> None:
+    classic = replace(
+        inspection.networks[0],
+        frame_protocol=FrameProtocol.CLASSIC_CAN,
+        available_weight_modes=(WeightMode.PAYLOAD_BYTES,),
+        automatic_weight_mode=WeightMode.PAYLOAD_BYTES,
+        classic_weight_model=CLASSIC_WEIGHT_MODEL,
+    )
+    mixed = replace(inspection, networks=(classic, *inspection.networks[1:]))
+    panel = SettingsPanel()
+    qtbot.addWidget(panel)
+    panel.set_inspection(mixed)
+    panel.mode_combo.setCurrentIndex(
+        panel.mode_combo.findData(OptimizationMode.BALANCED)
+    )
+    request = panel.build_request()
+
+    batch = FixtureBackend(
+        workspace_root=inspection.session.workspace_root, delay_seconds=0
+    ).optimize_all_networks(request, lambda _update: None, CancellationToken())
+    by_id = batch.network_items_by_id
+    assert by_id[classic.network_id].result is not None
+    assert by_id[classic.network_id].result.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert by_id[classic.network_id].result.mode is OptimizationMode.BALANCED
+    for network in mixed.networks[1:]:
+        assert by_id[network.network_id].result is not None
+        assert by_id[network.network_id].result.weight_mode is WeightMode.FRAME_TIME_US
+        assert by_id[network.network_id].result.mode is OptimizationMode.BALANCED

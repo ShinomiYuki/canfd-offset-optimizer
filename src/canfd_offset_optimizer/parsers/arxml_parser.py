@@ -77,6 +77,91 @@ def _parameter_spec(reference: str) -> tuple[str, int] | None:
     return None
 
 
+def discover_arxml_channel_names(directory: Path) -> tuple[str, ...]:
+    """Return selectable controller ``SHORT-NAME`` values.
+
+    ECUC production exports identify controller containers with a
+    ``DEFINITION-REF`` ending in ``CanController``.  Small or vendor-neutral
+    exports may omit that definition; for those, return the deepest named
+    containers that own recognizable nominal bitrate and BRS values.
+    """
+    if not directory.is_dir():
+        raise InputFileError(f"ARXML directory does not exist: {directory}")
+    files = tuple(
+        sorted(
+            path.resolve()
+            for path in directory.rglob("*")
+            if path.suffix.lower() == ".arxml"
+        )
+    )
+    if not files:
+        raise InputFileError(f"ARXML directory contains no .arxml files: {directory}")
+
+    trees: list[etree._ElementTree] = []
+    strict_names: set[str] = set()
+    for path in files:
+        try:
+            tree = etree.parse(
+                str(path),
+                parser=etree.XMLParser(resolve_entities=False, no_network=True),
+            )
+        except (OSError, etree.XMLSyntaxError) as exc:
+            raise InputFileError(f"cannot parse ARXML {path}: {exc}") from exc
+        trees.append(tree)
+        for element in tree.iter():
+            short_name = _child_text(element, "SHORT-NAME")
+            definition = _child_text(element, "DEFINITION-REF")
+            if short_name is None or definition is None:
+                continue
+            tail = definition.rstrip("/").rsplit("/", 1)[-1]
+            if tail.casefold() == "cancontroller":
+                strict_names.add(short_name)
+    if strict_names:
+        return tuple(sorted(strict_names, key=str.casefold))
+
+    keys_by_container: dict[int, set[str]] = {}
+    containers: dict[int, etree._Element] = {}
+    names: dict[int, str] = {}
+    for tree in trees:
+        for parameter in tree.iter():
+            reference = _child_text(parameter, "DEFINITION-REF")
+            if reference is None or _child_text(parameter, "VALUE") is None:
+                continue
+            spec = _parameter_spec(reference)
+            if spec is None:
+                continue
+            key = spec[0]
+            container = parameter.getparent()
+            while container is not None:
+                short_name = _child_text(container, "SHORT-NAME")
+                if short_name is not None:
+                    identity = id(container)
+                    containers[identity] = container
+                    names[identity] = short_name
+                    keys_by_container.setdefault(identity, set()).add(key)
+                container = container.getparent()
+
+    candidate_ids = {
+        identity
+        for identity, keys in keys_by_container.items()
+        if {"nominal_bitrate", "brs"}.issubset(keys)
+    }
+    ancestor_ids: set[int] = set()
+    for identity in candidate_ids:
+        ancestor = containers[identity].getparent()
+        while ancestor is not None:
+            ancestor_identity = id(ancestor)
+            if ancestor_identity in candidate_ids:
+                ancestor_ids.add(ancestor_identity)
+            ancestor = ancestor.getparent()
+    return tuple(
+        sorted(
+            {names[identity] for identity in candidate_ids - ancestor_ids},
+            key=str.casefold,
+        )
+    )
+
+
 def _parse_scaled_integer(value_text: str, scale: int, source: str) -> int:
     """! @brief Parse a numeric AUTOSAR value and convert it to an integer base unit."""
     try:
