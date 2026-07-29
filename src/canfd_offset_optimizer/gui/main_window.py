@@ -43,6 +43,7 @@ from .widgets.assignment_table import AssignmentTable
 from .widgets.input_panel import InputPanel
 from .widgets.load_chart import LoadChart
 from .widgets.load_heatmap import LoadHeatmap
+from .widgets.joint_result_page import JointOptimizationResultPage
 from .widgets.network_timing_dialog import NetworkTimingDialog
 from .widgets.metrics_panel import BatchSummaryPanel
 from .widgets.progress_panel import ProgressPanel
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
         self.assignment_table = AssignmentTable()
         self.load_chart = LoadChart()
         self.load_heatmap = LoadHeatmap()
+        self.joint_result_page = JointOptimizationResultPage()
         self.quick_start_page = QuickStartPage()
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -136,6 +138,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.assignment_table, "Offset 修改")
         self.tabs.addTab(self.load_chart, "可优化报文负载曲线")
         self.tabs.addTab(self.load_heatmap, "可优化报文负载热力图")
+        self._joint_tab_index = self.tabs.addTab(
+            self.joint_result_page, "联合优化结果"
+        )
+        self.tabs.setTabVisible(self._joint_tab_index, False)
         self.tabs.addTab(details_page, "运行日志与详情")
         splitter = QSplitter()
         splitter.addWidget(left)
@@ -243,10 +249,15 @@ class MainWindow(QMainWindow):
             return
         self._state.transition(WorkflowState.RUNNING)
         self._reset_current_results()
+        workflow = (
+            "CAN-CPU 联合优化（普通模式参数不参与）"
+            if request.joint_settings is not None
+            else f"模式={request.mode.value}"
+        )
         self._append_log(
             f"开始批量优化 {len(request.inspection.optimizable_networks)} 个网段；"
             f"Classic CAN 权重={request.classic_can_weight.value}，"
-            f"CAN FD 权重={request.can_fd_weight.value}，模式={request.mode.value}。"
+            f"CAN FD 权重={request.can_fd_weight.value}，{workflow}。"
         )
 
         def operation(callback: ProgressCallback, token: CancellationToken) -> object:
@@ -497,6 +508,11 @@ class MainWindow(QMainWindow):
             self._clear_selected_network()
             return
         self._selected_network_id = item.network_id
+        self.tabs.setTabVisible(self._joint_tab_index, item.joint is not None)
+        if item.joint is not None:
+            self.joint_result_page.set_result(item.joint)
+        else:
+            self.joint_result_page.clear_result()
         self.details_network_label.setText(f"当前网段：{item.display_name}")
         self.details_network_label.setToolTip(
             f"network_id：{item.network_id}\n来源 DBC：{item.source_file}"
@@ -623,6 +639,8 @@ class MainWindow(QMainWindow):
         self.assignment_table.clear_result()
         self.load_chart.clear_result()
         self.load_heatmap.clear_result()
+        self.joint_result_page.clear_result()
+        self.tabs.setTabVisible(self._joint_tab_index, False)
         self.details_network_label.setText("当前网段：请选择一个网段")
         self.details_network_label.setToolTip("")
         self.log_view.setPlainText("请选择一个网段")

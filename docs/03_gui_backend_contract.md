@@ -5,7 +5,8 @@
 当前 `app.py` 默认注入 `RealBackend`。真实 adapter 实现
 `canfd_offset_optimizer.gui.contracts.OptimizationBackend`。只有 `real_backend.py` 与纯数据服务
 `sender_selection.py`、`heatmap_details.py` 允许接触核心 parser/model/SlotMap 类型，并立即转换为
-GUI 不可变 DTO；窗口、worker 和 widgets 不得直接导入核心类型。
+GUI 不可变 DTO；Joint 通过非 GUI 的 `joint_service.py` 调用核心。窗口、worker 和 widgets
+不得直接导入 `JointSolution`、`MainFunctionSolveResult` 或其他核心类型。
 
 ## 2. 调用协议
 
@@ -259,6 +260,42 @@ Estimator cache key 必须包含 message identity、network_id、协议/格式/P
    仍必须携带完整 `GuiOptimizationResult`，通过
    `dbc_write_error` 和实际 `exported_files` 表达 DBC 缺失，其他产物和 GUI 展示不得丢失。DBC
    basename 不得改变，最终路径采用 240 字符预算，临时文件必须使用短名称并在失败后清理。
-8. 核心尚未提供独立公共 OptimizationService，因此 `real_backend.py` 是受审计的优化适配边界；
-   `sender_selection.py` 仅负责 DBC 发送节点资格，`heatmap_details.py` 仅把正式 SlotMap 命中转换为
-   只读时隙成员 DTO。后续公共 service 就绪后应替换这些核心导入，不影响 GUI contracts/widgets。
+10. 普通 Peak/Balanced/Variance 仍由 `real_backend.py → run_gcls` 适配；Joint 必须经
+   `real_backend.py → joint_service.py → optimization.joint`。`joint_service.py` 不得 import
+   GUI/PySide6，Joint core 也只接受纯 Python cancellation/progress callbacks。
+
+## 7.1 Joint 可选工作流契约
+
+`GuiBatchOptimizationRequest.joint_settings is None` 必须走原 GCLS 路径；非 `None` 才走
+Joint service。Joint 不是 `OptimizationMode`，也不得读取 `request.mode`、普通 Restart、
+Candidate Pool、3-opt 或 Balanced tolerance 作为搜索参数。共享输入仅包括：
+
+- Offset min/max/step；
+- Classic CAN / CAN FD 权重；
+- sender selection、routing exclusion；
+- network timing / protocol metadata。
+
+用户 DTO `JointOptimizationSettings` 为 frozen immutable，只包含峰值允许增量、精确 `rho`
+和 21/41 精度。正式隐藏 baseline 来自第三轮 validation：
+`attempts=3`、`max_refinement_passes=3`、`seed=0`、`endpoint_only=false`；其余 hot-slot、
+pair、Candidate Pool=1 和 3-opt=false 与该轮 `input/config/project.yaml` 一致，不继承普通
+GUI 高级设置。
+
+Joint core 返回的 `select_joint_recommendation(...)` 结果是 GUI 唯一正式 assignment。
+`GuiOptimizationResult.assignment_hash`、Offset 表、曲线、热力图、DBC replacements、
+MainFunction groups 和 Joint exports 必须使用同一 recommendation hash。Pareto 图无选择
+signal，只用于解释 observed Qss / CPU Cost Proxy front；Peak 仅是 hard guardrail。
+
+`T > offset_max` 的长周期消息在 Joint domain 固定 Offset=0，但必须保留在 full assignment、
+CAN metrics、MainFunction solver、GUI rows、CSV 和 DBC；等号仍属于 decision domain。
+
+无 recommendation 时必须 fail closed：网段保留 Joint 诊断与
+`joint_summary.json` / `joint_pareto.csv`，但不创建优化 `GuiOptimizationResult`、Offset CSV、
+MainFunction recommendation 或 DBC。成功 Joint 网段额外输出：
+
+- `joint_summary.json`
+- `joint_pareto.csv`
+- `main_function_recommendation.csv`
+
+`run_config.json` 必须显式记录 `joint_enabled`、三个用户设置及隐藏 baseline。CPU 指标统一称为
+`CPU Cost Proxy` 或“COM-Tx 调度成本代理”，不得解释为 CPU utilization、CPU load 或 WCET。

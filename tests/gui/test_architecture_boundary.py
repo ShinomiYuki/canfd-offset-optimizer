@@ -46,3 +46,39 @@ builtins.__import__ = guarded
 import canfd_offset_optimizer.cli
 """
     subprocess.run([sys.executable, "-c", script], check=True, cwd=Path.cwd())
+
+
+def test_joint_gui_core_boundaries_are_explicit() -> None:
+    widgets = Path("src/canfd_offset_optimizer/gui/widgets")
+    for path in widgets.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert "optimization.joint" not in source
+        assert "JointSolution" not in source
+        assert "MainFunctionSolveResult" not in source
+
+    main_window = Path(
+        "src/canfd_offset_optimizer/gui/main_window.py"
+    ).read_text(encoding="utf-8")
+    assert "JointSolution" not in main_window
+    assert "MainFunctionSolveResult" not in main_window
+
+    real_backend = Path(
+        "src/canfd_offset_optimizer/gui/real_backend.py"
+    ).read_text(encoding="utf-8")
+    assert "from ..joint_service import" in real_backend
+
+    service = Path("src/canfd_offset_optimizer/joint_service.py").read_text(
+        encoding="utf-8"
+    )
+    assert ".gui" not in service
+    assert "PySide6" not in service
+
+    core_roots = (
+        Path("src/canfd_offset_optimizer/optimization"),
+        Path("src/canfd_offset_optimizer/joint_service.py"),
+    )
+    core_paths = tuple(core_roots[0].rglob("*.py")) + (core_roots[1],)
+    for path in core_paths:
+        source = path.read_text(encoding="utf-8")
+        assert "canfd_offset_optimizer.gui" not in source
+        assert "PySide6" not in source

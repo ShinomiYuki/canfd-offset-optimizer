@@ -14,7 +14,7 @@ import hashlib
 import json
 import random
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from itertools import combinations
@@ -57,6 +57,36 @@ from .main_function import (
 from .objective import ObjectivePolicy, score_state, slot_load_threshold_us
 from .joint_analysis import JointRecommendation, select_joint_recommendation
 from .triple_search import conflict_triple_search
+
+CancellationCheck = Callable[[], None]
+JointProgressCallback = Callable[["JointProgressEvent"], None]
+
+
+@dataclass(frozen=True, slots=True)
+class JointProgressEvent:
+    """GUI-independent progress at bounded, cooperative checkpoints."""
+
+    stage: str
+    refinement_index: int | None = None
+    refinement_total: int | None = None
+    epsilon_index: int | None = None
+    epsilon_total: int | None = None
+    attempt: int | None = None
+    attempts_total: int | None = None
+
+
+def _checkpoint(cancellation_check: CancellationCheck | None) -> None:
+    if cancellation_check is not None:
+        cancellation_check()
+
+
+def _progress(
+    callback: JointProgressCallback | None,
+    stage: str,
+    **values: int | None,
+) -> None:
+    if callback is not None:
+        callback(JointProgressEvent(stage, **values))
 
 
 @dataclass(frozen=True, slots=True)
@@ -821,6 +851,8 @@ def _run_joint_search(
     stage: str,
     incumbents: tuple[JointSolution, ...],
     refinement_pass: int = -1,
+    cancellation_check: CancellationCheck | None = None,
+    progress_callback: JointProgressCallback | None = None,
 ) -> JointSolution:
     """Run one shared custom-comparator GCLS path for CPU anchor and ε stages."""
     started = perf_counter()
@@ -830,6 +862,7 @@ def _run_joint_search(
     attempts: list[JointSearchAttempt] = []
 
     for incumbent in incumbents:
+        _checkpoint(cancellation_check)
         state = domain.new_state()
         state.apply_assignments(_full_offsets_from_solution(incumbent, domain))
         metrics = evaluator.evaluate_state(state)
@@ -855,6 +888,13 @@ def _run_joint_search(
         policy.peak_budget,
     )
     for attempt_index in range(restart_policy.attempt_limit):
+        _checkpoint(cancellation_check)
+        _progress(
+            progress_callback,
+            stage,
+            attempt=attempt_index + 1,
+            attempts_total=restart_policy.attempt_limit,
+        )
         attempt_started = perf_counter()
         joint_evaluations_before = evaluator.evaluation_count
         seed = base_seed + attempt_index
@@ -1362,6 +1402,8 @@ def optimize_can_cpu_balanced(
     weight_mode: WeightMode = WeightMode.FRAME_TIME_US,
     seed: int = 0,
     joint_config: JointOptimizationConfig | None = None,
+    cancellation_check: CancellationCheck | None = None,
+    progress_callback: JointProgressCallback | None = None,
 ) -> JointOptimizationResult:
     """! @brief 运行 bounded iterative refinement 并解释最终 observed Pareto。
 
@@ -1371,6 +1413,7 @@ def optimize_can_cpu_balanced(
     convergence 完成后做 post-processing，不反馈给搜索。
     """
     started = perf_counter()
+    _checkpoint(cancellation_check)
     selected_joint_config = joint_config or JointOptimizationConfig()
     domain = build_joint_domain(messages, optimization_config)
     load_threshold = (
@@ -1386,6 +1429,7 @@ def optimize_can_cpu_balanced(
         selected_joint_config.rho,
         load_threshold,
     )
+    _progress(progress_callback, "domain")
     if not domain.decision_messages:
         only = _single_assignment_solution(domain, evaluator, "single_assignment", seed)
         recommendation = select_joint_recommendation((only,))
@@ -1429,18 +1473,50 @@ def optimize_can_cpu_balanced(
         )
 
     archive: dict[str, JointSolution] = {}
+
+    def run_can_stage(
+        stage: str,
+        base_seed: int,
+        objective: ObjectiveConfig,
+        peak_reference_result: OptimizationResult | None = None,
+        *,
+        refinement_index: int | None = None,
+    ) -> OptimizationResult:
+        _checkpoint(cancellation_check)
+        _progress(
+            progress_callback,
+            stage,
+            refinement_index=refinement_index,
+            refinement_total=selected_joint_config.max_refinement_passes,
+        )
+
+        def observe(record: object) -> None:
+            _checkpoint(cancellation_check)
+            _progress(
+                progress_callback,
+                stage,
+                refinement_index=refinement_index,
+                refinement_total=selected_joint_config.max_refinement_passes,
+                attempt=int(getattr(record, "attempt_index")) + 1,
+                attempts_total=optimization_config.restart_policy.attempt_limit,
+            )
+
+        return run_gcls(
+            domain.decision_messages,
+            domain.slot_map,
+            optimization_config,
+            average_load_limit,
+            base_seed,
+            weight_mode,
+            objective,
+            peak_reference_result,
+            observe,
+            fixed_messages=domain.fixed_messages,
+            fixed_offsets=domain.fixed_offset_map,
+        )
+
     peak_objective = replace(objective_config, mode=ObjectiveMode.PEAK)
-    peak_result = run_gcls(
-        domain.decision_messages,
-        domain.slot_map,
-        optimization_config,
-        average_load_limit,
-        seed,
-        weight_mode,
-        peak_objective,
-        fixed_messages=domain.fixed_messages,
-        fixed_offsets=domain.fixed_offset_map,
-    )
+    peak_result = run_can_stage("peak_reference", seed, peak_objective)
     peak_reference = _solution_from_gcls(
         "initial_peak_reference",
         seed,
@@ -1453,17 +1529,8 @@ def optimize_can_cpu_balanced(
         objective_config,
     )
     balanced_objective = replace(objective_config, mode=ObjectiveMode.BALANCED)
-    can_result = run_gcls(
-        domain.decision_messages,
-        domain.slot_map,
-        optimization_config,
-        average_load_limit,
-        seed,
-        weight_mode,
-        balanced_objective,
-        peak_result,
-        fixed_messages=domain.fixed_messages,
-        fixed_offsets=domain.fixed_offset_map,
+    can_result = run_can_stage(
+        "can_endpoint", seed, balanced_objective, peak_result
     )
     can_anchor = _solution_from_gcls(
         "initial_can_anchor",
@@ -1491,6 +1558,8 @@ def optimize_can_cpu_balanced(
         base_seed=seed + 10_000,
         stage="initial_cpu_anchor",
         incumbents=(can_anchor,),
+        cancellation_check=cancellation_check,
+        progress_callback=progress_callback,
     )
     if cpu_anchor.cpu_proxy > can_anchor.cpu_proxy:
         raise RuntimeError("CPU anchor lost the known feasible CAN anchor")
@@ -1522,19 +1591,21 @@ def optimize_can_cpu_balanced(
     refinement_started = perf_counter()
 
     for pass_index in range(selected_joint_config.max_refinement_passes):
+        _checkpoint(cancellation_check)
+        _progress(
+            progress_callback,
+            "refinement",
+            refinement_index=pass_index + 1,
+            refinement_total=selected_joint_config.max_refinement_passes,
+        )
         pass_started = perf_counter()
         pass_seed_base = seed + 1_000_000 + pass_index * 100_000
 
-        peak_pass_result = run_gcls(
-            domain.decision_messages,
-            domain.slot_map,
-            optimization_config,
-            average_load_limit,
+        peak_pass_result = run_can_stage(
+            "refinement_peak",
             pass_seed_base,
-            weight_mode,
             peak_objective,
-            fixed_messages=domain.fixed_messages,
-            fixed_offsets=domain.fixed_offset_map,
+            refinement_index=pass_index + 1,
         )
         peak_pass = _solution_from_gcls(
             f"refinement_{pass_index:02d}_peak",
@@ -1580,6 +1651,8 @@ def optimize_can_cpu_balanced(
                 required=(refined_can,),
             ),
             refinement_pass=pass_index,
+            cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
         )
         _archive_stage(archive, can_refinement, evaluator, domain)
         stage_solutions.append(can_refinement)
@@ -1617,6 +1690,8 @@ def optimize_can_cpu_balanced(
                 required=(refined_cpu, refined_can),
             ),
             refinement_pass=pass_index,
+            cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
         )
         _archive_stage(archive, cpu_refinement, evaluator, domain)
         stage_solutions.append(cpu_refinement)
@@ -1650,6 +1725,15 @@ def optimize_can_cpu_balanced(
             previous = refined_cpu
             epsilon_started = perf_counter()
             for index, budget in enumerate(budgets):
+                _checkpoint(cancellation_check)
+                _progress(
+                    progress_callback,
+                    "epsilon",
+                    refinement_index=pass_index + 1,
+                    refinement_total=selected_joint_config.max_refinement_passes,
+                    epsilon_index=index + 1,
+                    epsilon_total=len(budgets),
+                )
                 epsilon_required = tuple(
                     solution
                     for solution in (previous, refined_cpu, refined_can)
@@ -1678,6 +1762,8 @@ def optimize_can_cpu_balanced(
                         cap=6,
                     ),
                     refinement_pass=pass_index,
+                    cancellation_check=cancellation_check,
+                    progress_callback=progress_callback,
                 )
                 run = JointEpsilonRun(index, budget, solution)
                 pass_epsilon_runs.append(run)
@@ -1745,7 +1831,10 @@ def optimize_can_cpu_balanced(
     if not pass_records:
         raise RuntimeError("joint refinement produced no pass")
     pareto = filter_pareto_solutions(feasible_archive)
+    _checkpoint(cancellation_check)
+    _progress(progress_callback, "pareto_filtering")
     recommendation = select_joint_recommendation(pareto)
+    _progress(progress_callback, "recommendation")
     refinement = JointRefinementSummary(
         len(pass_records),
         selected_joint_config.max_refinement_passes,

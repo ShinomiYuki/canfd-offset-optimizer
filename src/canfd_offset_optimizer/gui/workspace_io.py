@@ -29,6 +29,10 @@ from .contracts import (
 
 
 DEFAULT_PROJECT_CONFIG_PATH = Path(__file__).with_name("default_project.yaml")
+# Cache the bundled template while the application is starting. A portable
+# package can then finish an import safely even if its files are replaced after
+# launch (for example, while preparing a new package in the same directory).
+DEFAULT_PROJECT_CONFIG_BYTES = DEFAULT_PROJECT_CONFIG_PATH.read_bytes()
 DEFAULT_CONFIG_NOTE = "用户未提供项目配置；已使用内置默认 project.yaml"
 
 
@@ -48,9 +52,13 @@ def add_default_project_config(
     ):
         return None
     source = default_config_path.resolve(strict=False)
-    if not source.is_file():
+    bundled_source = DEFAULT_PROJECT_CONFIG_PATH.resolve(strict=False)
+    if source == bundled_source:
+        content = DEFAULT_PROJECT_CONFIG_BYTES
+    elif source.is_file():
+        content = source.read_bytes()
+    else:
         raise BackendError(f"内置默认项目配置不存在：{source}")
-    content = source.read_bytes()
     relative = Path("config/project.yaml")
     destination = session_directory / relative
     destination.parent.mkdir(parents=True, exist_ok=True)

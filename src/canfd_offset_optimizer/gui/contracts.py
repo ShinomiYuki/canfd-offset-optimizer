@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from fractions import Fraction
 from math import isfinite
 from pathlib import Path
 from threading import Event
@@ -11,6 +12,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
 from ..config import OffsetSearchConfig
+from ..exact import RhoInput, normalize_rho
 from ..timing.conservative_service import ConservativeEstimateStatus
 
 
@@ -39,6 +41,11 @@ class OptimizationMode(str, Enum):
     PEAK = "peak"
     BALANCED = "balanced"
     VARIANCE = "variance"
+
+
+class ParetoPrecision(str, Enum):
+    STANDARD = "standard"
+    FINE = "fine"
 
 
 class WeightMode(str, Enum):
@@ -800,6 +807,43 @@ class RestartSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class JointOptimizationSettings:
+    """The three user-visible settings for the optional Joint workflow."""
+
+    peak_tolerance_relative: float = 0.05
+    rho: Fraction = Fraction(1, 1)
+    pareto_precision: ParetoPrecision = ParetoPrecision.STANDARD
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.peak_tolerance_relative, bool)
+            or not isfinite(self.peak_tolerance_relative)
+            or not 0 <= self.peak_tolerance_relative <= 1
+        ):
+            raise ValueError("joint peak tolerance must be finite and in [0, 1]")
+        object.__setattr__(self, "rho", normalize_rho(self.rho))
+        if not isinstance(self.pareto_precision, ParetoPrecision):
+            raise ValueError("joint Pareto precision is unsupported")
+
+    @classmethod
+    def from_values(
+        cls,
+        peak_tolerance_relative: float = 0.05,
+        rho: RhoInput = Fraction(1, 1),
+        pareto_precision: ParetoPrecision = ParetoPrecision.STANDARD,
+    ) -> JointOptimizationSettings:
+        return cls(
+            peak_tolerance_relative,
+            normalize_rho(rho),
+            pareto_precision,
+        )
+
+    @property
+    def epsilon_points(self) -> int:
+        return 21 if self.pareto_precision is ParetoPrecision.STANDARD else 41
+
+
+@dataclass(frozen=True, slots=True)
 class GuiBatchOptimizationRequest:
     """One immutable request applied to every discovered network."""
 
@@ -817,6 +861,7 @@ class GuiBatchOptimizationRequest:
         default_factory=SenderNodeSelectionConfig
     )
     network_timing_configs: tuple[NetworkTimingConfig, ...] = ()
+    joint_settings: JointOptimizationSettings | None = None
 
     def __post_init__(self) -> None:
         if not self.inspection.can_optimize:
@@ -837,6 +882,10 @@ class GuiBatchOptimizationRequest:
             raise ValueError("enable_triple_search must be boolean")
         if not isinstance(self.offset_search, OffsetSearchConfig):
             raise ValueError("offset_search must be an OffsetSearchConfig")
+        if self.joint_settings is not None and not isinstance(
+            self.joint_settings, JointOptimizationSettings
+        ):
+            raise ValueError("joint_settings must be JointOptimizationSettings or None")
         if self.inspection.sender_selection_summaries:
             if not self.sender_selection.confirmed:
                 raise ValueError("DBC sender node selection is not confirmed")
@@ -1159,6 +1208,142 @@ class LoadWindowMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class JointParetoRow:
+    index: int
+    qss: int
+    cpu_proxy: Fraction
+    peak: int
+    main_function_count: int
+    assignment_hash: str
+    source: str
+    is_recommended: bool = False
+
+    def __post_init__(self) -> None:
+        if self.index < 0 or min(self.qss, self.peak, self.main_function_count) < 0:
+            raise ValueError("joint Pareto values must be non-negative")
+        if self.cpu_proxy <= 0:
+            raise ValueError("joint CPU Cost Proxy must be positive")
+        if len(self.assignment_hash) != 64 or not self.source.strip():
+            raise ValueError("joint Pareto provenance is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class MainFunctionMessageRow:
+    message_name: str
+    period_us: int
+    offset_us: int
+    d_us: int
+
+    def __post_init__(self) -> None:
+        if (
+            not self.message_name.strip()
+            or self.period_us <= 0
+            or self.offset_us < 0
+            or self.d_us <= 0
+        ):
+            raise ValueError("MainFunction message row is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class MainFunctionGroupRow:
+    group_index: int
+    timebase_us: int
+    group_cpu_proxy: Fraction
+    messages: tuple[MainFunctionMessageRow, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            self.group_index <= 0
+            or self.timebase_us <= 0
+            or self.group_cpu_proxy <= 0
+            or not self.messages
+        ):
+            raise ValueError("MainFunction group row is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class JointRecommendationView:
+    method: str
+    solution_hash: str | None
+    note: str
+    qss: int | None = None
+    cpu_proxy: Fraction | None = None
+    peak: int | None = None
+    main_function_count: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.method.strip() or not self.note.strip():
+            raise ValueError("joint recommendation diagnosis is incomplete")
+        if self.solution_hash is not None and len(self.solution_hash) != 64:
+            raise ValueError("joint recommendation hash is invalid")
+        present = (
+            self.qss,
+            self.cpu_proxy,
+            self.peak,
+            self.main_function_count,
+        )
+        if self.solution_hash is None and any(value is not None for value in present):
+            raise ValueError("missing recommendation must not expose selected metrics")
+        if self.solution_hash is not None and any(value is None for value in present):
+            raise ValueError("available recommendation requires all selected metrics")
+
+    @property
+    def has_recommendation(self) -> bool:
+        return self.solution_hash is not None
+
+
+@dataclass(frozen=True, slots=True)
+class JointOptimizationView:
+    status: str
+    settings: JointOptimizationSettings
+    pareto_rows: tuple[JointParetoRow, ...]
+    recommendation: JointRecommendationView
+    can_endpoint_hash: str
+    cpu_endpoint_hash: str
+    peak_reference_hash: str
+    peak_budget: int
+    decision_message_count: int
+    fixed_message_count: int
+    refinement_passes: int
+    refinement_limit: int
+    refinement_status: str
+    main_function_groups: tuple[MainFunctionGroupRow, ...] = ()
+    output_directory: Path | None = None
+    exported_files: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.status.strip() or not self.refinement_status.strip():
+            raise ValueError("joint result status must not be empty")
+        for value in (
+            self.can_endpoint_hash,
+            self.cpu_endpoint_hash,
+            self.peak_reference_hash,
+        ):
+            if len(value) != 64:
+                raise ValueError("joint endpoint hash is invalid")
+        counts = (
+            self.peak_budget,
+            self.decision_message_count,
+            self.fixed_message_count,
+            self.refinement_passes,
+            self.refinement_limit,
+        )
+        if min(counts) < 0 or self.refinement_passes > self.refinement_limit:
+            raise ValueError("joint result counts are invalid")
+        recommended = tuple(row for row in self.pareto_rows if row.is_recommended)
+        if self.recommendation.has_recommendation:
+            if (
+                len(recommended) != 1
+                or recommended[0].assignment_hash
+                != self.recommendation.solution_hash
+                or not self.main_function_groups
+            ):
+                raise ValueError("joint recommendation view is inconsistent")
+        elif recommended or self.main_function_groups:
+            raise ValueError("no-recommendation result must fail closed")
+
+
+@dataclass(frozen=True, slots=True)
 class GuiOptimizationResult:
     """Complete immutable result for one network."""
 
@@ -1195,6 +1380,7 @@ class GuiOptimizationResult:
     startup_heatmap: HeatmapWindowDetail | None = None
     network_timing_config: NetworkTimingConfig | None = None
     assignment_hash: str = ""
+    joint: JointOptimizationView | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.weight_mode, WeightMode):
@@ -1212,6 +1398,11 @@ class GuiOptimizationResult:
             raise ValueError("result timing config belongs to another network")
         if self.assignment_hash and len(self.assignment_hash) != 64:
             raise ValueError("result assignment_hash must be SHA-256 hexadecimal text")
+        if self.joint is not None and (
+            not self.joint.recommendation.has_recommendation
+            or self.joint.recommendation.solution_hash != self.assignment_hash
+        ):
+            raise ValueError("successful Joint result must use the recommended assignment")
         if self.dbc_write_error is not None and not self.dbc_write_error.strip():
             raise ValueError("result dbc_write_error must be non-empty when present")
         if (
@@ -1378,6 +1569,7 @@ class NetworkBatchResult:
     base_eligible_message_count: int = 0
     routing_excluded_count: int = 0
     final_eligible_message_count: int = 0
+    joint: JointOptimizationView | None = None
 
     def __post_init__(self) -> None:
         identity = (self.network_id, self.network_name, self.display_name, self.source_file)
@@ -1395,6 +1587,11 @@ class NetworkBatchResult:
             or self.result.source_file != self.source_file
         ):
             raise ValueError("batch row and detailed result network identity must match")
+        if self.result is not None and self.result.joint != self.joint:
+            raise ValueError("batch row and detailed Joint result must match")
+        if self.joint is not None and self.status is NetworkRunStatus.SUCCEEDED:
+            if not self.joint.recommendation.has_recommendation:
+                raise ValueError("successful Joint row requires a recommendation")
         if (
             self.result is not None
             and self.base_eligible_message_count == 0

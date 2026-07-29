@@ -126,8 +126,9 @@ def test_unified_import_automatically_inspects_and_enables_batch(
         "结果概览",
         "Offset 修改",
         "可优化报文负载曲线",
-        "可优化报文负载热力图",
-        "运行日志与详情",
+            "可优化报文负载热力图",
+            "联合优化结果",
+            "运行日志与详情",
     ]
     import_until_ready(qtbot, window, (source_project,))
 

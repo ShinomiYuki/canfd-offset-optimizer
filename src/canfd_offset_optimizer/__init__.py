@@ -6,7 +6,7 @@
 
 from .models import CanMessage, NetworkModel, ObjectiveValue, OptimizationResult
 
-__version__ = "0.1.7"
+__version__ = "1.0"
 
 __all__ = [
     "CanMessage",

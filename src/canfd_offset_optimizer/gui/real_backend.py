@@ -16,6 +16,7 @@ from ..config import (
     load_project_config,
 )
 from ..exceptions import CanfdOptimizerError
+from ..joint_service import materialize_joint_state, run_joint_optimization
 from ..models import (
     FrameProtocol as CoreFrameProtocol,
     ObjectiveMode as CoreObjectiveMode,
@@ -25,10 +26,17 @@ from ..models import (
     WeightMode as CoreWeightMode,
 )
 from ..optimization.gcls import run_gcls
+from ..optimization.joint import JointOptimizationConfig, JointOptimizationResult
+from ..optimization.objective import ObjectivePolicy, score_state, slot_load_threshold_us
 from ..parsers.arxml_parser import discover_arxml_channel_names
 from ..parsers.dbc_parser import parse_dbc
 from ..parsers.project_loader import LoadedProject, load_project
 from ..reporting.objective_mode_writer import load_statistics
+from ..reporting.joint_writer import (
+    write_joint_pareto_csv,
+    write_joint_summary,
+    write_main_function_recommendation_csv,
+)
 from ..timeline.slot_map import precompute_slot_map
 from ..timeline.slot_map import build_windows
 from ..timeline.state import SearchState
@@ -43,6 +51,12 @@ from .contracts import (
     FrameProtocol,
     GuiBatchOptimizationRequest,
     GuiOptimizationResult,
+    JointOptimizationView,
+    JointOptimizationSettings,
+    JointParetoRow,
+    JointRecommendationView,
+    MainFunctionGroupRow,
+    MainFunctionMessageRow,
     MessageEligibilityStatus,
     ImportRecord,
     ImportRecordStatus,
@@ -87,6 +101,21 @@ from .formatting import (
     export_batch_summary_csv,
 )
 from .heatmap_details import build_heatmap_window_detail
+from .joint_baseline import (
+    VALIDATED_CONFLICT_CANDIDATE_CAP,
+    VALIDATED_CONFLICT_TRIPLE_ENABLED,
+    VALIDATED_HOT_SLOT_COUNT,
+    VALIDATED_JOINT_ATTEMPTS,
+    VALIDATED_JOINT_ENDPOINT_ONLY,
+    VALIDATED_JOINT_MAX_REFINEMENT_PASSES,
+    VALIDATED_JOINT_SEED,
+    VALIDATED_PAIR_NEIGHBOR_STEPS,
+    VALIDATED_PEAK_CANDIDATE_POOL_SIZE,
+    VALIDATED_TRIPLE_CANDIDATE_CAP,
+    VALIDATED_TRIPLE_HOT_SLOT_COUNT,
+    VALIDATED_TRIPLE_MAX_ROUNDS,
+    VALIDATED_VARIANCE_OFFSET_CAP,
+)
 from .output_paths import (
     create_timestamped_batch_directory,
     dbc_output_destination,
@@ -108,6 +137,12 @@ from .routing_exclusion import (
 
 
 REQUIRED_ALLOWED_OFFSETS_US = OffsetSearchConfig().candidate_offsets_us
+
+
+class _JointRecommendationUnavailable(RuntimeError):
+    def __init__(self, view: JointOptimizationView) -> None:
+        super().__init__("联合优化未形成可自动推荐的内部折中点；未生成正式 assignment 或 DBC。")
+        self.view = view
 
 
 class RealBackend(WorkspaceImporter):
@@ -591,6 +626,7 @@ class RealBackend(WorkspaceImporter):
                         base_eligible_message_count=self._base_count(network),
                         routing_excluded_count=network.routing_excluded_count,
                         final_eligible_message_count=self._final_count(network),
+                        joint=detail.joint,
                     )
                 )
                 status = NetworkRunStatus.SUCCEEDED
@@ -611,6 +647,26 @@ class RealBackend(WorkspaceImporter):
                     request, output_directory, tuple(results), started, cancelled=True
                 )
                 raise BatchOptimizationCancelled(partial)
+            except _JointRecommendationUnavailable as exc:
+                message = str(exc)
+                results.append(
+                    NetworkBatchResult(
+                        network.network_id,
+                        network.network_name,
+                        network.display_name,
+                        network.source_file,
+                        NetworkRunStatus.FAILED,
+                        actual_weight,
+                        request.mode,
+                        error=message,
+                        logs=(message,),
+                        base_eligible_message_count=self._base_count(network),
+                        routing_excluded_count=network.routing_excluded_count,
+                        final_eligible_message_count=self._final_count(network),
+                        joint=exc.view,
+                    )
+                )
+                status = NetworkRunStatus.FAILED
             except (CanfdOptimizerError, ValueError, OSError, RuntimeError) as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 results.append(
@@ -647,7 +703,11 @@ class RealBackend(WorkspaceImporter):
         arxml_root = session.session_directory / "arxml" if arxml_records else session.session_directory
         actual_weight = self._network_weight(network, request)
         core_weight = CoreWeightMode(actual_weight.value)
-        core_mode = CoreObjectiveMode(request.mode.value)
+        core_mode = (
+            CoreObjectiveMode.BALANCED
+            if request.joint_settings is not None
+            else CoreObjectiveMode(request.mode.value)
+        )
         if actual_weight is WeightMode.FRAME_TIME_US and channel_override is None:
             raise BackendError(
                 f"网段 {network.display_name} 没有唯一的 ARXML Controller 映射"
@@ -663,7 +723,24 @@ class RealBackend(WorkspaceImporter):
             ),
         )
         loaded = self._apply_routing_exclusions(loaded, request, network)
-        loaded = self._apply_request_settings(loaded, request)
+        loaded = (
+            self._apply_joint_request_settings(loaded, request)
+            if request.joint_settings is not None
+            else self._apply_request_settings(loaded, request)
+        )
+        if request.joint_settings is not None:
+            return self._optimize_joint_network(
+                loaded,
+                request,
+                network,
+                index,
+                total,
+                batch_output,
+                progress_callback,
+                cancellation_token,
+                channel_override,
+                started,
+            )
         preflight_replacements = tuple(
             DbcOffsetReplacement(
                 message.name,
@@ -985,6 +1062,502 @@ class RealBackend(WorkspaceImporter):
             exported_files.append(written_dbc_path)
         return replace(detail, exported_files=tuple(exported_files))
 
+    def _optimize_joint_network(
+        self,
+        loaded: LoadedProject,
+        request: GuiBatchOptimizationRequest,
+        network: NetworkSummary,
+        index: int,
+        total: int,
+        batch_output: Path,
+        progress_callback: ProgressCallback,
+        cancellation_token: CancellationToken,
+        channel_override: str | None,
+        started: float,
+    ) -> GuiOptimizationResult:
+        """Run the service-owned Joint workflow and adapt only its recommendation."""
+
+        settings = request.joint_settings
+        if settings is None:
+            raise RuntimeError("Joint adapter requires joint_settings")
+        timing_config = request.timing_config_for(network.network_id)
+        actual_weight = self._network_weight(network, request)
+        stage_labels = {
+            "domain": "准备联合优化搜索域",
+            "peak_reference": "建立 Peak 参考",
+            "can_endpoint": "搜索 CAN 优先端",
+            "initial_cpu_anchor": "搜索 CPU 优先端",
+            "refinement": "细化",
+            "refinement_peak": "细化 Peak 参考",
+            "pareto_filtering": "筛选当前搜索得到的非支配候选解集",
+            "recommendation": "生成自动推荐",
+        }
+
+        def joint_progress(event: object) -> None:
+            cancellation_token.raise_if_cancelled()
+            stage = str(getattr(event, "stage"))
+            refinement_index = getattr(event, "refinement_index", None)
+            refinement_total = getattr(event, "refinement_total", None)
+            epsilon_index = getattr(event, "epsilon_index", None)
+            epsilon_total = getattr(event, "epsilon_total", None)
+            attempt = getattr(event, "attempt", None)
+            attempts_total = getattr(event, "attempts_total", None)
+            if stage == "epsilon" and epsilon_index is not None:
+                message = f"Pareto 搜索 {epsilon_index}/{epsilon_total}"
+            elif refinement_index is not None and stage == "refinement":
+                message = f"细化 {refinement_index}/{refinement_total}"
+            elif match := re.fullmatch(
+                r"refinement_(\d+)_epsilon_(\d+)", stage
+            ):
+                message = (
+                    f"细化 {int(match.group(1)) + 1}/"
+                    f"{VALIDATED_JOINT_MAX_REFINEMENT_PASSES}，Pareto 搜索 "
+                    f"{int(match.group(2)) + 1}/{settings.epsilon_points}"
+                )
+            elif match := re.fullmatch(
+                r"refinement_(\d+)_(can|cpu)", stage
+            ):
+                endpoint = "CAN 优先端" if match.group(2) == "can" else "CPU 优先端"
+                message = (
+                    f"细化 {int(match.group(1)) + 1}/"
+                    f"{VALIDATED_JOINT_MAX_REFINEMENT_PASSES}，搜索 {endpoint}"
+                )
+            else:
+                message = stage_labels.get(stage, stage.replace("_", " "))
+            if attempt is not None:
+                message += f"（attempt {attempt}/{attempts_total}）"
+            progress_callback(
+                ProgressUpdate(
+                    ProgressPhase.NETWORK_RUNNING,
+                    f"{network.display_name}：{message}",
+                    elapsed_seconds=perf_counter() - started,
+                    network_id=network.network_id,
+                    network_name=network.network_name,
+                    network_index=index,
+                    network_total=total,
+                    attempt=attempt,
+                    total_attempts=attempts_total,
+                    overall_completed=index - 1,
+                    overall_total=total,
+                )
+            )
+
+        joint_result = run_joint_optimization(
+            loaded,
+            network.network_id,
+            seed=VALIDATED_JOINT_SEED,
+            joint_config=JointOptimizationConfig.from_values(
+                settings.rho,
+                settings.epsilon_points,
+                VALIDATED_JOINT_MAX_REFINEMENT_PASSES,
+                VALIDATED_JOINT_ENDPOINT_ONLY,
+            ),
+            cancellation_check=cancellation_token.raise_if_cancelled,
+            progress_callback=joint_progress,
+        )
+        cancellation_token.raise_if_cancelled()
+        layout = create_output_layout(batch_output)
+        stem = short_output_stem(network.display_name)
+        network_output = layout.results / stem
+        network_output.mkdir(parents=False, exist_ok=False)
+        summary_path = write_joint_summary(
+            network_output / "joint_summary.json", joint_result
+        )
+        pareto_path = write_joint_pareto_csv(
+            network_output / "joint_pareto.csv", joint_result
+        )
+        base_exports: tuple[Path, ...] = (summary_path, pareto_path)
+        view = self._joint_view(
+            joint_result,
+            settings,
+            output_directory=network_output,
+            exported_files=base_exports,
+        )
+        recommendation = joint_result.recommendation
+        if recommendation is None or not recommendation.has_recommendation:
+            raise _JointRecommendationUnavailable(view)
+        selected = next(
+            (
+                solution
+                for solution in joint_result.pareto_solutions
+                if solution.assignment_hash == recommendation.solution_hash
+            ),
+            None,
+        )
+        if selected is None:
+            raise RuntimeError("Joint recommendation does not identify a Pareto solution")
+        optimized_offsets = {
+            assignment.message_name: assignment.offset_us
+            for assignment in selected.assignments
+        }
+        domain, optimized_state = materialize_joint_state(
+            loaded, optimized_offsets
+        )
+        initial_state = self._baseline_state(loaded)
+        original_by_name = {
+            message.name: message for message in loaded.network.messages
+        }
+
+        def original_offset(message_name: str) -> int:
+            message = original_by_name[message_name]
+            return (
+                message.original_offset_us
+                if message.original_offset_us is not None
+                else min(message.allowed_offsets_us)
+            )
+
+        rows = tuple(
+            OffsetAssignmentRow(
+                message.name,
+                message.can_id,
+                message.cycle_time_us,
+                original_offset(message.name),
+                optimized_offsets[message.name],
+                original_offset_attribute=(
+                    original_by_name[message.name].original_offset_attribute
+                ),
+                original_offset_source=(
+                    original_by_name[message.name].original_offset_source
+                ),
+            )
+            for message in domain.all_messages
+        )
+        for message, row in zip(domain.all_messages, rows, strict=True):
+            if message.cycle_time_us > loaded.config.optimization.offset_max_us:
+                if row.optimized_offset_us != 0:
+                    raise ValueError(
+                        f"Joint long-period Offset must be 0: {row.message_name}"
+                    )
+            else:
+                self._validate_offset_contract(
+                    row.message_name,
+                    row.optimized_offset_us,
+                    "Joint automatic recommendation",
+                    request.offset_search.candidate_offsets_us,
+                )
+        original_offsets = {row.message_name: row.original_offset_us for row in rows}
+        steady_heatmap = build_heatmap_window_detail(
+            domain.all_messages,
+            domain.slot_map,
+            original_offsets,
+            optimized_offsets,
+            initial_state.steady_slot_loads,
+            optimized_state.steady_slot_loads,
+            initial_state.steady_slot_counts,
+            optimized_state.steady_slot_counts,
+            startup=False,
+            original_messages=initial_state.messages,
+            original_slot_map=initial_state.slot_map,
+            network_timing_config=timing_config,
+        )
+        startup_heatmap = build_heatmap_window_detail(
+            domain.all_messages,
+            domain.slot_map,
+            original_offsets,
+            optimized_offsets,
+            initial_state.startup_slot_loads,
+            optimized_state.startup_slot_loads,
+            initial_state.startup_slot_counts,
+            optimized_state.startup_slot_counts,
+            startup=True,
+            original_messages=initial_state.messages,
+            original_slot_map=initial_state.slot_map,
+            network_timing_config=timing_config,
+        )
+        load_threshold = (
+            slot_load_threshold_us(
+                loaded.config.optimization.slot_width_us,
+                loaded.config.model.average_load_limit,
+            )
+            if loaded.network.weight_mode is CoreWeightMode.FRAME_TIME_US
+            else None
+        )
+        original_objective = score_state(
+            initial_state,
+            ObjectivePolicy(CoreObjectiveMode.PEAK, load_threshold),
+        )
+        detail = GuiOptimizationResult(
+            network.network_id,
+            network.network_name,
+            network.display_name,
+            network.source_file,
+            actual_weight,
+            request.mode,
+            self._metrics(
+                original_objective,
+                tuple(initial_state.steady_slot_loads),
+                physical=actual_weight is WeightMode.FRAME_TIME_US,
+            ),
+            self._metrics(
+                selected.can_objective,
+                tuple(optimized_state.steady_slot_loads),
+                physical=actual_weight is WeightMode.FRAME_TIME_US,
+            ),
+            rows,
+            VALIDATED_JOINT_ATTEMPTS,
+            (
+                joint_result.refinement.termination_reason
+                if joint_result.refinement is not None
+                else joint_result.status
+            ),
+            joint_result.performance.total_seconds,
+            loaded.network.warnings,
+            self._copy_int_tuple(initial_state.steady_slot_loads),
+            self._copy_int_tuple(optimized_state.steady_slot_loads),
+            self._copy_int_tuple(initial_state.startup_slot_loads),
+            self._copy_int_tuple(optimized_state.startup_slot_loads),
+            steady_counts_before=self._copy_int_tuple(
+                initial_state.steady_slot_counts
+            ),
+            steady_counts_after=self._copy_int_tuple(
+                optimized_state.steady_slot_counts
+            ),
+            startup_counts_before=self._copy_int_tuple(
+                initial_state.startup_slot_counts
+            ),
+            startup_counts_after=self._copy_int_tuple(
+                optimized_state.startup_slot_counts
+            ),
+            steady_heatmap=steady_heatmap,
+            startup_heatmap=startup_heatmap,
+            logs=(
+                "数据源：GUI → RealBackend → joint_service → Joint core",
+                "正式输出仅使用 core automatic recommendation",
+                f"recommendation_method={recommendation.method}",
+                f"assignment_hash={selected.assignment_hash}",
+                f"joint_attempts={VALIDATED_JOINT_ATTEMPTS}",
+                f"joint_epsilon_points={settings.epsilon_points}",
+                f"joint_rho={settings.rho}",
+                f"joint_peak_tolerance={settings.peak_tolerance_relative}",
+                f"arxml_channel={channel_override or 'not_used'}",
+            ),
+            output_directory=network_output,
+            frame_protocol=network.frame_protocol,
+            classic_weight_model=network.classic_weight_model,
+            offset_search=request.offset_search,
+            slot_width_us=steady_heatmap.slot_width_us,
+            network_timing_config=timing_config,
+            assignment_hash=selected.assignment_hash,
+            joint=view,
+        )
+        progress_callback(
+            ProgressUpdate(
+                ProgressPhase.FINALIZING,
+                f"{network.display_name}：写出联合优化结果",
+                elapsed_seconds=perf_counter() - started,
+                network_id=network.network_id,
+                network_name=network.network_name,
+                network_index=index,
+                network_total=total,
+                overall_completed=index - 1,
+                overall_total=total,
+            )
+        )
+        assignment_path = export_assignments_csv(
+            detail, network_output / "offsets.csv"
+        )
+        load_plot_path = write_load_curve_png(
+            detail, layout.plots / f"{stem}_load_curve.png"
+        )
+        heatmap_path = write_load_heatmap_png(
+            detail, layout.plots / f"{stem}_heatmap.png"
+        )
+        main_function_path = write_main_function_recommendation_csv(
+            network_output / "main_function_recommendation.csv", selected
+        )
+        dbc_path = (
+            request.inspection.session.session_directory
+            / network.source_workspace_path
+        )
+        replacements = tuple(
+            DbcOffsetReplacement(
+                message.name,
+                message.can_id,
+                message.is_extended,
+                optimized_offsets[message.name],
+            )
+            for message in domain.all_messages
+        )
+        dbc_output = dbc_output_destination(
+            layout.dbc,
+            network.source_file,
+            network.display_name,
+            network.network_id,
+        )
+        written_dbc_path: Path | None = None
+        dbc_write_error: str | None = None
+        try:
+            inspect_dbc_offset_write(dbc_path, replacements)
+            written_dbc_path = write_dbc_with_offsets(
+                dbc_path, dbc_output, replacements
+            )
+        except (OSError, ValueError) as exc:
+            dbc_write_error = f"{type(exc).__name__}: {exc}"
+            detail = replace(
+                detail,
+                warnings=detail.warnings
+                + (f"DBC 写回失败；其他 Joint 输出已保留：{dbc_write_error}",),
+                dbc_write_error=dbc_write_error,
+            )
+        exported_files = [
+            *base_exports,
+            assignment_path,
+            load_plot_path,
+            heatmap_path,
+            main_function_path,
+        ]
+        if written_dbc_path is not None:
+            exported_files.append(written_dbc_path)
+        final_view = replace(view, exported_files=tuple(exported_files))
+        detail = replace(
+            detail,
+            joint=final_view,
+            exported_files=tuple(exported_files),
+            logs=detail.logs
+            + (
+                (
+                    "dbc_write_status=succeeded"
+                    if dbc_write_error is None
+                    else "dbc_write_status=failed"
+                ),
+            ),
+        )
+        log_path = write_network_log(
+            NetworkBatchResult(
+                network.network_id,
+                network.network_name,
+                network.display_name,
+                network.source_file,
+                NetworkRunStatus.SUCCEEDED,
+                actual_weight,
+                request.mode,
+                result=detail,
+                warnings=detail.warnings,
+                logs=detail.logs,
+                base_eligible_message_count=self._base_count(network),
+                routing_excluded_count=network.routing_excluded_count,
+                final_eligible_message_count=self._final_count(network),
+                joint=final_view,
+            ),
+            layout.logs / f"{stem}.log",
+        )
+        exported_files.append(log_path)
+        final_view = replace(final_view, exported_files=tuple(exported_files))
+        return replace(
+            detail,
+            joint=final_view,
+            exported_files=tuple(exported_files),
+        )
+
+    @staticmethod
+    def _joint_view(
+        result: JointOptimizationResult,
+        settings: JointOptimizationSettings,
+        *,
+        output_directory: Path,
+        exported_files: tuple[Path, ...],
+    ) -> JointOptimizationView:
+        recommendation = result.recommendation
+        solution_hash = (
+            getattr(recommendation, "solution_hash", None)
+            if recommendation is not None
+            else None
+        )
+        pareto_solutions = result.pareto_solutions
+        pareto_rows = tuple(
+            JointParetoRow(
+                index,
+                solution.qss,
+                solution.cpu_proxy,
+                solution.peak,
+                solution.main_function_count,
+                solution.assignment_hash,
+                solution.source,
+                solution.assignment_hash == solution_hash,
+            )
+            for index, solution in enumerate(pareto_solutions)
+        )
+        selected = next(
+            (
+                solution
+                for solution in pareto_solutions
+                if solution.assignment_hash == solution_hash
+            ),
+            None,
+        )
+        groups = (
+            tuple(
+                MainFunctionGroupRow(
+                    group_index,
+                    group.timebase_us,
+                    group.group_proxy_cost,
+                    tuple(
+                        MainFunctionMessageRow(
+                            message.message_key.split(":", 2)[-1],
+                            message.period_us,
+                            message.offset_us,
+                            message.d_us,
+                        )
+                        for message in group.messages
+                    ),
+                )
+                for group_index, group in enumerate(
+                    selected.main_function_result.groups, start=1
+                )
+            )
+            if selected is not None
+            else ()
+        )
+        recommendation_view = JointRecommendationView(
+            (
+                recommendation.method
+                if recommendation is not None
+                else "invalid_missing_recommendation"
+            ),
+            solution_hash,
+            (
+                recommendation.note
+                if recommendation is not None
+                else "core did not return a recommendation"
+            ),
+            qss=(selected.qss if selected is not None else None),
+            cpu_proxy=(selected.cpu_proxy if selected is not None else None),
+            peak=(selected.peak if selected is not None else None),
+            main_function_count=(
+                selected.main_function_count if selected is not None else None
+            ),
+        )
+        refined_peak = result.refined_peak_reference or result.peak_reference
+        refined_can = result.refined_can_endpoint or result.can_anchor
+        refined_cpu = result.refined_cpu_endpoint or result.cpu_anchor
+        refinement = result.refinement
+        return JointOptimizationView(
+            result.status,
+            settings,
+            pareto_rows,
+            recommendation_view,
+            refined_can.assignment_hash,
+            refined_cpu.assignment_hash,
+            refined_peak.assignment_hash,
+            (
+                result.refined_peak_budget
+                if result.refined_peak_budget is not None
+                else result.peak_budget
+            ),
+            result.decision_message_count,
+            result.fixed_message_count,
+            refinement.passes_run if refinement is not None else 0,
+            VALIDATED_JOINT_MAX_REFINEMENT_PASSES,
+            (
+                refinement.termination_reason
+                if refinement is not None
+                else result.status
+            ),
+            groups,
+            output_directory,
+            exported_files,
+        )
+
     @staticmethod
     def _validate_offset_contract(
         message_name: str,
@@ -1178,6 +1751,46 @@ class RealBackend(WorkspaceImporter):
         )
         config = replace(loaded.config, optimization=optimization, objective=objective)
         return replace(loaded, config=config)
+
+    @staticmethod
+    def _apply_joint_request_settings(
+        loaded: LoadedProject, request: GuiBatchOptimizationRequest
+    ) -> LoadedProject:
+        """Apply only shared inputs plus the independently validated hidden budget."""
+        settings = request.joint_settings
+        if settings is None:
+            raise ValueError("Joint request settings are missing")
+        optimization = replace(
+            loaded.config.optimization,
+            restart_policy=RestartPolicy.fixed(
+                VALIDATED_JOINT_ATTEMPTS, source_kind="cli"
+            ),
+            hot_slot_count=VALIDATED_HOT_SLOT_COUNT,
+            conflict_candidate_cap=VALIDATED_CONFLICT_CANDIDATE_CAP,
+            pair_neighbor_steps=VALIDATED_PAIR_NEIGHBOR_STEPS,
+            variance_offset_cap=VALIDATED_VARIANCE_OFFSET_CAP,
+            peak_candidate_pool_size=VALIDATED_PEAK_CANDIDATE_POOL_SIZE,
+            conflict_triple_enabled=VALIDATED_CONFLICT_TRIPLE_ENABLED,
+            triple_candidate_cap=VALIDATED_TRIPLE_CANDIDATE_CAP,
+            triple_hot_slot_count=VALIDATED_TRIPLE_HOT_SLOT_COUNT,
+            triple_max_rounds=VALIDATED_TRIPLE_MAX_ROUNDS,
+        )
+        objective = replace(
+            loaded.config.objective,
+            mode=CoreObjectiveMode.BALANCED,
+            peak_tolerance=PeakToleranceConfig(
+                PeakToleranceType.RELATIVE,
+                settings.peak_tolerance_relative,
+            ),
+        )
+        return replace(
+            loaded,
+            config=replace(
+                loaded.config,
+                optimization=optimization,
+                objective=objective,
+            ),
+        )
 
     def _finish_batch(
         self,

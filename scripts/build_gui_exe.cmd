@@ -34,6 +34,14 @@ set "PACKAGE_NAME=CANFDOffsetOptimizer-%APP_VERSION%-win-x64"
 set "PACKAGE_DIR=release\%PACKAGE_NAME%"
 set "ZIP_PATH=release\%PACKAGE_NAME%.zip"
 
+powershell -NoProfile -Command "if (Get-Process -Name 'CANFDOffsetOptimizer' -ErrorAction SilentlyContinue) { exit 1 }"
+if errorlevel 1 (
+    echo CANFDOffsetOptimizer.exe is running.
+    echo Close the portable GUI before rebuilding so its package is not modified in place.
+    popd >nul
+    exit /b 1
+)
+
 if exist "%PYI_WORK%" rmdir /s /q "%PYI_WORK%"
 if exist "%PYI_DIST%" rmdir /s /q "%PYI_DIST%"
 if exist "%PACKAGE_DIR%" rmdir /s /q "%PACKAGE_DIR%"
@@ -49,6 +57,10 @@ if errorlevel 8 goto :failed
 
 copy /y "LICENSE" "%PACKAGE_DIR%\LICENSE" >nul
 copy /y "packaging\README_运行说明.txt" "%PACKAGE_DIR%\README_运行说明.txt" >nul
+if not exist "%PACKAGE_DIR%\_internal\canfd_offset_optimizer\gui\default_project.yaml" (
+    echo Bundled default_project.yaml is missing from the portable package.
+    goto :failed
+)
 
 pushd "%TEMP%" >nul
 start "" /wait "%REPO_ROOT%\%PACKAGE_DIR%\CANFDOffsetOptimizer.exe" --portable-smoke-test

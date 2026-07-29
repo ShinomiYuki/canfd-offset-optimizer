@@ -17,6 +17,12 @@ from .contracts import (
     NetworkBatchResult,
     RoutingExclusionReport,
 )
+from .joint_baseline import (
+    VALIDATED_JOINT_ATTEMPTS,
+    VALIDATED_JOINT_ENDPOINT_ONLY,
+    VALIDATED_JOINT_MAX_REFINEMENT_PASSES,
+    VALIDATED_JOINT_SEED,
+)
 from .load_presentation import (
     CONGESTION_COLORS,
     DEFAULT_STEADY_REPEAT_COUNT,
@@ -130,6 +136,26 @@ def write_run_config_json(request: GuiBatchOptimizationRequest, path: Path) -> P
         "classic_can_weight": request.classic_can_weight.value,
         "can_fd_weight": request.can_fd_weight.value,
         "offset_search": request.offset_search.as_metadata(),
+        "joint_enabled": request.joint_settings is not None,
+        "joint": (
+            {
+                "peak_tolerance_relative": (
+                    request.joint_settings.peak_tolerance_relative
+                ),
+                "rho": str(request.joint_settings.rho),
+                "rho_numerator": request.joint_settings.rho.numerator,
+                "rho_denominator": request.joint_settings.rho.denominator,
+                "epsilon_points": request.joint_settings.epsilon_points,
+                "hidden_attempts": VALIDATED_JOINT_ATTEMPTS,
+                "max_refinement_passes": (
+                    VALIDATED_JOINT_MAX_REFINEMENT_PASSES
+                ),
+                "seed": VALIDATED_JOINT_SEED,
+                "endpoint_only": VALIDATED_JOINT_ENDPOINT_ONLY,
+            }
+            if request.joint_settings is not None
+            else None
+        ),
         "routing_table_count": routing.table_count,
         "routing_record_count": routing.record_count,
         "routing_matched_count": routing.matched_count,

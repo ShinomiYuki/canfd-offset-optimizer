@@ -101,6 +101,34 @@ def test_joint_config_parses_rho_exactly_and_validates_point_count() -> None:
         JointOptimizationConfig.from_values("1", 2, 0)
 
 
+def test_joint_progress_and_cancellation_use_bounded_core_checkpoints() -> None:
+    checks = 0
+    stages: list[str] = []
+
+    def cancel() -> None:
+        nonlocal checks
+        checks += 1
+        if checks >= 6:
+            raise RuntimeError("cancelled at checkpoint")
+
+    with pytest.raises(RuntimeError, match="cancelled at checkpoint"):
+        optimize_can_cpu_balanced(
+            "tiny",
+            _mixed_messages(),
+            _config(attempts=3),
+            ObjectiveConfig(mode=ObjectiveMode.BALANCED),
+            joint_config=JointOptimizationConfig(
+                epsilon_points=3,
+                max_refinement_passes=2,
+            ),
+            cancellation_check=cancel,
+            progress_callback=lambda event: stages.append(event.stage),
+        )
+    assert checks == 6
+    assert "domain" in stages
+    assert "peak_reference" in stages
+
+
 def test_joint_domain_uses_strict_long_period_threshold_without_mutation() -> None:
     messages = _mixed_messages()
     domain = build_joint_domain(messages, _config())

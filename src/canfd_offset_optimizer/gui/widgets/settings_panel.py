@@ -9,12 +9,14 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +27,7 @@ from ...exceptions import ConfigurationError
 from ..contracts import (
     FrameProtocol,
     GuiBatchOptimizationRequest,
+    JointOptimizationSettings,
     NetworkTimingConfig,
     OptimizationMode,
     RestartMode,
@@ -32,6 +35,7 @@ from ..contracts import (
     WeightMode,
     WorkspaceInspection,
 )
+from .joint_optimization_dialog import JointOptimizationDialog
 
 
 class SettingsPanel(QGroupBox):
@@ -46,6 +50,7 @@ class SettingsPanel(QGroupBox):
         super().__init__("批量优化设置")
         self._inspection: WorkspaceInspection | None = None
         self._timing_configs: tuple[NetworkTimingConfig, ...] = ()
+        self._joint_settings = JointOptimizationSettings()
 
         self.networks_label = QLabel("已发现网段：0 个")
         self.networks_label.setWordWrap(True)
@@ -89,6 +94,23 @@ class SettingsPanel(QGroupBox):
         self.mode_combo.addItem("Balanced（推荐）", OptimizationMode.BALANCED)
         self.mode_combo.addItem("Variance（实验）", OptimizationMode.VARIANCE)
         self.mode_combo.setCurrentIndex(1)
+        self.mode_unavailable_label = QLabel("联合优化中，不使用该参数")
+        self.mode_unavailable_label.setEnabled(False)
+        self.mode_stack = QStackedWidget()
+        self.mode_stack.addWidget(self.mode_combo)
+        self.mode_stack.addWidget(self.mode_unavailable_label)
+
+        self.joint_checkbox = QCheckBox("启用")
+        self.joint_checkbox.setObjectName("jointOptimizationCheckbox")
+        self.joint_config_button = QPushButton("配置...")
+        self.joint_config_button.setObjectName("jointOptimizationConfigButton")
+        self.joint_config_button.setEnabled(False)
+        joint_row = QWidget()
+        joint_layout = QHBoxLayout(joint_row)
+        joint_layout.setContentsMargins(0, 0, 0, 0)
+        joint_layout.addWidget(self.joint_checkbox)
+        joint_layout.addStretch(1)
+        joint_layout.addWidget(self.joint_config_button)
 
         self.classic_weight_combo = QComboBox()
         self.classic_weight_combo.addItem(
@@ -134,7 +156,8 @@ class SettingsPanel(QGroupBox):
         basic.addRow(sender_selection_row)
         basic.addRow(timing_row)
         basic.addRow(self.messages_label)
-        basic.addRow("模式：", self.mode_combo)
+        basic.addRow("模式：", self.mode_stack)
+        basic.addRow("CAN-CPU 联合优化：", joint_row)
         basic.addRow("Classic CAN 权重：", self.classic_weight_combo)
         basic.addRow("CAN FD 权重：", self.can_fd_weight_combo)
         basic.addRow("Offset 范围：", offset_range)
@@ -208,6 +231,8 @@ class SettingsPanel(QGroupBox):
         )
         self.restart_combo.currentIndexChanged.connect(self._update_restart_controls)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.joint_checkbox.toggled.connect(self._on_joint_toggled)
+        self.joint_config_button.clicked.connect(self.edit_joint_settings)
         self.details_button.clicked.connect(self.details_requested.emit)
         self.sender_selection_button.clicked.connect(
             self.sender_selection_requested.emit
@@ -230,6 +255,7 @@ class SettingsPanel(QGroupBox):
             self.adaptive_max_spin.valueChanged,
             self.candidate_pool_combo.currentIndexChanged,
             self.triple_search_check.toggled,
+            self.joint_checkbox.toggled,
         ):
             control_signal.connect(lambda *_args: self.validity_changed.emit())
         self._update_offset_summary()
@@ -380,7 +406,23 @@ class SettingsPanel(QGroupBox):
             offset_search=offset_search,
             sender_selection=self._inspection.sender_selection,
             network_timing_configs=self._timing_configs,
+            joint_settings=(
+                self._joint_settings if self.joint_checkbox.isChecked() else None
+            ),
         )
+
+    @property
+    def joint_settings(self) -> JointOptimizationSettings:
+        return self._joint_settings
+
+    def edit_joint_settings(self) -> None:
+        if not self.joint_checkbox.isChecked():
+            return
+        dialog = JointOptimizationDialog(self._joint_settings, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.settings is None:
+            return
+        self._joint_settings = dialog.settings
+        self.validity_changed.emit()
 
     def set_timing_configs(
         self, configs: tuple[NetworkTimingConfig, ...]
@@ -524,3 +566,12 @@ class SettingsPanel(QGroupBox):
         show_tolerance = balanced
         self.advanced_layout.setRowVisible(self.tolerance_spin, show_tolerance)
         self.advanced_layout.setRowVisible(self.candidate_pool_combo, balanced)
+
+    def _on_joint_toggled(self, enabled: bool) -> None:
+        self.joint_config_button.setEnabled(enabled)
+        self.mode_stack.setCurrentIndex(1 if enabled else 0)
+        self.advanced_button.setEnabled(not enabled)
+        self.advanced_content.setEnabled(not enabled)
+        self.advanced_button.setToolTip(
+            "联合优化使用独立的已验证搜索配置" if enabled else ""
+        )

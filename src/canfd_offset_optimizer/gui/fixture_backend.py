@@ -9,6 +9,8 @@ import re
 import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
+from fractions import Fraction
+from math import gcd
 from pathlib import Path
 from time import perf_counter, sleep
 from typing import Iterable
@@ -41,6 +43,11 @@ from .contracts import (
     NetworkRunStatus,
     NetworkSummary,
     NetworkTimingConfig,
+    JointOptimizationView,
+    JointParetoRow,
+    JointRecommendationView,
+    MainFunctionGroupRow,
+    MainFunctionMessageRow,
     ObjectiveMetrics,
     OffsetAssignmentRow,
     OptimizationCancelled,
@@ -498,6 +505,7 @@ class FixtureBackend:
                 result=result,
                 warnings=result.warnings,
                 logs=result.logs,
+                joint=result.joint,
             )
             network_results.append(item)
             self._emit_network_finished(progress_callback, item, index, total, started)
@@ -532,7 +540,11 @@ class FixtureBackend:
         batch_started: float,
     ) -> GuiOptimizationResult:
         profile = self._profile_index_by_network_id[network.network_id]
-        attempts = self._attempt_count(request, profile)
+        attempts = (
+            3
+            if request.joint_settings is not None
+            else self._attempt_count(request, profile)
+        )
         for attempt in range(1, attempts + 1):
             self._tick(cancellation_token)
             progress_callback(
@@ -586,6 +598,53 @@ class FixtureBackend:
                 )
             ).encode()
         ).hexdigest()
+        joint = None
+        if request.joint_settings is not None:
+            messages = tuple(
+                MainFunctionMessageRow(
+                    row.message_name,
+                    row.cycle_time_us,
+                    row.optimized_offset_us,
+                    gcd(row.cycle_time_us, row.optimized_offset_us),
+                )
+                for row in assignments
+            )
+            proxy = Fraction(1_000 + profile * 100, 1)
+            joint = JointOptimizationView(
+                "fixture",
+                request.joint_settings,
+                (
+                    JointParetoRow(
+                        0,
+                        after.qss,
+                        proxy,
+                        after.zss,
+                        1,
+                        assignment_hash,
+                        "fixture_unique_solution",
+                        True,
+                    ),
+                ),
+                JointRecommendationView(
+                    "unique_solution",
+                    assignment_hash,
+                    "fixture backend returns its only deterministic solution",
+                    after.qss,
+                    proxy,
+                    after.zss,
+                    1,
+                ),
+                assignment_hash,
+                assignment_hash,
+                assignment_hash,
+                after.zss,
+                len(assignments),
+                0,
+                0,
+                3,
+                "fixture",
+                (MainFunctionGroupRow(1, 5_000, proxy, messages),),
+            )
         result = GuiOptimizationResult(
             network_id=network.network_id,
             network_name=network.network_name,
@@ -647,6 +706,7 @@ class FixtureBackend:
                 else None
             ),
             assignment_hash=assignment_hash,
+            joint=joint,
         )
         return self._write_success_outputs(result, output_directory)
 
@@ -672,6 +732,7 @@ class FixtureBackend:
                 result=result,
                 warnings=result.warnings,
                 logs=result.logs,
+                joint=result.joint,
             ),
             layout.logs / f"{stem}.log",
         )

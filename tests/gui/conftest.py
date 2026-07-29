@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import gc
 import os
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtWidgets import QApplication
 
 from canfd_offset_optimizer.gui.contracts import (
     BatchOptimizationResult,
@@ -21,6 +24,19 @@ from canfd_offset_optimizer.gui.contracts import (
 from canfd_offset_optimizer.gui.fixture_backend import FixtureBackend
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@pytest.fixture(autouse=True)
+def collect_qt_objects_on_main_thread():
+    """Keep Python 3.14/PySide teardown away from backend QThreads."""
+
+    yield
+    application = QApplication.instance()
+    if isinstance(application, QApplication):
+        application.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        application.processEvents()
+    gc.collect()
 
 
 @pytest.fixture

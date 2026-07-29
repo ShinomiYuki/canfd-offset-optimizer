@@ -12,13 +12,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from decimal import Decimal
 from fractions import Fraction
 from functools import lru_cache
 from math import gcd
-from typing import TypeAlias
 
-RhoInput: TypeAlias = Fraction | Decimal | int | float | str
+from ..exact import RhoInput as RhoInput
+from ..exact import normalize_rho as normalize_rho
 
 _MICROSECONDS_PER_SECOND = 1_000_000
 _CACHE_MAX_SIZE = 256
@@ -33,31 +32,6 @@ def _require_plain_int(value: object, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{field_name} must be an integer number of microseconds")
     return value
-
-
-def normalize_rho(value: RhoInput) -> Fraction:
-    """! @brief 把公开 API 的 rho 转为严格正的精确有理数。
-
-    @details
-    对 float 和 Decimal 先取其十进制字符串，避免把 ``0.1`` 的二进制浮点
-    展开误差带进最优性比较。内部 DP 从不使用 float 比较方案。
-    """
-    if isinstance(value, bool):
-        raise TypeError("rho must be a positive real number, not bool")
-    if isinstance(value, Fraction):
-        normalized = value
-    elif isinstance(value, int):
-        normalized = Fraction(value, 1)
-    elif isinstance(value, (Decimal, float, str)):
-        try:
-            normalized = Fraction(str(value))
-        except (ValueError, ZeroDivisionError) as exc:
-            raise ValueError("rho must be a finite positive real number") from exc
-    else:
-        raise TypeError("rho must be int, float, str, Decimal, or Fraction")
-    if normalized <= 0:
-        raise ValueError("rho must be positive")
-    return normalized
 
 
 @dataclass(frozen=True, slots=True)

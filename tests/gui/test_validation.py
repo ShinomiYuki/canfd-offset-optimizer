@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import canfd_offset_optimizer.gui.workspace_io as workspace_io
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
     ImportRecordStatus,
@@ -114,6 +115,32 @@ def test_missing_user_config_copies_exact_bundled_default_into_session(
     )
     assert inspection.missing_required == ()
     assert inspection.can_optimize
+
+
+def test_bundled_default_is_cached_for_a_running_portable_app(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Replacing package files after launch must not break an active import."""
+
+    original_read_bytes = Path.read_bytes
+    bundled_path = workspace_io.DEFAULT_PROJECT_CONFIG_PATH.resolve(strict=False)
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path.resolve(strict=False) == bundled_path:
+            raise FileNotFoundError(path)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    records = []
+    record = workspace_io.add_default_project_config(
+        tmp_path / "session",
+        records,
+        "2026-07-29T00:00:00+00:00",
+    )
+
+    assert record is not None
+    destination = tmp_path / "session" / "config" / "project.yaml"
+    assert original_read_bytes(destination) == workspace_io.DEFAULT_PROJECT_CONFIG_BYTES
 
 
 def test_same_content_is_deduplicated_and_name_conflict_is_stably_renamed(

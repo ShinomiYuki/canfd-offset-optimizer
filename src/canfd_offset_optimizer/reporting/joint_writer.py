@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from fractions import Fraction
 from pathlib import Path
 
@@ -288,3 +289,98 @@ def write_joint_result(
         encoding="utf-8",
     )
     return output_path
+
+
+def write_joint_summary(
+    path: Path,
+    result: JointOptimizationResult,
+) -> Path:
+    """Write the stable schema to an explicitly selected GUI artifact path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            joint_result_dict(result),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_joint_pareto_csv(
+    path: Path,
+    result: JointOptimizationResult,
+) -> Path:
+    recommended_hash = (
+        result.recommendation.solution_hash
+        if result.recommendation is not None
+        else None
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(
+            (
+                "index",
+                "qss",
+                "cpu_proxy",
+                "peak",
+                "main_function_count",
+                "assignment_hash",
+                "is_recommended",
+                "source",
+            )
+        )
+        for index, solution in enumerate(result.pareto_solutions):
+            writer.writerow(
+                (
+                    index,
+                    solution.qss,
+                    str(solution.cpu_proxy),
+                    solution.peak,
+                    solution.main_function_count,
+                    solution.assignment_hash,
+                    solution.assignment_hash == recommended_hash,
+                    solution.source,
+                )
+            )
+    return path
+
+
+def write_main_function_recommendation_csv(
+    path: Path,
+    solution: JointSolution,
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(
+            (
+                "group",
+                "timebase_us",
+                "message_name",
+                "period_us",
+                "offset_us",
+                "d_us",
+                "group_cpu_proxy",
+            )
+        )
+        for group_index, group in enumerate(
+            solution.main_function_result.groups, start=1
+        ):
+            for message in group.messages:
+                writer.writerow(
+                    (
+                        group_index,
+                        group.timebase_us,
+                        message.message_key.split(":", 2)[-1],
+                        message.period_us,
+                        message.offset_us,
+                        message.d_us,
+                        str(group.group_proxy_cost),
+                    )
+                )
+    return path

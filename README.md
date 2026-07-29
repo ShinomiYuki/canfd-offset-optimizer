@@ -129,6 +129,33 @@ phase 分段计算；BRS 关闭时整帧按 Nominal 计算。
 
 GUI 的 Balanced tolerance 是相对容差。它只在 Balanced 模式下生效。
 
+### CAN-CPU 联合优化（可选工作流）
+
+“CAN-CPU 联合优化”是独立的可选工作流，不是第四个 `OptimizationMode`。启用后，
+模式行显示“联合优化中，不使用该参数”，但不会改写用户原先选择的 Peak/Balanced/Variance；
+普通高级搜索设置也会暂时禁用并在关闭 Joint 后恢复。
+
+Joint 配置只向用户提供三个参数：
+
+- 峰值允许增量：正式 Peak reference 的相对 guardrail，默认 5%；
+- 固定调用成本比 `ρ = C0/C1`，默认 1；
+- Pareto 搜索精度：标准 21 点或精细 41 点。
+
+`ρ` 进入核心前按十进制表示精确归一化。`CPU Cost Proxy` 是 COM-Tx 调度成本代理，
+不是实际 CPU 利用率。21/41 表示 CPU Cost Proxy 约束点数量；41 点耗时更长，也可能改变
+启发式搜索路径，不保证推荐一定优于 21 点。
+
+调用链为 `GUI → immutable DTO → RealBackend → joint_service → Joint core`。Joint 外层
+Offset 搜索仍是 heuristic GCLS；只有固定 assignment 下的 MainFunction partition 是 exact
+solver。周期 `T > max_offset` 的消息保留在完整工程、CAN 负载、MainFunction、输出和 DBC 中，
+但正式 Joint Offset 固定为 0；`T == max_offset` 仍是 decision message。
+
+联合优化结果页只读展示当前搜索得到的 Qss / CPU Cost Proxy observed Pareto front、
+自动推荐诊断和 MainFunctionTx / TimeBase 建议。GUI 不允许手选 Pareto 点，也不重新计算
+推荐；core automatic recommendation 是 Offset 表、负载曲线、热力图、DBC 和导出的唯一正式
+assignment。若 core 没有推荐（例如只有两个端点而没有内部折中点），GUI 不默认选择端点，
+不生成伪造 assignment，也不写回 DBC。
+
 ## 算法概览
 
 当前核心算法为 GCLS，主要步骤包括：

@@ -112,6 +112,10 @@ def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
             format_result_weight(result) if result else format_weight_mode(item.weight_mode)
         ),
         "mode": item.mode.value,
+        "joint_enabled": item.joint is not None,
+        "joint_recommendation_hash": (
+            item.joint.recommendation.solution_hash if item.joint is not None else None
+        ),
         "original_metrics": metrics_dict(result.original_metrics) if result else None,
         "optimized_metrics": metrics_dict(result.optimized_metrics) if result else None,
         "zss_improvement": item.zss_improvement,
@@ -121,8 +125,25 @@ def _network_dict(item: NetworkBatchResult) -> dict[str, Any]:
         "warnings": list(item.warnings),
         "error": item.error,
         "logs": list(item.logs),
-        "output_directory": str(result.output_directory) if result and result.output_directory else None,
-        "exported_files": [str(path) for path in result.exported_files] if result else [],
+        "output_directory": (
+            str(result.output_directory)
+            if result is not None and result.output_directory is not None
+            else (
+                str(item.joint.output_directory)
+                if item.joint is not None
+                and item.joint.output_directory is not None
+                else None
+            )
+        ),
+        "exported_files": (
+            [str(path) for path in result.exported_files]
+            if result is not None
+            else (
+                [str(path) for path in item.joint.exported_files]
+                if item.joint is not None
+                else []
+            )
+        ),
         "dbc_write_status": (
             "failed"
             if result and result.dbc_write_error
@@ -146,6 +167,12 @@ def export_network_summary_json(result: GuiOptimizationResult, path: Path) -> Pa
         "load_unit": format_load_unit(result),
         "classic_weight_model": result.classic_weight_model,
         "mode": result.mode.value,
+        "joint_enabled": result.joint is not None,
+        "joint_recommendation_hash": (
+            result.joint.recommendation.solution_hash
+            if result.joint is not None
+            else None
+        ),
         "original_metrics": metrics_dict(result.original_metrics),
         "optimized_metrics": metrics_dict(result.optimized_metrics),
         "actual_attempts": result.actual_attempts,
