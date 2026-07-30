@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..contracts import JointOptimizationView
+from ..formatting import format_milliseconds_compact
 
 
 def _recommendation_method_text(method: str) -> str:
@@ -138,9 +139,18 @@ class JointOptimizationResultPage(QWidget):
         )
         self.pareto_table.horizontalHeader().setStretchLastSection(True)
 
-        self.group_table = QTableWidget(0, 5)
+        self.group_table = QTableWidget(0, 8)
         self.group_table.setHorizontalHeaderLabels(
-            ("组", "TimeBase (μs)", "报文", "周期 (μs)", "Offset / D (μs)")
+            (
+                "组",
+                "TimeBase (μs)",
+                "TimeBase (ms)",
+                "报文",
+                "Cycle (ms)",
+                "Offset (ms)",
+                "D (μs)",
+                "D (ms)",
+            )
         )
         self.group_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
@@ -244,9 +254,12 @@ class JointOptimizationResultPage(QWidget):
             group_values = (
                 str(group.group_index),
                 str(group.timebase_us),
+                format_milliseconds_compact(group.timebase_us),
                 message.message_name,
-                str(message.period_us),
-                f"{message.offset_us} / {message.d_us}",
+                format_milliseconds_compact(message.period_us),
+                format_milliseconds_compact(message.offset_us),
+                str(message.d_us),
+                format_milliseconds_compact(message.d_us),
             )
             for column, value in enumerate(group_values):
                 self.group_table.setItem(

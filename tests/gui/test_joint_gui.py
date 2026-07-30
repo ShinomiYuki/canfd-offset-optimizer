@@ -30,6 +30,7 @@ from canfd_offset_optimizer.gui.joint_baseline import (
     VALIDATED_JOINT_ATTEMPTS,
     VALIDATED_JOINT_MAX_REFINEMENT_PASSES,
 )
+from canfd_offset_optimizer.gui.formatting import format_milliseconds_compact
 from canfd_offset_optimizer.gui.widgets.joint_optimization_dialog import (
     JointOptimizationDialog,
     RHO_HELP_TEXT,
@@ -201,6 +202,59 @@ def test_joint_result_page_is_read_only_and_no_recommendation_fails_closed(
     page.set_result(no_recommendation)
     assert "不会默认采用端点" in page.diagnosis_label.text()
     assert page.group_table.rowCount() == 0
+    page.close()
+    QApplication.processEvents()
+
+
+def test_joint_result_page_shows_exact_microseconds_and_readable_milliseconds(
+    qtbot,
+) -> None:
+    assert format_milliseconds_compact(5_000) == "5"
+    assert format_milliseconds_compact(20_000) == "20"
+    assert format_milliseconds_compact(1_500) == "1.5"
+    assert format_milliseconds_compact(1_250) == "1.25"
+    assert format_milliseconds_compact(1) == "0.001"
+
+    messages = (
+        MainFunctionMessageRow("M5", 20_000, 5_000, 5_000),
+        MainFunctionMessageRow("M1_5", 20_000, 1_500, 1_500),
+        MainFunctionMessageRow("M0_001", 20_000, 1, 1),
+    )
+    view = replace(
+        _joint_view(),
+        main_function_groups=(
+            MainFunctionGroupRow(1, 5_000, Fraction(10), messages),
+        ),
+    )
+    page = JointOptimizationResultPage()
+    qtbot.addWidget(page)
+    page.set_result(view)
+
+    headers = [
+        page.group_table.horizontalHeaderItem(column).text()
+        for column in range(page.group_table.columnCount())
+    ]
+    assert headers == [
+        "组",
+        "TimeBase (μs)",
+        "TimeBase (ms)",
+        "报文",
+        "Cycle (ms)",
+        "Offset (ms)",
+        "D (μs)",
+        "D (ms)",
+    ]
+    assert page.group_table.item(0, 1).text() == "5000"
+    assert page.group_table.item(0, 2).text() == "5"
+    assert page.group_table.item(0, 4).text() == "20"
+    assert page.group_table.item(0, 5).text() == "5"
+    assert page.group_table.item(0, 6).text() == "5000"
+    assert page.group_table.item(0, 7).text() == "5"
+    assert page.group_table.item(1, 7).text() == "1.5"
+    assert page.group_table.item(2, 7).text() == "0.001"
+    assert messages[0].d_us == 5_000
+    assert messages[1].d_us == 1_500
+    assert messages[2].d_us == 1
     page.close()
     QApplication.processEvents()
 

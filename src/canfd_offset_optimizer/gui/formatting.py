@@ -27,6 +27,17 @@ def format_milliseconds(microseconds: int) -> str:
     return f"{microseconds / 1_000:.3f}"
 
 
+def format_milliseconds_compact(microseconds: int) -> str:
+    """Format integer microseconds as exact, human-readable milliseconds."""
+
+    sign = "-" if microseconds < 0 else ""
+    whole, remainder = divmod(abs(microseconds), 1_000)
+    if remainder == 0:
+        return f"{sign}{whole}"
+    fraction = f"{remainder:03d}".rstrip("0")
+    return f"{sign}{whole}.{fraction}"
+
+
 def format_integer(value: int) -> str:
     return f"{value:,}"
 
