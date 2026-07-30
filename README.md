@@ -468,7 +468,7 @@ GUI 使用说明见 [`docs/gui_user_guide.md`](docs/gui_user_guide.md)，Backend
 
 ## Citation
 
-学术使用本软件时，可引用仓库根目录的 [`CITATION.cff`](CITATION.cff)。当前版本暂未提供 DOI。
+学术使用本软件时，可引用仓库根目录的 [`CITATION.cff`](CITATION.cff)。CAN FD Offset Optimizer v1.0 的正式 DOI 为 [`10.5281/zenodo.21696944`](https://doi.org/10.5281/zenodo.21696944)。
 
 ## 许可证
 
