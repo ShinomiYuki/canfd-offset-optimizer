@@ -296,6 +296,38 @@ def main_function_cache_info() -> MainFunctionCacheInfo:
     )
 
 
+def solve_main_function_proxy_exact(
+    histogram: tuple[tuple[int, int], ...],
+    rho: RhoInput = Fraction(1, 1),
+) -> Fraction:
+    """Return the exact optimal CPU Proxy for a canonical D histogram.
+
+    This is the comparison-only view of the same cached subset-DP used by
+    :func:`solve_main_function_partition`. It intentionally does not
+    materialize concrete message membership or ``MainFunctionGroup`` objects.
+    """
+
+    previous_d = 0
+    for item in histogram:
+        if (
+            not isinstance(item, tuple)
+            or len(item) != 2
+            or isinstance(item[0], bool)
+            or not isinstance(item[0], int)
+            or isinstance(item[1], bool)
+            or not isinstance(item[1], int)
+        ):
+            raise TypeError("histogram must contain integer (d_us, count) pairs")
+        d_us, count = item
+        if d_us <= previous_d or count <= 0:
+            raise ValueError("histogram must be positive, unique, and sorted by d_us")
+        previous_d = d_us
+    if not histogram:
+        raise ValueError("histogram must not be empty")
+    normalized_rho = normalize_rho(rho)
+    return _solve_histogram_cached(histogram, normalized_rho).cpu_proxy
+
+
 def solve_main_function_partition(
     messages: Iterable[MainFunctionMessage],
     rho: RhoInput = Fraction(1, 1),

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import FrozenInstanceError
 from fractions import Fraction
@@ -19,6 +20,7 @@ from canfd_offset_optimizer.optimization.main_function import (
     clear_main_function_cache,
     main_function_cache_info,
     solve_main_function_partition,
+    solve_main_function_proxy_exact,
 )
 
 
@@ -175,6 +177,58 @@ def test_compressed_subset_dp_matches_message_level_brute_force_oracle() -> None
                     assert previous_owner == group_index
             checked += 1
     assert checked == len(samples) * len(rhos)
+
+
+def test_proxy_only_exact_path_matches_full_materialized_solver() -> None:
+    generator = random.Random(20260730)
+    d_pool = (1, 1_250, 1_500, 5_000, 10_000, 20_000, 50_000)
+    rhos: tuple[Fraction | str | float, ...] = (
+        Fraction(1, 4),
+        Fraction(1),
+        "1.5",
+        2.25,
+    )
+    samples = (
+        (5_000,),
+        (5_000, 5_000),
+        (1, 1_250, 1_500),
+        (5_000, 10_000, 20_000, 50_000),
+        *(
+            tuple(generator.choice(d_pool) for _ in range(size))
+            for size in range(1, 8)
+            for _ in range(10)
+        ),
+    )
+    for sample_index, d_values in enumerate(samples):
+        messages = tuple(
+            _message(f"P{sample_index}_{index}", d_us)
+            for index, d_us in enumerate(d_values)
+        )
+        histogram = tuple(sorted(Counter(d_values).items()))
+        for rho in rhos:
+            proxy = solve_main_function_proxy_exact(histogram, rho)
+            materialized = solve_main_function_partition(messages, rho)
+            assert proxy == materialized.cpu_proxy
+
+
+@pytest.mark.parametrize(
+    ("histogram", "exception"),
+    (
+        ((), ValueError),
+        (((0, 1),), ValueError),
+        (((5_000, 0),), ValueError),
+        (((5_000, 1), (5_000, 2)), ValueError),
+        (((10_000, 1), (5_000, 1)), ValueError),
+        (((5_000.0, 1),), TypeError),
+        (((5_000, True),), TypeError),
+    ),
+)
+def test_proxy_only_histogram_validation(
+    histogram: tuple[tuple[object, object], ...],
+    exception: type[Exception],
+) -> None:
+    with pytest.raises(exception):
+        solve_main_function_proxy_exact(histogram)  # type: ignore[arg-type]
 
 
 def test_input_order_does_not_change_canonical_partition_or_group_order() -> None:

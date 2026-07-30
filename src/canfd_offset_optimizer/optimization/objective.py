@@ -60,18 +60,15 @@ def calculate_objective(
     @note 无物理阈值时前两项固定为零；近似权重只允许 peak 模式。
     """
     resolved_policy = coerce_objective_policy(policy)
-    if (
-        any(value < 0 for value in steady_slot_loads)
-        or any(value < 0 for value in startup_slot_loads)
-        or any(value < 0 for value in steady_slot_counts)
-    ):
-        raise ValueError("loads and counts must be non-negative")
     violation_count = 0
     violation_excess = 0
     steady_peak = 0
     sum_square = 0
     for load in steady_slot_loads:
-        steady_peak = max(steady_peak, load)
+        if load < 0:
+            raise ValueError("loads and counts must be non-negative")
+        if load > steady_peak:
+            steady_peak = load
         sum_square += load * load
         if (
             resolved_policy.load_threshold_us is not None
@@ -79,14 +76,28 @@ def calculate_objective(
         ):
             violation_count += 1
             violation_excess += load - resolved_policy.load_threshold_us
+    startup_peak = 0
+    startup_sum_square = 0
+    for load in startup_slot_loads:
+        if load < 0:
+            raise ValueError("loads and counts must be non-negative")
+        if load > startup_peak:
+            startup_peak = load
+        startup_sum_square += load * load
+    max_release_count = 0
+    for count in steady_slot_counts:
+        if count < 0:
+            raise ValueError("loads and counts must be non-negative")
+        if count > max_release_count:
+            max_release_count = count
     return ObjectiveValue(
         violation_count=violation_count,
         violation_excess=violation_excess,
         steady_peak=steady_peak,
-        startup_peak=max(startup_slot_loads, default=0),
+        startup_peak=startup_peak,
         sum_square_load=sum_square,
-        max_release_count=max(steady_slot_counts, default=0),
-        startup_sum_square_load=sum(load * load for load in startup_slot_loads),
+        max_release_count=max_release_count,
+        startup_sum_square_load=startup_sum_square,
         mode=resolved_policy.mode,
         peak_budget_us=resolved_policy.peak_budget_us,
     )

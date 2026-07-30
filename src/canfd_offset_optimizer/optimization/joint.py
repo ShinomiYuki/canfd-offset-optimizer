@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from itertools import combinations
+from math import gcd
 from time import perf_counter
 
 from ..config import ObjectiveConfig, OptimizationConfig
@@ -53,6 +54,7 @@ from .main_function import (
     main_function_cache_info,
     normalize_rho,
     solve_main_function_partition,
+    solve_main_function_proxy_exact,
 )
 from .objective import ObjectivePolicy, score_state, slot_load_threshold_us
 from .joint_analysis import JointRecommendation, select_joint_recommendation
@@ -178,6 +180,25 @@ class JointMetrics:
     @property
     def cpu_proxy(self) -> Fraction:
         return self.main_function_result.cpu_proxy
+
+
+@dataclass(frozen=True, slots=True)
+class _JointCandidateMetrics:
+    """Exact comparison metrics without concrete MainFunction group materialization."""
+
+    can_objective: ObjectiveValue
+    cpu_proxy: Fraction
+
+    @property
+    def peak(self) -> int:
+        return self.can_objective.steady_peak
+
+    @property
+    def qss(self) -> int:
+        return self.can_objective.sum_square_load
+
+
+_ComparableJointMetrics = JointMetrics | _JointCandidateMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,6 +488,9 @@ class JointEvaluator:
         self.cache_misses = 0
         self.solver_seconds = 0.0
         self._histograms: set[tuple[tuple[int, int], ...]] = set()
+        self._fixed_histogram = Counter(
+            message.cycle_time_us for message in domain.fixed_messages
+        )
 
     @property
     def unique_histogram_count(self) -> int:
@@ -491,6 +515,70 @@ class JointEvaluator:
             for message in self.domain.all_messages
         )
 
+    def assignment_signature(
+        self,
+        state: SearchState,
+    ) -> tuple[tuple[int, int, str, int], ...]:
+        """Build the canonical full signature without OffsetAssignment objects."""
+
+        offsets = state.current_offsets
+        fixed_offsets = self.domain.fixed_offset_map
+        return tuple(
+            (
+                message.definition_index,
+                message.can_id,
+                message.name,
+                (
+                    offsets[message.name]
+                    if message.name in offsets
+                    else fixed_offsets[message.name]
+                ),
+            )
+            for message in self.domain.all_messages
+        )
+
+    def _canonical_histogram(
+        self,
+        state: SearchState,
+    ) -> tuple[tuple[int, int], ...]:
+        histogram = self._fixed_histogram.copy()
+        offsets = state.current_offsets
+        for message in self.domain.decision_messages:
+            histogram[gcd(message.cycle_time_us, offsets[message.name])] += 1
+        canonical = tuple(sorted(histogram.items()))
+        self._histograms.add(canonical)
+        return canonical
+
+    def _record_solver_call(
+        self,
+        operation: Callable[[], Fraction | MainFunctionSolveResult],
+    ) -> Fraction | MainFunctionSolveResult:
+        before = main_function_cache_info()
+        started = perf_counter()
+        result = operation()
+        self.solver_seconds += perf_counter() - started
+        after = main_function_cache_info()
+        self.cache_hits += after.hits - before.hits
+        self.cache_misses += after.misses - before.misses
+        self.solver_calls += 1
+        return result
+
+    def evaluate_candidate_state(self, state: SearchState) -> _JointCandidateMetrics:
+        """Evaluate exact CAN/CPU objectives without materializing MF groups."""
+
+        if len(state.current_offsets) != len(self.domain.decision_messages):
+            raise OptimizationError("state does not contain a complete assignment")
+        histogram = self._canonical_histogram(state)
+        proxy = self._record_solver_call(
+            lambda: solve_main_function_proxy_exact(histogram, self.rho)
+        )
+        assert isinstance(proxy, Fraction)
+        self.evaluation_count += 1
+        return _JointCandidateMetrics(
+            score_state(state, self.can_policy),
+            proxy,
+        )
+
     def evaluate_state(self, state: SearchState) -> JointMetrics:
         """! @brief 对一个完整状态计算正式 Peak/Qss 和 exact CPU Proxy。"""
         state.validate_invariants(require_complete=True)
@@ -508,16 +596,27 @@ class JointEvaluator:
         )
         histogram_counter = Counter(message.d_us for message in mf_messages)
         self._histograms.add(tuple(sorted(histogram_counter.items())))
-        before = main_function_cache_info()
-        started = perf_counter()
-        mf_result = solve_main_function_partition(mf_messages, self.rho)
-        self.solver_seconds += perf_counter() - started
-        after = main_function_cache_info()
-        self.cache_hits += after.hits - before.hits
-        self.cache_misses += after.misses - before.misses
-        self.solver_calls += 1
+        mf_result = self._record_solver_call(
+            lambda: solve_main_function_partition(mf_messages, self.rho)
+        )
+        assert isinstance(mf_result, MainFunctionSolveResult)
         self.evaluation_count += 1
         return JointMetrics(score_state(state, self.can_policy), mf_result)
+
+    def materialize_candidate_state(
+        self,
+        state: SearchState,
+        candidate: _ComparableJointMetrics,
+    ) -> JointMetrics:
+        """Materialize exact groups only when a candidate becomes a solution."""
+
+        materialized = self.evaluate_state(state)
+        if (
+            materialized.can_objective != candidate.can_objective
+            or materialized.cpu_proxy != candidate.cpu_proxy
+        ):
+            raise RuntimeError("materialized Joint metrics differ from candidate metrics")
+        return materialized
 
     def evaluate_assignments(
         self,
@@ -537,7 +636,7 @@ class _JointPolicy:
     violation_guardrail: tuple[int, int]
     epsilon_budget: Fraction | None = None
 
-    def feasible(self, metrics: JointMetrics) -> bool:
+    def feasible(self, metrics: _ComparableJointMetrics) -> bool:
         objective = metrics.can_objective
         return (
             objective.steady_peak <= self.peak_budget
@@ -547,7 +646,7 @@ class _JointPolicy:
 
     def key(
         self,
-        metrics: JointMetrics,
+        metrics: _ComparableJointMetrics,
         assignment_signature: tuple[tuple[int, int, str, int], ...],
     ) -> tuple[object, ...]:
         if self.objective == "cpu_proxy_then_qss":
@@ -583,11 +682,11 @@ def _state_key(
     evaluator: JointEvaluator,
     policy: _JointPolicy,
     state: SearchState,
-    metrics: JointMetrics,
+    metrics: _ComparableJointMetrics,
 ) -> tuple[object, ...]:
     return policy.key(
         metrics,
-        _assignment_signature(evaluator.full_assignments(state)),
+        evaluator.assignment_signature(state),
     )
 
 
@@ -617,33 +716,39 @@ def _joint_single_search(
     evaluator: JointEvaluator,
     policy: _JointPolicy,
     order: tuple[CanMessage, ...],
-) -> tuple[int, int]:
+) -> tuple[int, int, _JointCandidateMetrics]:
     evaluations = 0
     accepted = 0
+    current_metrics = evaluator.evaluate_candidate_state(state)
     improved = True
     while improved:
         improved = False
         for message in order:
-            baseline_metrics = evaluator.evaluate_state(state)
-            baseline_key = _state_key(evaluator, policy, state, baseline_metrics)
+            baseline_metrics = current_metrics
+            baseline_key = _state_key(evaluator, policy, state, current_metrics)
             old_offset = state.remove(message)
             best_offset = old_offset
             best_key = baseline_key
+            best_metrics = baseline_metrics
             for offset in message.allowed_offsets_us:
+                if offset == old_offset:
+                    continue
                 state.apply(message, offset)
-                metrics = evaluator.evaluate_state(state)
+                metrics = evaluator.evaluate_candidate_state(state)
                 evaluations += 1
                 if policy.feasible(metrics):
                     key = _state_key(evaluator, policy, state, metrics)
                     if key < best_key:
                         best_key = key
                         best_offset = offset
+                        best_metrics = metrics
                 state.rollback(message, offset)
             state.apply(message, best_offset)
+            current_metrics = best_metrics
             if best_offset != old_offset:
                 accepted += 1
                 improved = True
-    return evaluations, accepted
+    return evaluations, accepted, current_metrics
 
 
 def _neighbor_offsets(
@@ -665,12 +770,13 @@ def _joint_pair_search(
     evaluator: JointEvaluator,
     policy: _JointPolicy,
     config: OptimizationConfig,
-) -> tuple[int, int]:
+    baseline_metrics: _JointCandidateMetrics,
+) -> tuple[int, int, _JointCandidateMetrics]:
     evaluations = 0
     accepted = 0
+    current_metrics = baseline_metrics
     while True:
-        baseline_metrics = evaluator.evaluate_state(state)
-        baseline_key = _state_key(evaluator, policy, state, baseline_metrics)
+        baseline_key = _state_key(evaluator, policy, state, current_metrics)
         slots = variance_hot_slots(state)
         candidates = conflict_candidates(
             state,
@@ -689,6 +795,7 @@ def _joint_pair_search(
                 CanMessage,
                 int,
                 int,
+                _JointCandidateMetrics,
             ]
             | None
         ) = None
@@ -736,7 +843,7 @@ def _joint_pair_search(
                             continue
                         state.apply(first, first_new)
                         state.apply(second, second_new)
-                        metrics = evaluator.evaluate_state(state)
+                        metrics = evaluator.evaluate_candidate_state(state)
                         evaluations += 1
                         if policy.feasible(metrics):
                             key = _state_key(evaluator, policy, state, metrics)
@@ -746,6 +853,7 @@ def _joint_pair_search(
                                 second,
                                 first_new,
                                 second_new,
+                                metrics,
                             )
                             if key < baseline_key and (best is None or key < best[0]):
                                 best = candidate
@@ -758,13 +866,13 @@ def _joint_pair_search(
                     state.apply(second, second_old)
         if best is None:
             break
-        _, first, second, first_new, second_new = best
+        _, first, second, first_new, second_new, current_metrics = best
         state.remove(first)
         state.remove(second)
         state.apply(first, first_new)
         state.apply(second, second_new)
         accepted += 1
-        single_evaluations, single_accepted = _joint_single_search(
+        single_evaluations, single_accepted, current_metrics = _joint_single_search(
             state,
             evaluator,
             policy,
@@ -772,7 +880,7 @@ def _joint_pair_search(
         )
         evaluations += single_evaluations
         accepted += single_accepted
-    return evaluations, accepted
+    return evaluations, accepted, current_metrics
 
 
 def _full_offsets_from_solution(
@@ -788,7 +896,7 @@ def _full_offsets_from_solution(
 def _make_attempt(
     evaluator: JointEvaluator,
     state: SearchState,
-    metrics: JointMetrics,
+    metrics: _ComparableJointMetrics,
     policy: _JointPolicy,
     attempt_index: int,
     seed: int,
@@ -817,22 +925,27 @@ def _make_attempt(
 def _solution_from_state(
     evaluator: JointEvaluator,
     state: SearchState,
-    metrics: JointMetrics,
+    metrics: _ComparableJointMetrics,
     source: str,
     epsilon_budget: Fraction | None,
     metadata: JointSearchMetadata,
     refinement_pass: int = -1,
     origin_attempt: int | None = None,
 ) -> JointSolution:
+    materialized = (
+        metrics
+        if isinstance(metrics, JointMetrics)
+        else evaluator.materialize_candidate_state(state, metrics)
+    )
     assignments = evaluator.full_assignments(state)
     return JointSolution(
         assignments,
         hash_offset_assignments(assignments),
-        metrics.peak,
-        metrics.qss,
-        metrics.cpu_proxy,
-        metrics.can_objective,
-        metrics.main_function_result,
+        materialized.peak,
+        materialized.qss,
+        materialized.cpu_proxy,
+        materialized.can_objective,
+        materialized.main_function_result,
         source,
         epsilon_budget,
         metadata,
@@ -857,7 +970,7 @@ def _run_joint_search(
     """Run one shared custom-comparator GCLS path for CPU anchor and ε stages."""
     started = perf_counter()
     best_state: SearchState | None = None
-    best_metrics: JointMetrics | None = None
+    best_metrics: _JointCandidateMetrics | None = None
     best_key: tuple[object, ...] | None = None
     attempts: list[JointSearchAttempt] = []
 
@@ -865,16 +978,15 @@ def _run_joint_search(
         _checkpoint(cancellation_check)
         state = domain.new_state()
         state.apply_assignments(_full_offsets_from_solution(incumbent, domain))
-        metrics = evaluator.evaluate_state(state)
+        metrics = evaluator.evaluate_candidate_state(state)
         if not policy.feasible(metrics):
             continue
-        evaluations, accepted = _joint_single_search(
+        evaluations, accepted, metrics = _joint_single_search(
             state,
             evaluator,
             policy,
             greedy_order(domain.decision_messages),
         )
-        metrics = evaluator.evaluate_state(state)
         key = _state_key(evaluator, policy, state, metrics)
         if best_key is None or key < best_key:
             best_state, best_metrics, best_key = state.clone(), metrics, key
@@ -936,23 +1048,23 @@ def _run_joint_search(
                 variance_offset_cap=config.variance_offset_cap,
             )
             can_stats += triple_stats
-        metrics = evaluator.evaluate_state(state)
+        metrics = evaluator.evaluate_candidate_state(state)
         accepted_moves = can_stats.accepted_moves
         if policy.feasible(metrics):
-            _, joint_accepted = _joint_single_search(
+            _, joint_accepted, metrics = _joint_single_search(
                 state,
                 evaluator,
                 policy,
                 order,
             )
-            _, pair_accepted = _joint_pair_search(
+            _, pair_accepted, metrics = _joint_pair_search(
                 state,
                 evaluator,
                 policy,
                 config,
+                metrics,
             )
             accepted_moves += joint_accepted + pair_accepted
-            metrics = evaluator.evaluate_state(state)
         attempt = _make_attempt(
             evaluator,
             state,

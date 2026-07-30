@@ -25,14 +25,19 @@ from canfd_offset_optimizer.optimization.joint import (
     JointOptimizationConfig,
     JointSearchMetadata,
     JointSolution,
+    _JointPolicy,
+    _assignment_signature,
+    _joint_single_search,
     _observed_can_endpoint,
     _official_peak_key,
     _peak_feasible_archive,
+    _state_key,
     build_joint_domain,
     filter_pareto_solutions,
     generate_epsilon_budgets,
     optimize_can_cpu_balanced,
 )
+import canfd_offset_optimizer.optimization.joint as joint_module
 from canfd_offset_optimizer.optimization.gcls import calculate_peak_budget_us
 from canfd_offset_optimizer.optimization.main_function import (
     MainFunctionGroup,
@@ -184,6 +189,104 @@ def test_joint_evaluator_matches_formal_can_and_main_function_solvers() -> None:
 
     assert metrics.can_objective == formal_can
     assert metrics.main_function_result == formal_cpu
+
+
+def test_candidate_evaluation_is_exact_and_materializes_groups_lazily(
+    monkeypatch,
+) -> None:
+    domain = build_joint_domain(_mixed_messages(), _config())
+    evaluator = JointEvaluator(domain, Fraction(3, 2), None)
+    state = domain.new_state()
+    state.apply_assignments({"fast_a": 20_000, "edge": 30_000})
+    calls = 0
+    original = joint_module.solve_main_function_partition
+
+    def counted_partition(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(joint_module, "solve_main_function_partition", counted_partition)
+    candidate = evaluator.evaluate_candidate_state(state)
+    assert calls == 0
+
+    materialized = evaluator.materialize_candidate_state(state, candidate)
+    assert calls == 1
+    assert materialized.can_objective == candidate.can_objective
+    assert materialized.cpu_proxy == candidate.cpu_proxy
+    assert materialized.main_function_result.groups
+
+
+def test_fast_state_signature_matches_formal_assignment_signature() -> None:
+    domain = build_joint_domain(_mixed_messages(), _config())
+    evaluator = JointEvaluator(domain, Fraction(1), None)
+    state = domain.new_state()
+    state.apply_assignments({"fast_a": 30_000, "edge": 20_000})
+
+    assert evaluator.assignment_signature(state) == _assignment_signature(
+        evaluator.full_assignments(state)
+    )
+
+
+def test_single_search_removes_duplicate_evaluations_without_changing_path() -> None:
+    domain = build_joint_domain(_mixed_messages(), _config())
+    policy = _JointPolicy("qss_then_cpu_proxy", 10_000, (0, 0))
+    order = domain.decision_messages
+
+    reference_evaluator = JointEvaluator(domain, Fraction(1), None)
+    reference_state = domain.new_state()
+    reference_state.apply_assignments({"fast_a": 10_000, "edge": 10_000})
+    reference_accepted = 0
+    improved = True
+    while improved:
+        improved = False
+        for message in order:
+            baseline = reference_evaluator.evaluate_state(reference_state)
+            best_key = _state_key(
+                reference_evaluator,
+                policy,
+                reference_state,
+                baseline,
+            )
+            old_offset = reference_state.remove(message)
+            best_offset = old_offset
+            for offset in message.allowed_offsets_us:
+                reference_state.apply(message, offset)
+                metrics = reference_evaluator.evaluate_state(reference_state)
+                if policy.feasible(metrics):
+                    key = _state_key(
+                        reference_evaluator,
+                        policy,
+                        reference_state,
+                        metrics,
+                    )
+                    if key < best_key:
+                        best_key = key
+                        best_offset = offset
+                reference_state.rollback(message, offset)
+            reference_state.apply(message, best_offset)
+            if best_offset != old_offset:
+                reference_accepted += 1
+                improved = True
+
+    optimized_evaluator = JointEvaluator(domain, Fraction(1), None)
+    optimized_state = domain.new_state()
+    optimized_state.apply_assignments({"fast_a": 10_000, "edge": 10_000})
+    _, optimized_accepted, optimized_metrics = _joint_single_search(
+        optimized_state,
+        optimized_evaluator,
+        policy,
+        order,
+    )
+    reference_metrics = reference_evaluator.evaluate_state(reference_state)
+
+    assert optimized_evaluator.assignment_signature(
+        optimized_state
+    ) == reference_evaluator.assignment_signature(reference_state)
+    assert optimized_metrics.can_objective == reference_metrics.can_objective
+    assert optimized_metrics.cpu_proxy == reference_metrics.cpu_proxy
+    assert optimized_accepted == reference_accepted
+    assert optimized_evaluator.evaluation_count < reference_evaluator.evaluation_count
 
 
 def test_epsilon_budgets_are_exact_monotonic_and_include_endpoints() -> None:
