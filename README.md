@@ -466,6 +466,10 @@ GUI 使用说明见 [`docs/gui_user_guide.md`](docs/gui_user_guide.md)，Backend
 截图。不要在 Issue 中上传公司内部 DBC、ARXML、路由表或其他敏感工程数据；需要说明
 输入时请使用脱敏后的最小样例。
 
+## Citation
+
+学术使用本软件时，可引用仓库根目录的 [`CITATION.cff`](CITATION.cff)。当前版本暂未提供 DOI。
+
 ## 许可证
 
 本项目采用 [GNU Affero General Public License v3.0 only](LICENSE)，SPDX 标识为

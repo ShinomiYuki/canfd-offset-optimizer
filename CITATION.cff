@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "如果您使用本软件，请引用本文件中的元数据。"
+title: "CAN FD Offset Optimizer"
+authors:
+  - family-names: "Xin"
+    given-names: "Hao"
+version: "1.0"
+date-released: "2026-07-30"
+repository-code: "https://github.com/ShinomiYuki/canfd-offset-optimizer"
+license: "AGPL-3.0-only"
