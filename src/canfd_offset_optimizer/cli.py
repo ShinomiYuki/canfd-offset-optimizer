@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import shlex
 import sys
 import traceback
 from contextlib import contextmanager
@@ -24,6 +26,13 @@ from .diagnostics.candidate_pool_study import (
 from .diagnostics.restart_study import DEFAULT_CHECKPOINTS, run_restart_study
 from .diagnostics.tolerance_study import DEFAULT_TOLERANCES, run_tolerance_scan
 from .diagnostics.triple_ablation import run_triple_ablation
+from .diagnostics.d_structure import (
+    DStructureInputError,
+    NETWORK_ORDER,
+    analyze_manifest,
+)
+from .diagnostics.d_structure_models import DStructureLimits
+from .diagnostics.d_structure_report import write_batch_summary, write_network_result
 from .exceptions import CanfdOptimizerError
 from .joint_service import run_joint_optimization
 from .models import (
@@ -97,6 +106,27 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_triple_ablation = subparsers.add_parser(
         "analyze-triple-ablation",
         help="run the A/B/C/D conflict-directed 3-opt ablation",
+    )
+    analyze_d_structure = subparsers.add_parser(
+        "analyze-d-structure",
+        help="read-only exact D-structure analysis for the locked nine-network inputs",
+    )
+    analyze_d_structure.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("docs/final_nine_network_manifest.yaml"),
+    )
+    analyze_d_structure.add_argument("--network", choices=NETWORK_ORDER)
+    analyze_d_structure.add_argument("--rho", default="1")
+    analyze_d_structure.add_argument("--archive", type=Path)
+    analyze_d_structure.add_argument("--output-root", type=Path, default=Path("output/diagnostics"))
+    analyze_d_structure.add_argument("--max-histogram-states", type=int, default=1_000_000)
+    analyze_d_structure.add_argument("--max-exact-pstar-evaluations", type=int, default=1_000_000)
+    analyze_d_structure.add_argument("--timeout-s", type=float, default=300.0)
+    analyze_d_structure.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
     )
     all_commands = (
         optimize,
@@ -435,7 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    output: Path = args.output
+    output: Path = args.output_root if args.command == "analyze-d-structure" else args.output
     try:
         log_path = _configure_logging(output, args.log_level)
     except OSError as exc:
@@ -443,6 +473,70 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     logger = logging.getLogger(__name__)
     try:
+        if args.command == "analyze-d-structure":
+            raw_arguments = tuple(sys.argv[1:] if argv is None else argv)
+            command_text = "python -m canfd_offset_optimizer " + " ".join(
+                shlex.quote(value) for value in raw_arguments
+            )
+            try:
+                limits = DStructureLimits(
+                    max_histogram_states=args.max_histogram_states,
+                    max_exact_pstar_evaluations=args.max_exact_pstar_evaluations,
+                    timeout_s=args.timeout_s,
+                )
+                networks = (args.network,) if args.network is not None else NETWORK_ORDER
+                if (
+                    args.archive is not None
+                    and args.archive.suffix.lower() == ".json"
+                    and len(networks) > 1
+                ):
+                    raise DStructureInputError(
+                        "a single --archive JSON may only be used with --network"
+                    )
+                results = analyze_manifest(
+                    args.manifest,
+                    networks,
+                    args.rho,
+                    limits,
+                    archive=args.archive,
+                )
+                for d_structure_result in results:
+                    summary_path = write_network_result(
+                        d_structure_result, output, limits, command=command_text
+                    )
+                    logger.info(
+                        "%s D-structure status=%s classification=%s histograms=%s levels=%d summary=%s",
+                        d_structure_result.network,
+                        d_structure_result.exactness_status,
+                        d_structure_result.structure_classification,
+                        d_structure_result.reachable_histogram_count,
+                        len(d_structure_result.pstar_levels),
+                        summary_path,
+                    )
+                if len(results) > 1:
+                    write_batch_summary(results, output, limits, command=command_text)
+                return 0 if all(item.exactness_status == "exact" for item in results) else 1
+            except (DStructureInputError, TypeError, ValueError) as exc:
+                output.mkdir(parents=True, exist_ok=True)
+                failure_path = output / "d_structure_invalid_input.json"
+                failure_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "exactness_status": "invalid_input",
+                            "error": str(exc),
+                            "command": command_text,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                logger.error("invalid D-structure input: %s", exc, exc_info=True)
+                print(f"error: {exc} (details: {log_path})", file=sys.stderr)
+                return 2
         report_prefix = infer_report_prefix(args.dbc, output.name)
         if args.restarts is not None and args.restarts < 0:
             parser.error("--restarts must be non-negative")
