@@ -1198,7 +1198,7 @@ GCLS 至此得到一个具体的 CAN 侧相位配置 $\symbf O=(O_1,\ldots,O_N)$
 \section{Offset 约束下的 MainFunction 调用周期与分组优化}
 \label{sec:main-function-exact}
 
-第~\ref{sec:gcls-method}~章已经给出一个具体的离散 Offset 分配方案。相位确定后，研究重点由总线侧转向软件周期入口：这些报文的周期与释放相位能否通过周期调用准确表达？当多条报文共享一个 MainFunction 时，还需要确定共同采用的调用周期以及报文之间的分组方式。因此，给定完整 Offset 分配后，软件侧仍有两个核心未知量，即各 MainFunction 能够采用的共同调用周期和报文集合的分组方案。
+第~\ref{sec:gcls-method}~章已经给出一个具体的离散 Offset 分配方案。相位确定后，研究重点由总线侧转向软件周期入口：这些报文的周期与释放相位能否通过周期调用准确表达？当多条报文共享一个 MainFunction 时，还需要确定共同采用的调用周期以及报文之间的分组方式。本章的中心问题是，外层 Offset 确定后，软件侧是否仍需在报文级集合划分空间中搜索，还是能够利用周期与相位所诱导的结构精确压缩这一空间。
 
 \subsection{共同时间基准与周期调用可表示性}
 \label{subsec:integer-tick-alignment}
@@ -1219,7 +1219,7 @@ GCLS 至此得到一个具体的 CAN 侧相位配置 $\symbf O=(O_1,\ldots,O_N)$
 \end{equation}
 式\eqref{eq:exact-tick-alignment}称为精确时间刻对齐条件。该条件排除了以浮点舍入近似相位或周期的做法，使整除关系和最大公约数运算具有确定的整数语义。
 
-共同时间基准与精确对齐是本文生成周期调用建议时采用的建模条件；AUTOSAR COM 的 MainFunction 与 TimeBase 配置语义及基础软件的周期组织可参见文献\cite{autosarcom,zhang2011autosar,denil2011devs}，具体部署仍需结合目标平台的实际调度实现。式\eqref{eq:exact-tick-alignment}将单报文的可表示性转化为 $B$ 对 $T_i$ 与 $O_i$ 的共同整除关系，单报文问题因而进一步归结为在这些公共正约数中确定可采用的最大调用周期。
+共同时间基准与精确对齐是本文生成周期调用建议时采用的建模条件；AUTOSAR COM 的 MainFunction 与 TimeBase 配置语义及基础软件的周期组织可参见文献\cite{autosarcom,zhang2011autosar,denil2011devs}，利用 activation Offset 与 gcd 关系组织 runnable-to-task 映射的相邻研究见文献\cite{khenfri2015,khenfri2020}。具体部署仍需结合目标平台的实际调度实现。式\eqref{eq:exact-tick-alignment}将单报文的可表示性转化为 $B$ 对 $T_i$ 与 $O_i$ 的共同整除关系，单报文问题因而进一步归结为在这些公共正约数中确定可采用的最大调用周期。
 
 \subsection{单报文最大可行调用周期}
 \label{subsec:message-max-tick}
@@ -1345,12 +1345,22 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
 
 命题\ref{prop:naive-split-bias}表明，$P_0$ 对分组细化具有结构性的弱偏好：继续细分既有分组不会使指标增大，并可能因子组调用周期增大而严格下降。因此，该指标无法体现新增 MainFunction 本身带来的固定调用成本。在 $P_{\rm CPU}$ 中加入 $\rho$ 后，每个新增 MainFunction 都会引入固定调用项，分组细化不再天然占优；与此同时，子组 $B_G$ 的增大仍可能降低调用频率。由此，“合并以减少固定调用次数”与“拆分以获得更大的可行调用周期”之间形成了可比较的结构性权衡。
 
-代理模型明确后，固定 $\boldsymbol O$ 下的软件侧问题转化为：在所有 MainFunction 划分中寻找 $P_{\rm CPU}$ 最小的方案。此时，真正的困难不再是成本如何定义，而是报文级集合划分数量会随问题规模迅速增长。
+代理模型明确后，固定 $\boldsymbol O$ 下的软件侧问题转化为：在所有 MainFunction 划分中寻找 $P_{\rm CPU}$ 最小的方案。记 $\mathcal P(\boldsymbol O)$ 为该 Offset 分配下的可行划分集合，则最优软件代理成本为
+\begin{equation}
+ P^\star(\boldsymbol O)
+ =
+ \min_{\Pi\in\mathcal P(\boldsymbol O)}
+ P_{\rm CPU}(\Pi\mid\boldsymbol O).
+\label{eq:joint-inner-optimum}
+\end{equation}
+式\eqref{eq:joint-inner-optimum}只消去固定 Offset 后的软件分组变量；此时真正的困难不再是成本如何定义，而是报文级集合划分数量会随问题规模迅速增长。
 
 \subsection{D 类型压缩与最优性保持}
 \label{subsec:d-type-compression}
 
-对 $n$ 条报文直接枚举 MainFunction 划分，候选数量按 Bell 数增长。固定 $\boldsymbol O$ 后，每条报文的 $D_i$ 已由式\eqref{eq:message-max-tick}确定，分组调用周期由组内 $D_i$ 的最大公约数决定，而代理成本进一步只依赖各 D 类型、相应报文数量及 $\rho$。因此，在进入精确枚举前需要回答：具有相同 $D_i$ 的多条报文，是否仍有必要作为彼此不同的个体参与划分？对任意非空组 $G$，其代理成本可写为
+对 $n$ 条报文直接枚举 MainFunction 划分，候选数量按 Bell 数增长。固定 $\boldsymbol O$ 后，每条报文的 $D_i$ 已由式\eqref{eq:message-max-tick}确定，分组调用周期由组内 $D_i$ 的最大公约数决定。因此，在进入精确枚举前需要回答：具有相同 $D_i$ 的多条报文，是否仍有必要作为彼此不同的个体参与划分？
+
+以下压缩与精确性结论共同采用本章的既定模型前提：全部时间量位于共同整数栅格，所有分组共享同一个正参数 $\rho$，组成本为线性且不区分报文身份的形式；可行划分不含禁止同组、容量、节点归属或报文特异执行成本等附加约束，$P^\star$ 采用精确有理数比较。在这些条件下，对任意非空组 $G$，其代理成本可写为
 \begin{equation}
  c(G)
  =
@@ -1362,7 +1372,7 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
 
 将不同的 $D$ 值按升序记为 $d_1<d_2<\cdots<d_m$，令 $c_j$ 表示 $D_i=d_j$ 的报文数量。相应的 D 类型直方图为
 \begin{equation}
- H_D
+ H_D(\boldsymbol O)
  =
  \bigl((d_1,c_1),(d_2,c_2),\ldots,(d_m,c_m)\bigr).
 \label{eq:d-histogram}
@@ -1374,10 +1384,27 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
 \end{proposition}
 
 \begin{proof}[\normalfont 证明思路]
-若同一 D 类型分散在两个组中，可将 TimeBase 较小组内的一条同类型报文移入另一组。该移动不改变接收组的最大公约数；移出组的最大公约数保持不变或增大，因而总成本不会上升。反复执行交换即可由任一最优方案得到一个不拆分相同 D 类型的最优方案。完整交换证明见附录第~\ref{subsubsec:appendix-same-d-proof}~节。
+若同一 D 类型分散在两个组中，记两组的 TimeBase 满足 $B_1\le B_2$，并将第一组内的一条该类型报文移入第二组。接收组的最大公约数不变；若移出后第一组仍非空，其最大公约数保持不变或增大，线性报文数项的变化使总成本不增加。若第一组原为单例，则 $B_1=B_2$，合并还会省去一次固定调用成本。有限次执行这一操作，即可从任一最优方案得到一个不拆分相同 D 类型的最优方案。完整交换证明见附录第~\ref{subsubsec:appendix-same-d-proof}~节。
 \end{proof}
 
-命题\ref{prop:same-d-compression}只保证至少存在一个具有该结构的最优解，并不声称所有等成本最优解都必须满足这一性质。这意味着，将报文级划分压缩为 D 类型级划分不会排除全部全局最优方案；其意义不只是减少求解状态，而是在保留至少一个全局最优方案的前提下，将决策对象从 $n$ 条具体报文转化为 $m$ 个不同 D 类型，各类型的重数 $c_j$ 仍完整保留相应报文数量。类型集合本身仍存在多种划分，余下的问题是如何不重不漏地枚举这些分组，并利用最优子结构精确求得最小成本。
+命题\ref{prop:same-d-compression}只保证至少存在一个具有该结构的最优解，并不声称所有最优解都不拆分相同 D 类型。因此，类型压缩在保留至少一个全局最优方案的同时，将组合维度从 $n$ 条报文降为 $m$ 个不同 D 类型；重数 $c_j$ 仍保留各类型的报文数量。类型集合本身仍需划分，但外层 Offset 对软件最优值的影响已经可以只通过其诱导的 D 结构传递。
+
+\begin{proposition}[软件代理成本对 D 结构的依赖]
+\label{prop:pstar-d-structure}
+设 $\boldsymbol O$ 与 $\boldsymbol O'$ 为两个完整 Offset 分配。若二者产生相同的 D 向量，则
+\begin{equation}
+ P^\star(\boldsymbol O)=P^\star(\boldsymbol O').
+\label{eq:pstar-same-d-vector}
+\end{equation}
+在当前不区分报文身份的组成本下，即使 D 值分配给具体报文的方式不同，只要
+$H_D(\boldsymbol O)=H_D(\boldsymbol O')$，式\eqref{eq:pstar-same-d-vector}仍成立。
+\end{proposition}
+
+\begin{proof}[\normalfont 证明思路]
+D 向量相同时，每个报文级划分中各组的最大公约数、组大小和成本均保持不变。D 直方图相同时，两个实例具有相同的类型值及重数；由命题\ref{prop:same-d-compression}，两者都可无损压缩为同一个类型级划分问题，故精确最优值相同。
+\end{proof}
+
+因此，$H_D(\boldsymbol O)$ 足以表示当前软件侧精确子问题，可作为缓存键，并支持类型压缩和后续可达软件代价水平诊断。该表示并非 $P^\star$ 的一一编码：不同直方图仍可能得到相同的最优软件代理成本。若模型加入报文特异执行成本、兼容性或容量约束，报文身份将重新影响组成本，直方图表示也未必继续充分。
 
 \subsection{基于子集动态规划的精确分组求解}
 \label{subsec:deterministic-subset-dp}
@@ -1443,27 +1470,46 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 
 递推式本身并不自动保证报文级全局最优性。为此，需要同时利用 D 类型压缩对至少一个最优方案的保持、规范锚点对类型划分的完备枚举，以及式\eqref{eq:anchor-subset-dp}所具有的最优子结构。命题\ref{prop:same-d-compression}与引理\ref{lem:anchor-block-uniqueness}分别给出前两项保证，由此得到以下精确性结论。
 
-\begin{theorem}[固定 Offset 分组子问题的精确性]
+\begin{theorem}[固定 Offset 分组子问题的精确性与参数化复杂度]
 \label{thm:fixed-offset-dp-exactness}
-给定一个完整且固定的 Offset 分配方案，若全部时间量位于共同整数栅格，组成本采用式\eqref{eq:fixed-offset-group-cost}，参数 $\rho>0$，且式\eqref{eq:anchor-subset-dp}完整枚举所有包含规范锚点的类型子集，则 D 类型压缩与子集动态规划返回本章 CPU 开销代理模型内的全局最小 MainFunction 分组成本。
+给定一个完整且固定的 Offset 分配方案，在上述代理模型前提下，D 类型压缩与式\eqref{eq:anchor-subset-dp}的规范锚点动态规划精确得到全局最优软件代理成本 $P^\star$。全部非空状态的规范转移数为
+\begin{equation}
+ \sum_{\varnothing\ne S\subseteq\mathcal U}2^{|S|-1}
+ =\frac{3^m-1}{2},
+\label{eq:anchor-transition-count}
+\end{equation}
+包括子集预计算与精确数值运算后，总时间为
+\begin{equation}
+ O\!\left(3^m\operatorname{poly}(|I|)\right).
+\label{eq:fixed-offset-fpt-time}
+\end{equation}
+因此，该固定 Offset 分组子问题关于不同 D 类型数 $m$ 为固定参数可解（fixed-parameter tractable，FPT）。
 \end{theorem}
 
 \begin{proof}[\normalfont 证明思路]
 命题\ref{prop:same-d-compression}保证至少存在一个报文级全局最优方案可以表示为 D 类型划分。引理\ref{lem:anchor-block-uniqueness}保证锚点递推对类型划分不重不漏，最优子结构则使每个状态由一个锚点组与余集最优状态组成。由集合大小归纳即可得到 $F(\mathcal U)$ 的全局最小性。完整归纳证明见附录第~\ref{subsubsec:appendix-dp-induction}~节。
 \end{proof}
 
-定理\ref{thm:fixed-offset-dp-exactness}的全局最优性限定于给定 $\boldsymbol O$ 后的 MainFunction 分组子问题。
+这里的“固定参数可解”是指，当不同 D 类型数保持较小时，即使报文数量增加，指数搜索仍被限制在类型层面\cite{downey2013,mnich2015}；它不是关于报文数 $n$ 的一般多项式算法，当 $m=n$ 时指数项仍可能随全部报文增长。通用集合划分的精确算法与子集递推已有成熟研究\cite{bjorklund2009}，本文的结构性内容在于当前 gcd 型组成本允许无损压缩到 $m$ 个 D 类型，而非递推模板本身。
 
-这种精确性以 D 类型集合上的指数枚举为代价。子集动态规划包含 $O(2^m)$ 个状态，候选分组的组合枚举使核心时间规模为 $O(3^m)$；其中 $m$ 表示不同 D 类型的数量，而不是具体报文数量。实际实现还包含关于 $m$ 的多项式额外开销，完整组合计数推导见附录第~\ref{subsubsec:appendix-dp-complexity-derivation}~节。
+空间复杂度随状态保存内容而异，两个口径分别为
+\begin{equation}
+ \begin{aligned}
+  &O\!\left(2^m\operatorname{poly}(|I|)\right),
+  &&\text{仅保存最优值与一个前驱时},\\
+  &O\!\left(m2^m\operatorname{poly}(|I|)\right),
+  &&\text{当前实现保存规范分组结构与子集签名时}.
+ \end{aligned}
+\label{eq:fixed-offset-space-bounds}
+\end{equation}
+规范消歧只在等成本方案中选择稳定代表，不改变最优值。完整组合计数、精确有理数运算与位复杂度推导见附录第~\ref{subsubsec:appendix-dp-complexity-derivation}~节。
 
-实现采用整数时间和精确有理数比较代理成本，并以规范消歧规则在等成本最优方案中选择唯一代表；这些规则只保证结果稳定，不改变式\eqref{eq:cpu-proxy}的目标值及其最小成本。
-
-因此，对任一已经确定的完整 Offset 分配方案，本章方法都能精确返回模型内的最小软件调用开销代理值及一个规范最优分组。外层评价 Offset 时无需再同时启发式搜索 MainFunction 划分，这一结果为通信与软件目标的联合优化提供了结构基础。
+因此，对任一已经确定的完整 Offset 分配方案，本章方法都能精确返回模型内的最小软件调用开销代理值及一个规范最优分组。然而，外层 Offset 同时改变通信侧的释放位置与软件侧的 D 结构，通信均衡的改善是否会提高最优软件代理成本，不能由任一单侧模型预先判断。下一章先说明两类目标确实可能严格冲突，再据此建立联合评价与搜索模型。
 \clearpage
 \section{CAN--CPU 联合优化}
 \label{sec:can-cpu-joint}
 
-一个完整 Offset 分配方案 $\boldsymbol O$ 一旦确定，第~\ref{sec:offset-balancing-model}~章定义的通信侧评价即可给出其局部释放指标，第~\ref{sec:main-function-exact}~章的精确求解器则可返回该分配方案下软件分组的最小 CPU 开销代理指标。因而，同一外层决策不再只对应 CAN 侧的均衡质量，而是同时产生通信侧与软件侧两类评价结果。本章关注的问题是：如何在 Peak 不发生不可接受退化的条件下，搜索稳态负载平方和 $Q^{\mathrm{ss}}$ 与软件侧最小代理成本之间的折中。
+一个完整 Offset 分配方案 $\boldsymbol O$ 一旦确定，第~\ref{sec:offset-balancing-model}~章定义的通信侧评价即可给出其局部释放指标，第~\ref{sec:main-function-exact}~章的精确求解器则可返回该分配方案下软件分组的最小 CPU 开销代理指标。因而，同一外层决策不再只对应 CAN 侧的均衡质量，而是同时产生通信侧与软件侧两类评价结果。本章先说明二者在当前模型中并不天然同向，再讨论如何在 Peak 不发生不可接受退化的条件下，搜索稳态负载平方和 $Q^{\mathrm{ss}}$ 与软件侧最小代理成本之间的折中。
 
 \subsection{联合搜索域与长周期相位约束}
 \label{subsec:joint-long-period-policy}
@@ -1491,15 +1537,7 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 \subsection{固定 Offset 下的精确内层评价}
 \label{subsec:joint-layered-solver}
 
-若把 Offset 分配 $\boldsymbol O$ 与 MainFunction 划分 $\Pi$ 同时作为外层变量，联合搜索空间将叠加相位分配与集合划分两类组合复杂度。第~\ref{sec:main-function-exact}~章给出的结构性质使这一联合枚举没有必要：对任意 $\boldsymbol O\in\Omega_{\rm joint}$，记 $\mathcal P(\boldsymbol O)$ 为相应的可行划分集合，则固定 Offset 下的最小代理成本为
-\begin{equation}
- P^\star(\boldsymbol O)
- =
- \min_{\Pi\in\mathcal P(\boldsymbol O)}
- P_{\rm CPU}(\Pi\mid\boldsymbol O).
-\label{eq:joint-inner-optimum}
-\end{equation}
-由定理\ref{thm:fixed-offset-dp-exactness}，该最小值可由 D 类型压缩与确定性子集动态规划精确取得。下文以 $\Pi^\star(\boldsymbol O)$ 表示精确求解器按既定消歧规则返回的一个最优划分。
+若把 Offset 分配 $\boldsymbol O$ 与 MainFunction 划分 $\Pi$ 同时作为外层变量，联合搜索空间将叠加相位分配与集合划分两类组合复杂度。第~\ref{sec:main-function-exact}~章给出的结构性质使这一联合枚举没有必要：对任意 $\boldsymbol O\in\Omega_{\rm joint}$，式\eqref{eq:joint-inner-optimum}定义的最小代理成本可由 D 类型压缩与确定性子集动态规划精确取得。下文以 $\Pi^\star(\boldsymbol O)$ 表示精确求解器按既定消歧规则返回的一个最优划分。
 
 \begin{proposition}[内层最优划分的充分性]
 \label{prop:inner-optimal-partition-suffices}
@@ -1522,6 +1560,47 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 \label{eq:joint-evaluation-map}
 \end{equation}
 其中，$Z^{\mathrm{ss}}$ 用于限定可接受的峰值变化，后续折中与 Pareto 关系仅在 $Q^{\mathrm{ss}}$ 和 $P^\star$ 两维上定义。对外层已经访问的 $\boldsymbol O$，$P^\star(\boldsymbol O)$ 是当前代理模型下的精确内层最小值；Offset 空间的覆盖仍由启发式外层搜索决定。
+
+\subsection{通信均衡与软件代价的非同向性}
+\label{subsec:joint-strict-conflict}
+
+为判断通信均衡与软件最优值是否可能同时改善，考虑两条周期相同的报文，令
+\begin{equation}
+ T_1=T_2=20\,\mathrm{ms},
+ \qquad
+ \Oset_1=\Oset_2=\{20,25\}\,\mathrm{ms},
+\label{eq:two-message-conflict-instance}
+\end{equation}
+两条报文的通信权重均为 $w>0$，且 $\rho>0$。取 $\Delta=5\,\mathrm{ms}$ 和稳态窗口 $[25,45)\,\mathrm{ms}$，两个候选分别在窗口内命中 $40\,\mathrm{ms}$ 和 $25\,\mathrm{ms}$。于是，$\boldsymbol O_A=(20,20)$ 的两次释放同槽，而 $\boldsymbol O_B=(20,25)$ 的两次释放异槽，从而
+\begin{equation}
+ Q^{\mathrm{ss}}(\boldsymbol O_B)=2w^2
+ <4w^2=Q^{\mathrm{ss}}(\boldsymbol O_A).
+\label{eq:two-message-q-conflict}
+\end{equation}
+
+两方案的 D 向量分别为 $(20,20)$ 与 $(20,5)$。以毫秒为共同时间单位并省略不改变排序的正比例换算，方案 A 合并两条报文即可最优；方案 B 比较合并与两个单例两种划分，得到
+\begin{equation}
+ \begin{aligned}
+  P^\star(\boldsymbol O_A)
+  &=\frac{\rho+2}{20},\\
+  P^\star(\boldsymbol O_B)
+  &=\min\!\left\{
+    \frac{\rho+2}{5},\frac{\rho+1}{4}
+   \right\}
+  >\frac{\rho+2}{20}.
+ \end{aligned}
+\label{eq:two-message-pstar-conflict}
+\end{equation}
+其中，方案 B 的两个候选成本均严格大于方案 A；第二项的差为 $(4\rho+3)/20>0$。
+
+\begin{proposition}[通信均衡与软件代理成本的严格冲突]
+\label{prop:two-message-strict-conflict}
+存在一个仅含两条等周期报文、每条只有两个 Offset 候选的实例，使某一合法 Offset 调整严格降低 $Q^{\mathrm{ss}}$，同时严格提高最优软件代理成本 $P^\star$。
+\end{proposition}
+
+式\eqref{eq:two-message-q-conflict}与式\eqref{eq:two-message-pstar-conflict}给出命题\ref{prop:two-message-strict-conflict}的见证，说明两目标在一般模型中不具有天然的单调一致性。方案 A 与 B 的稳态 Peak 分别为 $2w$ 和 $w$；Peak hard guardrail 同时接纳二者时冲突保留，预算位于 $[w,2w)$ 时方案 A 被排除，该冲突则可从可行域中消失。因此，这一见证为联合优化提供非冗余的数学基础，但不表示每个预算或真实网段都必然产生多点前沿。
+
+由此，单独最小化 $Q^{\mathrm{ss}}$ 可能牺牲 $P^\star$，反之也可能保留通信热点。本文先以 Peak hard guardrail 限定可接受的通信峰值，再用既有的 $\varepsilon$-constraint 方法分析二者折中；外层仍为启发式候选搜索，所得是观测 Pareto 前沿，而不是完整前沿。
 
 \subsection{Peak 约束下的 \texorpdfstring{$\varepsilon$-constraint}{Epsilon-constraint} 联合模型}
 \label{subsec:joint-epsilon-model}
@@ -2084,6 +2163,9 @@ BJÖRKLUND A, HUSFELDT T, KOIVISTO M. Set partitioning via inclusion--exclusion[
 
 \bibitem{mnich2015}
 MNICH M, WIESE A. Scheduling and fixed-parameter tractability[J]. Mathematical Programming, 2015, 154(1--2): 533--562. DOI: \url{https://doi.org/10.1007/s10107-014-0830-9}.
+
+\bibitem{downey2013}
+DOWNEY R G, FELLOWS M R. Fundamentals of parameterized complexity[M]. London: Springer, 2013. DOI: \url{https://doi.org/10.1007/978-1-4471-5559-1}.
 
 \bibitem{pimentel2007}
 PIMENTEL J R. An incremental approach to task and message scheduling for AUTOSAR based distributed automotive applications[C]//Proceedings of the 4th International Workshop on Software Engineering for Automotive Systems. Minneapolis: IEEE, 2007: 1--7. DOI: \url{https://doi.org/10.1109/SEAS.2007.1}.
