@@ -187,6 +187,7 @@
 \newtheorem{proposition}{命题}
 \newtheorem{lemma}{引理}
 \newtheorem{theorem}{定理}
+\newtheorem{corollary}{推论}
 \newtheorem{remark}{说明}
 \renewcommand{\proofname}{\normalfont 证明}
 
@@ -960,7 +961,7 @@ Balanced 模式据此采用比较键
 \end{theorem}
 
 \begin{proof}[\normalfont 证明思路]
-给定一个 Offset 分配后，只需扫描所选候选的显式命中列表，累加各时隙负载并与 $\Theta$ 比较，因此证书可在显式输入长度的多项式时间内验证。困难性由经典 PARTITION 问题归约\cite{karp1972}：把每个正整数 $a_i$ 作为一条报文的权重，并为该报文设置分别只命中两个时隙之一的两个 Offset 候选。若总权重为 $2B$，取阈值 $\Theta=B$，则两个时隙的负载都不超过 $B$ 当且仅当原整数集合存在等和划分。该构造已经满足定理所列的同周期、二候选、二时隙和单次命中限制；判定版本的 NP-completeness 随即推出对应最小化问题的 NP-hardness。
+给定一个 Offset 分配后，只需扫描所选候选的显式命中列表，累加各时隙负载并与 $\Theta$ 比较，因此证书可在显式输入长度的多项式时间内验证。困难性由经典 PARTITION 问题归约\cite{karp1972}：把每个正整数 $a_i$ 作为一条报文的权重，并为该报文设置分别只命中两个时隙之一的两个 Offset 候选。若总权重为 $2B$，取阈值 $\Theta=B$，则两个时隙的负载都不超过 $B$ 当且仅当原整数集合存在等和划分。该构造已经满足定理所列的同周期、二候选、二时隙和单次命中限制；判定版本的 NP-completeness 随即推出对应最小化问题的 NP-hardness。完整的 NP 成员资格、奇数总和处理、双向归约与编码长度证明见附录第~\ref{subsec:appendix-explicit-peak-proof}~节。
 \end{proof}
 
 该归约只给出受限子类的弱数值困难性，不证明 strong NP-hardness，也不证明由合法 CAN FD \texttt{frame\_time\_us} 产生的物理权重子类具有同样困难性。NP 成员资格依赖命中列表显式给出；当周期与超周期采用紧凑数值隐式编码时，展开验证未必对输入位长为多项式，周期 phase 峰值问题中已知的表示差异也说明这一边界不可省略\cite{zeng2006periodic,short2010periodic}。上述最坏情形结果同样不排除精确枚举、伪多项式算法、全多项式时间近似方案（FPTAS）、CP-SAT 或分支定界在特定规模和结构上有效。它说明的是外层 Offset 选择具有组合困难性，而不是下一章只能采用启发式方法。
@@ -1401,10 +1402,10 @@ $H_D(\boldsymbol O)=H_D(\boldsymbol O')$，式\eqref{eq:pstar-same-d-vector}仍�
 \end{proposition}
 
 \begin{proof}[\normalfont 证明思路]
-D 向量相同时，每个报文级划分中各组的最大公约数、组大小和成本均保持不变。D 直方图相同时，两个实例具有相同的类型值及重数；由命题\ref{prop:same-d-compression}，两者都可无损压缩为同一个类型级划分问题，故精确最优值相同。
+D 向量相同时，每个报文级划分中各组的最大公约数、组大小和成本均保持不变。D 直方图相同时，两个实例具有相同的类型值及重数；由命题\ref{prop:same-d-compression}，两者都可无损压缩为同一个类型级划分问题，故精确最优值相同。保持 D 类型的报文双射证明、可达约数集合及必要反例见附录第~\ref{subsec:appendix-d-structure-proof}~节。
 \end{proof}
 
-因此，$H_D(\boldsymbol O)$ 足以表示当前软件侧精确子问题，可作为缓存键，并支持类型压缩和后续可达软件代价水平诊断。该表示并非 $P^\star$ 的一一编码：不同直方图仍可能得到相同的最优软件代理成本。若模型加入报文特异执行成本、兼容性或容量约束，报文身份将重新影响组成本，直方图表示也未必继续充分。
+因此，$H_D(\boldsymbol O)$ 足以表示当前软件侧精确子问题，可作为缓存键，并支持类型压缩和后续可达软件代价水平诊断。该表示并非 $P^\star$ 的一一编码：不同直方图仍可能得到相同的最优软件代理成本。若模型加入报文特异执行成本、兼容性或容量约束，报文身份将重新影响组成本，直方图表示也未必继续充分。软件代价水平数与二维非支配目标向量数的组合上界见推论~\ref{cor:pstar-pareto-cardinality}。
 
 \subsection{基于子集动态规划的精确分组求解}
 \label{subsec:deterministic-subset-dp}
@@ -1599,6 +1600,8 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 \end{proposition}
 
 式\eqref{eq:two-message-q-conflict}与式\eqref{eq:two-message-pstar-conflict}给出命题\ref{prop:two-message-strict-conflict}的见证，说明两目标在一般模型中不具有天然的单调一致性。方案 A 与 B 的稳态 Peak 分别为 $2w$ 和 $w$；Peak hard guardrail 同时接纳二者时冲突保留，预算位于 $[w,2w)$ 时方案 A 被排除，该冲突则可从可行域中消失。因此，这一见证为联合优化提供非冗余的数学基础，但不表示每个预算或真实网段都必然产生多点前沿。
+
+四个 Offset assignment、全部两报文分组及完整目标像的枚举见附录第~\ref{subsec:appendix-two-message-conflict-proof}~节。
 
 由此，单独最小化 $Q^{\mathrm{ss}}$ 可能牺牲 $P^\star$，反之也可能保留通信热点。本文先以 Peak hard guardrail 限定可接受的通信峰值，再用既有的 $\varepsilon$-constraint 方法分析二者折中；外层仍为启发式候选搜索，所得是观测 Pareto 前沿，而不是完整前沿。
 
@@ -2517,24 +2520,8 @@ CRC 序列长度由 Payload 长度决定：
 因子 $10^6$ 对所有候选划分相同，只改变指标的展示尺度，不改变最优划分或候选排序。
 
 \subsubsection{子集动态规划的组合规模}
-\label{subsubsec:appendix-dp-complexity-derivation}
 
-设不同 D 类型数为 $m$。子集动态规划以全部类型子集为状态，共有 $2^m$ 个状态。对于大小为 $k$ 的非空状态，固定锚点后，其余 $k-1$ 个元素可自由选择是否进入当前分组，因此包含锚点的候选分组数为 $2^{k-1}$。全部非空状态的候选转移数为
-\begin{equation}
- \sum_{k=1}^{m}
- \binom{m}{k}2^{k-1}
- =
- \frac{1}{2}
- \left(
- \sum_{k=0}^{m}\binom{m}{k}2^k-1
- \right)
- =
- \frac{3^m-1}{2}.
-\label{eq:subset-enumeration-count}
-\end{equation}
-其中第二个等号由二项式定理得到。若子集统计量查询和数值比较视为常数操作，式\eqref{eq:subset-enumeration-count}给出 $O(3^m)$ 的核心组合枚举规模。
-
-抽象算法只保存数值状态与回溯指针时，状态表为 $O(2^m)$。当前实现还为每个状态保存类型子集签名和规范分组元组；全部子集签名的元素总数为 $m2^{m-1}$，每个状态保存的重构元组长度至多为 $m$，因此实际存储上界为 $O(m2^m)$。规范元组的构造、排序与比较还会在核心组合枚举之外引入关于 $m$ 的多项式操作量。
+正文式\eqref{eq:anchor-transition-count}给出规范锚点动态规划的转移总数。该计数、精确有理数运算的位复杂度、FPT 结论以及值/前驱表示与当前实现的两种空间上界，统一在附录第~\ref{subsec:appendix-dp-proof}~节证明。此处仅保留单位换算与代理成本的代数推导，避免在两个附录位置重复同一复杂度论证。
 
 \subsection{联合搜索与折中推荐的计算细节}
 \label{subsec:appendix-joint-deterministic-details}
@@ -2628,7 +2615,253 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 \section{理论性质证明}
 \label{sec:appendix-proofs}
 
-本附录给出第~\ref{sec:gcls-method}~章、第~\ref{sec:main-function-exact}~章和第~\ref{sec:can-cpu-joint}~章中命题、引理与定理的完整证明。证明所用可行域、比较向量、CPU 开销代理指标和分组成本均沿用正文定义，不引入新的优化模型；其中“精确”始终只限定于固定完整 Offset 分配下的 MainFunction 分组子问题。纯代数展开、单位换算与复杂度求和统一置于附录第~\ref{subsec:appendix-mainfunction-derivations}~节。
+本附录给出第~\ref{sec:offset-balancing-model}~章至第~\ref{sec:can-cpu-joint}~章中主要定理、命题、推论与引理的完整证明。证明所用可行域、比较向量、CPU 开销代理指标和分组成本均沿用正文定义，不引入新的优化模型；其中“精确”始终只限定于固定完整 Offset 分配下的 MainFunction 分组子问题。代理成本的代数展开与单位换算仍置于附录第~\ref{subsec:appendix-mainfunction-derivations}~节，本附录则集中给出复杂性、结构性质和计数上界的论证。
+
+\subsection{显式带权离散 Offset 峰值判定的 NP 完全性}
+\label{subsec:appendix-explicit-peak-proof}
+
+本节补全定理~\ref{thm:explicit-offset-peak-complexity}。证明路线是先给出与正文式~\eqref{eq:explicit-offset-peak-decision}一致的显式输入，再证明证书可在该输入长度的多项式时间内验证，最后由 \textsc{Partition} 构造受限的二候选、二时隙实例。
+
+一个显式带权离散 Offset 峰值判定实例由报文集合、各报文的正整数权重 $w_i$、有限候选集 $\Oset_i$、每个候选显式给出的稳态时隙命中列表 $\Hset_{i,o}^{\mathrm{ss}}$，以及非负整数阈值 $\Theta$ 构成。列表允许同一时隙重复出现，以表示同一稳态窗口内的多次释放。问题询问是否存在完整分配 $\boldsymbol O\in\prod_i\Oset_i$，使所有稳态时隙负载均不超过 $\Theta$。
+
+\begin{proof}[定理~\ref{thm:explicit-offset-peak-complexity} 的完整证明]
+先证该问题属于 NP。给定完整 Offset 分配作为证书，验证器逐条检查 $O_i\in\Oset_i$，扫描所选候选的显式命中列表，并按出现次数把 $w_i$ 累加到相应时隙，最后将每个累计负载与 $\Theta$ 比较。扫描次数不超过所选列表的总长度；累计值的位长至多在权重最大位长上增加关于报文数和列表长度的对数量级。因此，候选合法性、负载累计和阈值比较都能在显式输入长度的多项式时间内完成。这里的 NP 成员资格依赖命中列表显式给出；若只用二进制周期隐式描述可能指数长的超周期展开，上述验证时间结论不能直接沿用。
+
+再从经典 \textsc{Partition} 问题归约\cite{karp1972}。给定正整数 $a_1,\ldots,a_n$。若其总和为奇数，则输出一个固定 no-instance：取两条权重分别为 1 和 2 的报文，每条均可选择只命中两个时隙之一的候选，并令阈值为 1。总负载为 3，无论如何分配，至少一个时隙的负载不小于 2，故该实例必为否。
+
+若总和为偶数 $2B$，对每个 $a_i$ 构造一条权重 $w_i=a_i$ 的报文，并令
+\begin{equation}
+ \Delta=5\,\mathrm{ms},\qquad
+ T_i=10\,\mathrm{ms},\qquad
+ \Oset_i=\{15,20\}\,\mathrm{ms}.
+\label{eq:appendix-partition-construction}
+\end{equation}
+取稳态窗口 $[20,30)\,\mathrm{ms}$ 和阈值 $\Theta=B$。候选 $20\,\mathrm{ms}$ 在窗口内于 $20\,\mathrm{ms}$ 释放，命中第一个时隙；候选 $15\,\mathrm{ms}$ 的下一次释放位于 $25\,\mathrm{ms}$，命中第二个时隙。因周期均为 $10\,\mathrm{ms}$，每条报文在该窗口内恰释放一次，所以每个 $a_i$ 恰被分配到两个时隙之一。
+
+若原实例存在和为 $B$ 的子集，就令该子集选择 $20\,\mathrm{ms}$，其余元素选择 $15\,\mathrm{ms}$。两个时隙的负载都为 $B$，从而 $Z^{\mathrm{ss}}\le B$。反之，若构造实例存在满足 $Z^{\mathrm{ss}}\le B$ 的 Offset 分配，由于两个时隙的总负载固定为 $2B$，且每个时隙均不超过 $B$，两者只能都等于 $B$。选择 $20\,\mathrm{ms}$ 的报文权重因而构成原实例的等和子集。故 $Z^{\mathrm{ss}}\le B$ 当且仅当原 \textsc{Partition} 实例可等分。
+
+该构造产生 $O(n)$ 个候选及显式命中项；除复制 $a_i$ 与 $B$ 外，所有时间数值均为常数，输出数值的二进制编码长度关于原输入长度为多项式。因此这是多项式 many-one 归约。结合 NP 成员资格，判定问题即使限制为同周期、每条报文两个候选、两个稳态时隙且每候选只命中一次，仍为 NP-complete；相应峰值最小化问题为 NP-hard。
+\end{proof}
+
+该证明由 \textsc{Partition} 得到的是受限子类的弱数值困难性，不支持 strong NP-hardness，也不覆盖由合法 \texttt{frame\_time\_us} 产生的物理权重子类或隐式超周期表示。它同样不排除伪多项式、近似、参数化或实际规模上的精确方法。定理的作用是刻画显式外层选择的最坏情形，而不是推出“只能采用启发式”。
+
+\subsection{same-D 类型压缩与最优性保持}
+\label{subsec:appendix-same-d-compression-proof}
+\label{subsubsec:appendix-same-d-proof}
+
+本节补全命题~\ref{prop:same-d-compression} 的交换证明。目标不是证明每个最优划分都不拆分相同 D 类型，而是从任一全局最优划分出发，通过有限次不增成本的移动得到至少一个具有该结构的最优划分。
+
+\begin{proof}[命题~\ref{prop:same-d-compression} 的完整证明]
+设同一类型 $d$ 分散在两个组 $G_1$ 与 $G_2$ 中，其调用周期分别为 $B_1$ 与 $B_2$。两者都整除 $d$，不妨令 $B_1\le B_2$，并从 $G_1$ 向 $G_2$ 移动一条类型 $d$ 的报文。
+
+若移动后 $G_1$ 仍包含类型 $d$，则两组的最大公约数均不变，固定组开销也不变。报文数变量项的总变化为
+\begin{equation}
+ -\frac{1}{B_1}+\frac{1}{B_2}\le 0,
+\label{eq:appendix-same-d-case-one}
+\end{equation}
+故总成本不增加。
+
+若移出的是 $G_1$ 中最后一条类型 $d$ 的报文，但余组 $H=G_1\setminus\{i\}$ 仍非空，记 $B'_1=\gcd_{j\in H}D_j$。从最大公约数的参数集合中删除 $d$ 后，$B'_1$ 是 $B_1$ 的倍数，因此 $B'_1\ge B_1$。令 $|H|=h$，并令移动前 $|G_2|=n_2$。接收组原已含有类型 $d$，故加入同类型报文不改变 $B_2$；两个相关组的成本变化满足
+\begin{equation}
+ \begin{aligned}
+ &\left(
+   \frac{\rho+h}{B'_1}
+   +\frac{\rho+n_2+1}{B_2}
+  \right)
+ -\left(
+   \frac{\rho+h+1}{B_1}
+   +\frac{\rho+n_2}{B_2}
+  \right)\\
+ &\qquad\le
+ -\frac{1}{B_1}+\frac{1}{B_2}
+ \le0.
+ \end{aligned}
+\label{eq:appendix-same-d-case-two}
+\end{equation}
+第一个不等式使用了 $B'_1\ge B_1$ 以及分子为正这一条件。
+
+若 $G_1$ 原为被移动报文的单例，则 $B_1=d$。又因 $B_2\mid d$ 且 $B_1\le B_2$，只能有 $B_2=d$。移动后原组消失，变量成本在两个组之间抵消，并省去原单例组的固定项，故总成本变化为 $-\rho/d<0$。
+
+三种情形均不增加成本。对一个分散类型反复移动，有限次后该类型集中到一个组；依次处理全部分散类型不会重新拆分已经集中的类型。由类型和报文数均有限，过程终止。若初始划分全局最优，所得划分的成本不可能低于全局最优值，又不高于初始成本，因而仍为全局最优。
+\end{proof}
+
+该结论依赖所有组共享公共正参数 $\rho$、变量成本对报文数线性且不区分身份，并且不存在禁止同组、容量、节点归属或其他兼容约束。它只保证存在一个结构化最优解，不排除另有拆分相同 D 类型的等成本最优解。
+
+\subsection{类型级子集动态规划的精确性与参数化复杂度}
+\label{subsec:appendix-dp-proof}
+
+本节证明定理~\ref{thm:fixed-offset-dp-exactness}。证明先说明规范锚点递推对无序类型划分不重不漏，再由最优子结构和归纳得到精确性，最后推导转移数量、位复杂度和两种空间上界。
+
+\subsubsection{锚点递推与精确性}
+\label{subsubsec:appendix-anchor-proof}
+\label{subsubsec:appendix-dp-induction}
+
+令 $\mathcal U=\{1,\ldots,m\}$ 为 D 类型索引全集，$F(S)$、$a(S)$、$N(A)$、$B(A)$ 与 $C(A)$ 沿用式~\eqref{eq:subset-message-count}--\eqref{eq:anchor-subset-dp}。任一非空 $S$ 的无序划分中，各组两两不交且并集为 $S$，因此恰有一个组包含锚点 $a(S)$。记该组为 $A$，则余下各组唯一构成 $S\setminus A$ 的无序划分；反之，把任一满足 $a(S)\in A\subseteq S$ 的集合 $A$ 与余集的任一无序划分合并，也唯一得到 $S$ 的一个无序划分。故枚举所有包含锚点的 $A$ 对无序划分不重不漏，这同时补全引理~\ref{lem:anchor-block-uniqueness}。
+
+\begin{proof}[定理~\ref{thm:fixed-offset-dp-exactness} 的精确性部分]
+对 $|S|$ 归纳。基础情形 $S=\varnothing$ 只有空划分，成本为 $F(\varnothing)=0$。假设所有大小小于 $k$ 的状态都取得相应类型集合上的最小划分成本，现取 $|S|=k$。任一 $S$ 的划分都有唯一锚点组 $A$；固定该组后，若余集不采用 $F(S\setminus A)$ 对应的最优划分，就可用更低成本的余集划分替换并改进原方案。因此，以 $A$ 为锚点组的最小总成本恰为 $C(A)+F(S\setminus A)$。再对全部含锚点的 $A$ 取最小值，因其不重不漏覆盖所有划分，式~\eqref{eq:anchor-subset-dp} 即得到 $S$ 的真实最小值。
+
+于是 $F(\mathcal U)$ 是类型级全局最优值。由命题~\ref{prop:same-d-compression}，至少存在一个报文级全局最优划分不拆分任何 D 类型，因而可表示为 $\mathcal U$ 的类型划分；任一类型划分又可展开成对应的报文级划分。两层可行解的这一包含关系说明类型级最优值等于报文级最优值，故动态规划精确得到固定 Offset 下的 $P^\star$。
+\end{proof}
+
+\subsubsection{转移数量、位复杂度与空间}
+\label{subsubsec:appendix-dp-complexity-derivation}
+
+对大小为 $k$ 的非空状态 $S$，锚点固定后其余 $k-1$ 个类型可自由选择是否进入当前组，故该状态有 $2^{k-1}$ 个候选转移。按状态大小求和并使用二项式定理，得到
+\begin{equation}
+ \begin{aligned}
+ \sum_{\varnothing\ne S\subseteq[m]}2^{|S|-1}
+ &=\sum_{k=1}^{m}\binom{m}{k}2^{k-1}\\
+ &=\frac{1}{2}\left(\sum_{k=0}^{m}\binom{m}{k}2^k-1\right)\\
+ &=\frac{(1+2)^m-1}{2}
+ =\frac{3^m-1}{2}.
+ \end{aligned}
+\label{eq:subset-enumeration-count}
+\end{equation}
+这证明正文式~\eqref{eq:anchor-transition-count} 的精确计数，而不是只给出渐近结论。
+
+下面补足数值运算的位复杂度。设输入整数最大位长为 $L$，并将正有理数 $\rho=p/q$ 的分子、分母编码计入 $|I|$。子集 gcd 可用 Euclid 算法计算，其位复杂度关于 $L$ 为多项式；重数和至多为报文数 $n$，位长为 $O(\log n)$。单组成本可写成
+\begin{equation}
+ C(A)=\frac{p+qN(A)}{qB(A)},
+\label{eq:appendix-rational-group-cost}
+\end{equation}
+其分子、分母位长均为 $\operatorname{poly}(|I|)$。一个 DP 值至多相加 $m$ 个组成本；即使按分母乘积作保守估计，中间分子和分母的位长也只累加至多 $m$ 个输入级位长，仍为输入编码长度的多项式。分数加法、交叉乘比较、最大公约数约分，以及按前驱重建至多 $m$ 个组，因而都只贡献 $\operatorname{poly}(|I|)$ 因子。
+
+预计算全部 $2^m$ 个子集统计量需要 $O(2^m\operatorname{poly}(|I|))$ 时间，加上式~\eqref{eq:subset-enumeration-count} 的转移，得到
+\begin{equation}
+ O\!\left(3^m\operatorname{poly}(|I|)\right).
+\end{equation}
+该形式符合参数 $m$ 下 $f(m)|I|^{O(1)}$ 的 FPT 定义\cite{downey2013,mnich2015}。它不是关于报文数 $n$ 的一般多项式算法；当每条报文都有不同 D 类型时，$m=n$，指数项仍可达到 $3^n$。规范锚点递推采用的是既有集合划分思想\cite{bjorklund2009}，本文的结构依据是 same-D 交换性质允许把报文级实例无损压缩到类型级实例。
+
+空间上，若每个状态只保存一个最优有理数值与一个前驱 mask，共有 $2^m$ 个状态，所需空间为
+\begin{equation}
+ O\!\left(2^m\operatorname{poly}(|I|)\right).
+\end{equation}
+当前实现还为每个状态保存规范分组结构并预存子集签名；每个结构最坏含 $O(m)$ 个类型索引，故实现口径的上界为
+\begin{equation}
+ O\!\left(m2^m\operatorname{poly}(|I|)\right).
+\end{equation}
+两者分别对应抽象值/前驱表示和当前对象表示，不能混为同一个空间结论。规范消歧只在成本完全相等时选择稳定代表，不改变上述最优值证明。
+
+\subsection{软件代理成本对 D 结构的依赖}
+\label{subsec:appendix-d-structure-proof}
+
+本节补全命题~\ref{prop:pstar-d-structure}。证明依次刻画单报文可达 D 集合、D 向量和 D 直方图，并用两个反例说明直方图充分性既不是一一对应，也不自动延伸到身份相关成本。
+
+由式~\eqref{eq:reachable-d-set}，
+\begin{equation}
+ \mathcal D_i=\{\gcd(T_i,o):o\in\Oset_i\}.
+\end{equation}
+每个最大公约数都整除 $T_i$，因此
+\begin{equation}
+ \mathcal D_i\subseteq\operatorname{Div}(T_i).
+\label{eq:appendix-reachable-divisor-subset}
+\end{equation}
+该包含通常为真包含，且可达集合未必构成约数格的子格。例如 $T_i=12$、$\Oset_i=\{2,3\}$ 时，$\mathcal D_i=\{2,3\}$；其 gcd 为 1、lcm 为 6，均不属于该集合。故候选 Offset 所诱导的是可达约数子集，而不是 $T_i$ 的全部约数。
+
+\begin{proof}[命题~\ref{prop:pstar-d-structure} 的完整证明]
+先设两个 Offset 分配 $\boldsymbol O$ 与 $\boldsymbol O'$ 产生相同 D 向量。对任意固定报文分组 $\Pi$，每个对应组含有相同的 $D_i$，所以组的 $B_G$、报文数和式~\eqref{eq:fixed-offset-group-cost} 给出的成本完全相同。两边允许的报文集合划分也相同，故每个 $\Pi$ 的总成本逐项相等；在同一划分集合上取最小值即得 $P^\star(\boldsymbol O)=P^\star(\boldsymbol O')$。
+
+再设两分配只具有相同 D 直方图。对每个 D 值，把 $\boldsymbol O$ 下具有该值的报文与 $\boldsymbol O'$ 下具有该值的报文任取一一对应，由相同重数可把这些对应合并为保持 D 类型的报文双射。该双射把一侧任一报文划分逐组映射为另一侧唯一划分，并保持每组的 D 多重集、最大公约数、报文数和成本；其逆映射同样成立。因此两侧可行划分及其逐组成本一一对应，最小总成本相同。
+\end{proof}
+
+直方图充分不意味着它与软件代价水平一一对应。取 $\rho=1$，D 向量 $(10,10)$ 的合并成本为 $3/10$；D 向量 $(10,20)$ 的合并成本也是 $3/10$，两个单例的总成本同样为 $2/10+2/20=3/10$。两种直方图不同，却有相同的 $P^\star=3/10$。
+
+身份对称假设也不可删除。考虑扩展组成本
+\begin{equation}
+ \frac{\rho+\sum_{i\in G}c_i}{\gcd_{i\in G}D_i},
+\label{eq:appendix-identity-specific-cost}
+\end{equation}
+令 $\rho=1$，两个报文的特异变量成本分别为 1 和 10。实例一的 D 向量为 $(20,5)$，实例二把 D 值对换为 $(5,20)$；两者直方图相同。逐一比较合并与两个单例后，前者最优成本为 $23/10$，后者为 $19/20$。因此，一旦成本依赖报文身份，相同 D 直方图也可能产生不同最优值。
+
+综上，当前结论依赖公共 $\rho$、身份对称线性成本和无额外兼容约束。它说明 D 直方图足以确定当前 $P^\star$，但不说明不同直方图必对应不同成本，也不能用于压缩身份相关的扩展模型。
+
+\subsection{软件代价水平与二维非支配目标点数上界}
+\label{subsec:appendix-structure-bounds}
+
+令 $n$ 为报文数，$\mathcal R=\bigcup_i\mathcal D_i$，$r=|\mathcal R|$，并令 $\mathcal H_{\mathrm{reachable}}$ 为合法 Offset 分配实际能够诱导的 D 直方图集合。以下推论只计数不同软件代价值和不同二维目标向量，不计数产生同一结构或目标的 assignment 数量。
+
+\begin{corollary}[软件代价水平与二维目标前沿的组合上界]
+\label{cor:pstar-pareto-cardinality}
+在命题~\ref{prop:pstar-d-structure} 的模型前提下，
+\begin{equation}
+ |\operatorname{range}(P^\star)|
+ \le\prod_i|\mathcal D_i|
+ \le\prod_i\tau(T_i),
+\label{eq:appendix-pstar-vector-bound}
+\end{equation}
+且
+\begin{equation}
+ |\operatorname{range}(P^\star)|
+ \le|\mathcal H_{\mathrm{reachable}}|
+ \le\min\left\{
+  \prod_i|\mathcal D_i|,
+  \binom{n+r-1}{r-1}
+ \right\}.
+\label{eq:appendix-pstar-histogram-bound}
+\end{equation}
+对不同二维目标向量构成的非支配前沿，还有
+\begin{equation}
+ |\mathrm{PF}_{\rm objective}|
+ \le|\operatorname{range}(P^\star)|.
+\label{eq:appendix-pareto-level-bound}
+\end{equation}
+\end{corollary}
+
+\begin{proof}
+每个 Offset 分配先映射到 $\prod_i\mathcal D_i$ 中的一个 D 向量，再映射到一个 $P^\star$ 值，故软件代价水平数不超过 D 向量数 $\prod_i|\mathcal D_i|$。由式~\eqref{eq:appendix-reachable-divisor-subset}，$|\mathcal D_i|\le\tau(T_i)$，得到式~\eqref{eq:appendix-pstar-vector-bound}。
+
+命题~\ref{prop:pstar-d-structure} 又说明每个可达直方图至多对应一个 $P^\star$ 值，因此代价水平数不超过 $|\mathcal H_{\mathrm{reachable}}|$。可达直方图由可达 D 向量诱导，所以其数量不超过 $\prod_i|\mathcal D_i|$。另一方面，若暂时忽略每条报文各自的可达集合限制，只计数 $r$ 个 D 值上的非负整数重数且总和为 $n$ 的直方图，stars-and-bars 给出 $\binom{n+r-1}{r-1}$ 个可能向量。实际可达直方图只是其中的子集，故式~\eqref{eq:appendix-pstar-histogram-bound} 成立；该组合数不是“每个直方图均可达”的断言。
+
+最后固定任一软件水平 $P^\star=p$。在所有具有该第二维坐标的不同目标向量中，只有 $Q^{\mathrm{ss}}$ 最小者可能非支配；同层更大的 $Q^{\mathrm{ss}}$ 被它支配。因此每个软件水平至多贡献一个不同的非支配目标向量，得到式~\eqref{eq:appendix-pareto-level-bound}。Peak 约束若存在，只会缩小可行 assignment 集，不改变这一计数论证。
+\end{proof}
+
+该推论提供的是结构性上界，不保证达到等号，也不能把目标向量数解释为 Offset 分配数。特别地，多个 assignment 可以共享同一目标向量，而不同可达直方图也可以共享同一软件代价水平。
+
+\subsection{两报文严格冲突构造的完整枚举}
+\label{subsec:appendix-two-message-conflict-proof}
+
+本节补全命题~\ref{prop:two-message-strict-conflict}。证明在正文式~\eqref{eq:two-message-conflict-instance} 的实例上枚举四个 Offset assignment 及全部可能的两报文分组，然后直接比较完整目标像。
+
+取 $T_1=T_2=20\,\mathrm{ms}$、$\Oset_1=\Oset_2=\{20,25\}\,\mathrm{ms}$、$w_1=w_2=w>0$、$\rho>0$，稳态窗口为 $[25,45)\,\mathrm{ms}$，时隙宽度为 $5\,\mathrm{ms}$。Offset 20 在窗口内于 $40\,\mathrm{ms}$ 释放，Offset 25 于 $25\,\mathrm{ms}$ 释放，每条报文恰释放一次。表~\ref{tab:appendix-two-message-enumeration} 使用毫秒倒数的无公共尺度成本；生产值只相差不改变排序的正比例因子。
+
+\begin{table}[htbp]
+\centering
+\caption{两报文实例的四个 Offset assignment 与完整目标值}
+\label{tab:appendix-two-message-enumeration}
+\scriptsize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}lclllll@{}}
+\toprule
+$\boldsymbol O$ & 释放关系 & $Q^{\mathrm{ss}}$ & D 向量 & 合并成本 & 两单例成本 & $P^\star$ \\
+\midrule
+$(20,20)$ & 同槽 & $4w^2$ & $(20,20)$ & $(\rho+2)/20$ & $2(\rho+1)/20$ & $(\rho+2)/20$ \\
+$(20,25)$ & 异槽 & $2w^2$ & $(20,5)$ & $(\rho+2)/5$ & $(\rho+1)/4$ & 两者较小值 \\
+$(25,20)$ & 异槽 & $2w^2$ & $(5,20)$ & $(\rho+2)/5$ & $(\rho+1)/4$ & 两者较小值 \\
+$(25,25)$ & 同槽 & $4w^2$ & $(5,5)$ & $(\rho+2)/5$ & $2(\rho+1)/5$ & $(\rho+2)/5$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{proof}[命题~\ref{prop:two-message-strict-conflict} 的完整证明]
+两报文只有合并和两个单例两种无序划分，表中已经全部列出。对于 $(20,20)$，合并成本比两个单例少 $\rho/20>0$，故 $P^\star=(\rho+2)/20$；对 $(25,25)$ 同理有 $P^\star=(\rho+2)/5$。两个混合 assignment 只交换报文身份，在当前身份对称成本下产生相同目标向量，其 $P^\star$ 为 $(\rho+2)/5$ 与 $(\rho+1)/4$ 的较小者。
+
+记 A 为 $(20,20)$，B 为任一混合方案。对任意 $\rho>0$，
+\begin{equation}
+ \frac{\rho+2}{20}<\frac{\rho+2}{5},
+ \qquad
+ \frac{\rho+2}{20}<\frac{\rho+1}{4},
+\label{eq:appendix-two-message-pstar-order}
+\end{equation}
+故 $P_A^\star<P_B^\star$；同时 $Q_B^{\mathrm{ss}}=2w^2<4w^2=Q_A^{\mathrm{ss}}$。因此 A 与 B 在两个最小化目标上严格不可比。$(25,25)$ 与 A 具有相同的 $Q^{\mathrm{ss}}$，但软件成本严格更高，故受 A 支配。两个混合 assignment 又映射到同一个 B。由此，完整目标像恰有 A、B 两个非支配目标点。
+\end{proof}
+
+A 与 B 的 Peak 分别为 $2w$ 与 $w$。上述两点前沿结论适用于没有 Peak 约束，或 Peak 预算同时接纳两者的情形；若预算位于 $[w,2w)$，A 被排除，严格权衡可从可行域中消失。因此该构造只证明两个目标一般不天然同向，不证明每个真实网段、每个预算或每次有限外层搜索都必然产生多点前沿。
+
+\subsection{有限枚举与实现交叉核验的证据位置}
+\label{subsec:appendix-theory-verification}
+
+正文 RQ4 报告的 141/141 组报文级 Bell 枚举，用于核对类型级精确求解器返回的最小成本；冻结理论审计中的 V1--V5 则以确定案例和固定种子随机案例检查 PARTITION 构造、两报文冲突、D 直方图边界、类型 DP 与结构计数上界。这些有限枚举能够发现构造、实现或边界反例，并与本附录的形式推导相互核对，但它们不是数学证明，也不替代上述 NP 归约、交换论证、归纳证明和计数证明。141/141 的证据强度因此始终限定为实现交叉核验。
 
 \subsection{GCLS 1-opt 的终止性与局部最优性}
 \label{subsec:appendix-gcls-proof}
@@ -2698,7 +2931,7 @@ $\boldsymbol O'\in\mathcal N_1(\boldsymbol O^\star)$，均有正文式~\eqref{eq
 
 以上结论不推出双报文邻域、完整 2-opt、3-opt 或全局最优。正文随后采用的双报文搜索是冲突导向且受候选数和 Offset 数限制的有界邻域，并未枚举全部报文对；可选 3-opt 同样受限且默认关闭。重启只从不同构造盆地重复有限次启发式搜索，也不会把上述单报文局部最优性提升为全局最优性证书。
 
-\subsection{Offset--MainFunction 耦合与精确分组的理论性质}
+\subsection{其他正文性质的补充证明}
 \label{subsec:appendix-mainfunction-proof}
 
 \subsubsection{单报文最大可行调用周期}
@@ -2748,74 +2981,7 @@ $B_{G_j}\ge B_G$。于是该组在拆分前后的朴素成本满足
 其余组不变，所以 $P_0(\Pi')\le P_0(\Pi)$。只有当至少一个含有报文的子组满足
 $B_{G_j}>B_G$ 时，相应项才严格减小；若所有子组的 TimeBase 均等于 $B_G$，拆分前后可以等成本。因此，无固定调用项时只能推出分组细化不增加该朴素指标，不能推出任意拆分都严格降低成本。加入 $\rho$ 后，每个新组还会引入 $\rho/B_{G_j}$，上述单调性不再直接适用于 $P_{\rm CPU}$。
 
-\subsubsection{同 D 类型的最优性保持}
-\label{subsubsec:appendix-same-d-proof}
-
-固定 $\boldsymbol O$ 后，组成本由式~\eqref{eq:fixed-offset-group-cost} 给出。其分母只取决于组内 $D_i$ 的取值，分子只取决于报文数及 $\rho$，因此报文名称、CAN ID 和定义位置均不参与成本。换言之，对该固定 Offset 子问题，D 类型及其重数构成充分统计量。
-
-下面给出命题~\ref{prop:same-d-compression} 的完整交换论证。设两条同类型
-$D_i=d$ 的报文分别位于 $G_1$ 和 $G_2$，相应 TimeBase 为 $B_1$ 和
-$B_2$。由于两组都含有类型 $d$，有 $B_1\mid d$ 与 $B_2\mid d$。不妨令
-$B_1\le B_2$，并从 $G_1$ 向 $G_2$ 移动一条类型 $d$ 的报文。
-
-若移动后 $G_1$ 中仍保留至少一条类型 $d$ 的报文，则两组的最大公约数都不变。两个固定项也不变，而报文计数项的总变化为
-\[
- -\frac{1}{B_1}+\frac{1}{B_2}\le 0.
-\]
-因此该移动不增加总成本。
-
-若被移动的是 $G_1$ 中最后一条类型 $d$ 的报文，先考虑余集
-$H=G_1\setminus\{i\}$ 非空。记 $B'_1=\gcd_{j\in H}D_j$。从最大公约数的参数集合中删除 $d$ 后，$B'_1$ 是 $B_1$ 的倍数，故 $B'_1\ge B_1$。设
-$|H|=h$、移动前 $|G_2|=n_2$，则两个相关组的成本变化满足
-\[
- \left(\frac{\rho+h}{B'_1}
-       +\frac{\rho+n_2+1}{B_2}\right)
- -
- \left(\frac{\rho+h+1}{B_1}
-       +\frac{\rho+n_2}{B_2}\right)
- \le
- -\frac{1}{B_1}+\frac{1}{B_2}
- \le 0.
-\]
-这里第一项的不等式来自 $B'_1\ge B_1$，而 $G_2$ 原已含有 $d$，加入另一条同类型报文不会改变 $B_2$。
-
-若 $H$ 为空，则原 $G_1$ 只含这一条报文，从而 $B_1=d$。又因
-$B_2\mid d$、$B_1\le B_2$，只能有 $B_2=d$。删除空组并把报文加入
-$G_2$ 后，变量成本相互抵消，原 $G_1$ 的固定项消失，总成本变化为
-$-\rho/d<0$。
-
-三种情形均表明，可以把同一 D 类型从 TimeBase 不大的组逐条移向
-TimeBase 不小的组而不增加总成本。对每个分散类型重复这一操作，有限次后得到一个不拆分任何 D 类型的方案。若从全局最优方案出发，所得方案成本不高于全局最优值，故仍为全局最优。这只证明“至少存在一个”具有同类型不拆分结构的最优方案，并不排除其他等成本最优方案拆分同一类型。
-
-\subsubsection{锚点枚举的不重不漏性}
-\label{subsubsec:appendix-anchor-proof}
-
-对任意非空类型集合 $S$，正文取 $a(S)=\min S$。任一无序划分中，分组两两不交且并集为 $S$，所以恰有一个分组包含 $a(S)$。将它记为 $A$，则
-$A\subseteq S$ 且 $a(S)\in A$，余下各组构成 $S\setminus A$ 的一个无序划分。反过来，任取这样的 $A$ 以及余集的一个无序划分，把 $A$ 加入其中便唯一得到 $S$ 的一个划分。
-
-因此，式~\eqref{eq:anchor-subset-dp} 枚举所有包含锚点的 $A$ 时不会遗漏任何划分；同一划分也不可能由两个不同的锚点组产生，因为其中只有一个组含有 $a(S)$。这就是锚点递推不重不漏的组合依据。
-
-\subsubsection{子集动态规划的精确性}
-\label{subsubsec:appendix-dp-induction}
-
-现以集合大小归纳补全定理~\ref{thm:fixed-offset-dp-exactness} 的证明。基础情形为
-$S=\varnothing$。空集合只有空划分，没有分组成本，故
-$F(\varnothing)=0$ 与真实最小值一致。
-
-假设对所有满足 $|S|<k$ 的类型集合，$F(S)$ 均等于式~\eqref{eq:cpu-proxy}
-在该集合全部无序划分上的最小值。任取 $|S|=k$。由上一小节，任意
-$S$ 的划分都有唯一的锚点组 $A$，余下部分是 $S\setminus A$ 的划分，且
-$|S\setminus A|<k$。固定锚点组 $A$ 后，按归纳假设，余集可取得的最小成本为
-$F(S\setminus A)$，所以所有以 $A$ 为锚点组的划分中，最小总成本恰为
-\[
- C(A)+F(S\setminus A).
-\]
-再对全部满足 $A\subseteq S$ 且 $a(S)\in A$ 的候选取最小值，依据不重不漏性，所得最小值恰覆盖 $S$ 的全部无序划分。这正是式~\eqref{eq:anchor-subset-dp}，故归纳步骤成立。
-
-于是 $F(\mathcal U)$ 是所有 D 类型划分中的最小成本。结合上一交换论证，至少存在一个报文级全局最优分组能够表示为不拆分 D 类型的划分，因此该最小值也等于固定完整 Offset 分配下全部报文级 MainFunction 分组的最小代理成本。这里的全局性只针对给定 $\boldsymbol O$、式~\eqref{eq:fixed-offset-group-cost} 与精确整数对齐假设下的内层分组模型，不延伸至外层 Offset 搜索。
-
-
-\subsection{固定 Offset 下的内层最优替换性质}
+\subsubsection{固定 Offset 下的内层最优替换性质}
 \label{subsec:appendix-inner-replacement-proof}
 
 现证明命题~\ref{prop:inner-optimal-partition-suffices}。任取固定的 $\boldsymbol O\in\Omega_{\rm joint}$ 与可行划分 $\Pi\in\mathcal P(\boldsymbol O)$。通信侧时隙负载由报文释放序列、释放权重和 $\boldsymbol O$ 唯一确定，MainFunction 划分不参与式\eqref{eq:slot-load-model}所定义的负载累加。因此，以另一可行划分替换 $\Pi$ 时，$Q^{\mathrm{ss}}(\boldsymbol O)$、$Z^{\mathrm{ss}}(\boldsymbol O)$ 以及超限二元组 $\boldsymbol G(\boldsymbol O)$ 均保持不变。
