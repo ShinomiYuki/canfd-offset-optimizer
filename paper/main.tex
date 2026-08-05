@@ -305,11 +305,11 @@
 \setcounter{page}{1}
 
 \fronttitlecn{摘\hspace{2em}要}
-\noindent\hspace*{\parindent}车载周期报文的 Offset 配置既决定总线时间轴上的释放相位，也会影响 ECU 软件侧周期入口的调用周期。针对通信侧局部释放均衡与软件周期调度代价通常分开处理的问题，本文提出一种面向周期 CAN/CAN FD 报文的 Offset 协同优化方法。通信侧在统一离散时间轴上建立带权释放负载模型，以稳态峰值和负载平方和分别刻画局部聚集与整体均衡，并采用 GCLS 启发式方法在有限 Offset 空间中搜索相位配置。
+\noindent\hspace*{\parindent}车载周期报文的 Offset 既决定总线时间轴上的释放相位，也会影响 ECU 软件侧周期入口的调用结构。针对通信侧局部释放均衡与软件周期调度代价通常分开处理的问题，本文提出一种面向周期 CAN/CAN FD 报文的 Offset 协同优化方法。通信侧在统一离散时间轴上建立带权释放负载模型，以稳态峰值和负载平方和分别评价局部聚集与整体均衡。在有限候选及稳态时隙命中列表均显式给出的条件下，受限峰值判定问题为 NP-complete；外层据此采用 GCLS 启发式方法搜索相位配置。
 
-在共同整数时间原点与精确周期触发假设下，本文进一步建立 Offset 与软件调用周期之间的耦合关系，推导单报文最大可行调用周期，并构造反映周期入口调用结构的 CPU 开销代理指标。给定 Offset 分配后，MainFunction 分组可通过 D 类型压缩与确定性子集动态规划精确求解，由此形成“外层 Offset 启发式搜索—内层软件分组精确求解”的分层结构。在此基础上，采用带峰值约束的 $\varepsilon$-constraint 方法协调通信均衡与软件调度代价，并通过观测 Pareto 前沿及几何膝点刻画和选择不同 CPU 预算下的折中方案。
+在共同整数时间原点与精确周期触发假设下，本文建立 Offset 与软件调用周期的耦合关系，并以 $D_i=\gcd(T_i,O_i)$ 刻画单报文最大可行调用周期。固定 Offset 后，相同 D 类型能够无损压缩，软件分组可由关于不同 D 类型数 $m$ 的确定性子集动态规划精确求解。通信均衡与软件代理成本可能严格冲突，因此本文采用 Peak 约束下的 $\varepsilon$-constraint 联合搜索，并以观测 Pareto 前沿和几何膝点组织不同软件预算下的折中候选。
 
-在九个真实 CAN FD 网段上的实验表明，相较原始配置，Peak 模式在其中六个网段降低了稳态峰值；CAN--CPU 联合优化中，六个网段形成多点观测 Pareto 前沿，三个网段未观察到明显的软件侧权衡；固定 Offset 下的 MainFunction 分组结果经独立枚举对照验证。结果表明，Offset 调整能够有效重塑周期报文的局部释放分布，但通信收益与软件调度代价之间的权衡具有明显的网段依赖性。在此基础上，本文方法已形成面向实际工程输入的优化工具，该工具已经投入实际工程使用，并在实际应用中观察到明显的周期释放热点改善。
+九个真实 CAN FD 网段的实验中，Peak 模式相较原始配置在六个网段降低了稳态峰值。对合法 Offset 空间诱导的软件结构进行完整枚举后，九个网段均存在多个可达软件代价水平；当前联合归档中，六个网段形成多点观测 Pareto 前沿，EP、LC 与 SU 形成单点观测前沿。固定 Offset 内层由精确算法求解，联合外层及其前沿仍是有限搜索预算下的观测结果。本文方法已实现为面向实际工程输入的优化工具并投入使用，实际应用中观察到周期释放热点改善。
 
 \noindent{\heiti\bfseries\zihao{-4}关键词：}{\songti\zihao{-4}CAN FD； 周期报文； Offset； GCLS； 协同优化}
 
@@ -317,11 +317,11 @@
 \fronttitleen{ABSTRACT}
 \begingroup
 \rmfamily\zihao{-4}\justifying
-\noindent\hspace*{\parindent}The Offset configuration of periodic in-vehicle messages determines their release phases on the bus timeline and also affects the invocation periods of periodic entry functions on the ECU software side. To address the common separation between local release balancing in communication and software scheduling cost optimization, this thesis proposes a joint Offset optimization method for periodic CAN/CAN FD messages. On the communication side, a weighted release-load model is established on a unified discrete timeline. The steady-state peak and the sum of squared loads are used to characterize local clustering and overall balance, respectively, while a GCLS heuristic searches for phase configurations in a finite Offset space.
+\noindent\hspace*{\parindent}The Offset of a periodic in-vehicle message determines its release phase on the bus timeline and also affects the invocation structure of periodic entry functions on the ECU. This thesis therefore studies joint Offset optimization for periodic CAN/CAN FD messages rather than treating communication balancing and software scheduling cost separately. A weighted release-load model on a unified discrete timeline uses the steady-state peak and the sum of squared loads to evaluate local clustering and overall balance. With finite candidates and steady-state slot-hit lists given explicitly, the restricted peak decision problem is NP-complete; a GCLS heuristic is used for the outer Offset search.
 
-Under the assumptions of a common integer time origin and exact periodic triggering, the coupling between Offset and software invocation periods is further established. The maximum feasible invocation period of a single message is derived, and a CPU cost proxy is constructed to represent the invocation structure of periodic entry functions. Given an Offset assignment, MainFunction grouping can be solved exactly through D-type compression and deterministic subset dynamic programming, forming a hierarchical architecture with heuristic Offset search in the outer layer and exact software grouping in the inner layer. On this basis, a peak-constrained $\varepsilon$-constraint method coordinates communication balancing and software scheduling cost. Observed Pareto fronts and geometric knee points are then used to characterize and select trade-off solutions under different CPU budgets.
+Under a common integer time origin and exact periodic triggering, $D_i=\gcd(T_i,O_i)$ gives the maximum feasible invocation period of one message. For a fixed Offset assignment, messages with the same D type can be compressed without loss, and deterministic subset dynamic programming solves the software grouping problem exactly with the number $m$ of distinct D types as the parameter. Because communication balance and the software cost proxy can conflict strictly, a Peak-constrained $\varepsilon$-constraint search is used to organize trade-off candidates into observed Pareto fronts and geometric knee points.
 
-Experiments on nine real CAN FD networks show that, compared with the original configurations, Peak mode reduces the steady-state peak on six networks. In the joint CAN--CPU optimization, six networks exhibit multi-point observed Pareto fronts, while no evident software-side trade-off is observed on the remaining three. The MainFunction grouping results under fixed Offset assignments are independently verified by enumeration. These results indicate that Offset adjustment can effectively reshape the local release distribution of periodic messages, whereas the trade-off between communication benefit and software scheduling cost is strongly network-dependent. The proposed method has also been implemented as an optimization tool for practical engineering inputs, deployed in engineering use, and shown to produce clear improvements in periodic-release hotspots in practical applications.
+Experiments on nine real CAN FD networks show that Peak mode reduces the steady-state peak on six networks relative to the original configurations. Complete enumeration of the software structures induced by legal Offsets finds multiple reachable software-cost levels on every network. In the current joint archives, six networks exhibit multi-point observed Pareto fronts, whereas EP, LC, and SU yield single-point observed fronts. The fixed-Offset inner problem is solved exactly, while the joint outer search and its fronts remain observations under finite search budgets. The method has been implemented as an engineering optimization tool, and its practical use has shown improvements in periodic-release hotspots.
 
 \par\noindent{\rmfamily\bfseries\zihao{-4}Key words:} {\rmfamily\zihao{-4}CAN FD; periodic messages; Offset; GCLS; joint optimization}
 \endgroup
@@ -358,28 +358,28 @@ Offset 决定周期序列相对于公共时间原点的初始相位，因而为�
 
 \subsection{相关研究与本文定位}
 
-CAN/CAN FD 周期报文的 Offset 与相位配置首先服务于通信时序分析。经典响应时间分析从固定优先级非抢占传输中的阻塞与高优先级干扰出发，建立报文最坏响应时间和可调度性判据\cite{tindell1994}；在此基础上，CAN Offset 配置与 Offset-aware 响应时间分析表明，利用相位关系使周期流去同步，能够改善部分高负载场景的时序表现\cite{grenier2008,yomsi2012}。这些工作确立了 Offset 作为通信配置自由度的意义。本文不以离散释放负载替代完整的响应时间或可调度性分析，而是在有限 Offset 候选上评价各稳态时隙中的带权释放聚集。
+这一核心问题同时涉及通信相位、软件周期组织和多目标取舍，现有研究则分别从这些方向展开。CAN/CAN FD 周期报文的 Offset 与相位配置首先服务于通信时序分析。经典响应时间分析从固定优先级非抢占传输中的阻塞与高优先级干扰出发，建立报文最坏响应时间和可调度性判据\cite{tindell1994}；在此基础上，CAN Offset 配置与 Offset-aware 响应时间分析表明，利用相位关系使周期流去同步，能够改善部分高负载场景的时序表现\cite{grenier2008,yomsi2012}。这些工作确立了 Offset 作为通信配置自由度的意义。本文不以离散释放负载替代完整的响应时间或可调度性分析，而是在有限 Offset 候选上评价各稳态时隙中的带权释放聚集。
 
 周期任务与周期资源的 phase 分配还形成了独立的峰值最小化研究方向。周期监测请求调度通过选择请求起始相位降低服务器峰值负载，并给出了复杂性与启发式算法结果\cite{zeng2006periodic}；后续研究指出，当周期以紧凑数值给出且验证需要处理隐式超周期时，输入表示会改变问题的复杂度分类\cite{short2010periodic}。这类结果与本文的峰值目标相近，也说明复杂性结论必须连同编码方式陈述。本文第3章考察的是另一种明确受限的输入：有限 Offset 候选及其稳态时隙命中列表均被显式给出，且每次命中带有正整数权重。
 
 在软件执行侧，AUTOSAR COM 规范规定了 \texttt{Com\_\allowbreak Main\allowbreak FunctionTx} 与 \texttt{Com\allowbreak MainTx\allowbreak TimeBase} 等周期发送配置语义\cite{autosarcom}，基础软件调度研究则讨论了周期入口的组织及平台执行成本\cite{zhang2011autosar,denil2011devs}。任务--消息协同调度还对周期、Offset、deadline 与抖动约束进行联合配置，说明计算与通信时序可以在统一模型中处理\cite{pimentel2007,minaeva2018,lesi2020}。更接近本文软件结构的 runnable-to-task 映射工作已经利用 activation Offset 组织不同周期 runnable，并以周期与 Offset 的最大公约数约束任务周期\cite{khenfri2015,khenfri2020}。其主要目标是任务数量、响应时间与可调度性；本文沿用这一已知的 Offset/gcd 关系，但将对象限定为 MainFunction 分组，并采用只依赖组内报文数和共同调用周期、而不依赖报文身份的代理成本。
 
-固定 Offset 后的软件分组属于集合划分问题。通用集合划分的指数时间精确算法已有系统研究\cite{bjorklund2009}，调度问题中按不同数值或类型数量进行参数化求解也已有成熟背景\cite{mnich2015}；因此，子集动态规划和 distinct-type 参数化思想本身并非本文的新颖点。对于通信与软件两个不同量纲的目标，Pareto 支配、$\varepsilon$-constraint 与膝点同样是成熟的多目标分析工具\cite{mavrotas2009,debgupta2011}。本文的具体区别在于：同一 Offset 同时进入显式稳态时隙的带权释放评价和特定身份对称的 MainFunction 代理成本；固定 Offset 后的软件分组采用精确内层，而外层仅对实际搜索到的 Offset 候选形成观测结果，并与可精确分析的 D 结构严格区分。
+固定 Offset 后的软件分组属于集合划分问题。通用集合划分的指数时间精确算法已有系统研究\cite{bjorklund2009}，调度问题中按不同数值或类型数量进行参数化求解也已有成熟背景\cite{mnich2015}；因此，子集动态规划和按类型数参数化的思想本身并非本文的新颖点。对于通信与软件两个不同量纲的目标，Pareto 支配、$\varepsilon$-constraint 与膝点同样是成熟的多目标分析工具\cite{mavrotas2009,debgupta2011}。本文关注的是同一 Offset 在两侧的共同作用：它既进入显式稳态时隙的带权释放评价，也进入不区分报文身份的 MainFunction 代理成本。固定 Offset 后的软件分组由精确内层求解，外层则只报告实际搜索到的 Offset 候选；后者与能够完整分析的 D 结构采用不同证据口径。
 
 \subsection{研究方法与主要贡献}
 
-围绕外层 Offset 组合选择、固定 Offset 后的软件分组及二者的联合评价，本文形成以下六项主要贡献。
+上述研究分别处理通信相位、软件周期组织与多目标分析。本文在其基础上聚焦同一 Offset 对两侧结构的共同影响，主要工作如下。
 
 \begin{enumerate}
   \item 建立周期报文 Offset 的带权离散时隙模型，以 Peak 与 $Q^{\mathrm{ss}}$ 分别刻画局部峰值和稳态整体均衡；同时由周期与 Offset 的最大公约数刻画单报文最大可行调用周期，使通信释放位置与软件调用周期在同一 Offset 决策上形成明确耦合。
 
   \item 针对有限候选及稳态命中列表均显式给出的带权 Offset 峰值判定模型，证明其即使在同周期、二候选和二时隙的受限情形下仍为 NP-complete，并据此刻画外层 Offset 组合选择的最坏情形困难性；该结论不扩展为对隐式超周期表示或真实帧时间权重子类的宽泛断言。
 
-  \item 固定完整 Offset 后，利用当前 gcd 型、身份对称组成本的 same-D 结构，把报文级 MainFunction 分组压缩为带重数的 D 类型集合划分，并以确定性子集动态规划精确求解。该贡献落在特定成本的结构保持与精确内层，而非通用集合划分递推本身。
+  \item 固定完整 Offset 后，利用当前 gcd 型且不区分报文身份的组成本，把相同 D 类型的报文压缩为带重数的类型集合划分，并以确定性子集动态规划精确求解。这里利用的是特定成本下的结构保持性质，而不是把通用集合划分递推作为新方法。
 
   \item 在上述复杂度背景下采用 GCLS 处理外层 Offset 搜索，将其定位为对实际网段规模、解质量、可复现性和运行时间预算的工程权衡。小规模精确枚举、CP-SAT 与分支定界仍可用于对照或受控实例，NP-hardness 并不排除这些方法。
 
-  \item 在固定 Offset 精确内层之上构造受 Peak 约束的 $\varepsilon$-constraint CAN--CPU 联合搜索，并以观测 Pareto 前沿组织候选。D 直方图对软件代价的压缩、通信与软件目标的冲突以及九网段结构结果在引言中仅作主线预告，其完整性质和证据边界由后续章节展开。
+  \item 在固定 Offset 精确内层之上构造受 Peak 约束的 $\varepsilon$-constraint CAN--CPU 联合搜索，并以观测 Pareto 前沿组织候选；同时区分可完整枚举的 D 结构与有限外层搜索实际访问的联合候选。
 
   \item 实现面向实际工程输入的 Offset 优化工具，并在九个真实 CAN FD 网段上分别验证通信侧搜索、固定 Offset 精确内层与有限预算联合候选。工程工具、理论性质和九网段实验各承担不同证据角色，不作重复计数。
 \end{enumerate}
@@ -757,14 +757,14 @@ $B$ 表示周期入口的调度基准周期，较小的 $B$ 对应更高的入�
  =\left\{o\in\Oset_i\mid\gcd(T_i,o)=d\right\}.
 \label{eq:reachable-d-fiber}
 \end{equation}
-集合 $\mathcal F_{i,d}$ 也称为候选域上的 gcd 纤维，用来把产生同一 D 值的 Offset 汇集在一起；它不应一般地理解为一个普通同余类。相应的软件侧 D 等价关系定义为
+集合 $\mathcal F_{i,d}$ 正式称为候选域上的 gcd 纤维，即产生同一 D 值的 Offset 候选集合；它不应一般地理解为一个普通同余类。相应的软件侧 D 等价关系定义为
 \begin{equation}
  o\sim_i o'
  \quad\Longleftrightarrow\quad
  \gcd(T_i,o)=\gcd(T_i,o').
 \label{eq:offset-d-equivalence}
 \end{equation}
-同一等价类中的 Offset 对报文 $i$ 的最大可行调用周期具有相同影响，但它们在 CAN 时间轴上的释放位置仍可能不同。因而，D 等价类能够压缩软件侧结构，却不能替代通信侧对具体 Offset 的评价；这一差异为后续“外层选择具体 Offset、固定 Offset 后精确处理软件分组”的求解层次提供了依据。
+同一 D 等价类中的 Offset 对报文 $i$ 的最大可行调用周期具有相同影响，但它们在 CAN 时间轴上的释放位置仍可能不同。因此，软件侧可以按 D 等价类压缩，通信侧仍须评价具体 Offset。下一章先在完整候选空间上定义通信侧目标，随后再利用这一差异构造“外层选择 Offset、固定 Offset 后精确处理软件分组”的求解层次。
 
 \clearpage
 \section{周期报文 Offset 均衡优化模型}
@@ -964,7 +964,7 @@ Balanced 模式据此采用比较键
 给定一个 Offset 分配后，只需扫描所选候选的显式命中列表，累加各时隙负载并与 $\Theta$ 比较，因此证书可在显式输入长度的多项式时间内验证。困难性由经典 PARTITION 问题归约\cite{karp1972}：把每个正整数 $a_i$ 作为一条报文的权重，并为该报文设置分别只命中两个时隙之一的两个 Offset 候选。若总权重为 $2B$，取阈值 $\Theta=B$，则两个时隙的负载都不超过 $B$ 当且仅当原整数集合存在等和划分。该构造已经满足定理所列的同周期、二候选、二时隙和单次命中限制；判定版本的 NP-completeness 随即推出对应最小化问题的 NP-hardness。完整的 NP 成员资格、奇数总和处理、双向归约与编码长度证明见附录第~\ref{subsec:appendix-explicit-peak-proof}~节。
 \end{proof}
 
-该归约只给出受限子类的弱数值困难性，不证明 strong NP-hardness，也不证明由合法 CAN FD \texttt{frame\_time\_us} 产生的物理权重子类具有同样困难性。NP 成员资格依赖命中列表显式给出；当周期与超周期采用紧凑数值隐式编码时，展开验证未必对输入位长为多项式，周期 phase 峰值问题中已知的表示差异也说明这一边界不可省略\cite{zeng2006periodic,short2010periodic}。上述最坏情形结果同样不排除精确枚举、伪多项式算法、全多项式时间近似方案（FPTAS）、CP-SAT 或分支定界在特定规模和结构上有效。它说明的是外层 Offset 选择具有组合困难性，而不是下一章只能采用启发式方法。
+该归约只给出受限子类的弱数值困难性，不证明 strong NP-hardness，也不覆盖由合法 CAN FD \texttt{frame\_time\_us} 产生的物理权重子类。NP 成员资格依赖命中列表显式给出；若周期与超周期采用紧凑数值隐式编码，展开验证未必对输入位长为多项式\cite{zeng2006periodic,short2010periodic}。这些边界仍允许伪多项式、近似、参数化及小规模精确方法；定理刻画的是外层组合选择的最坏情形，而不是“只能采用启发式”。
 
 \hyphenation{Offset}
 
@@ -975,7 +975,7 @@ Balanced 模式据此采用比较键
 \subsection{复杂度与工程求解选择}
 \label{subsec:gcls-engineering-choice}
 
-第\ref{subsec:explicit-offset-peak-complexity}节的结果刻画了显式命中模型中外层 Offset 组合选择的最坏情形困难性，但 NP-hardness 并不意味着只能使用启发式算法。对于候选较少的小规模实例，完整枚举、CP-SAT、分支定界及其他精确方法仍可用于求得或逼近可验证的基准，并可作为启发式结果的对照。复杂性结论在本文中的作用，是说明外层搜索需要面对随候选组合增长的计算压力，而不是排除所有精确求解路径。
+第\ref{subsec:explicit-offset-peak-complexity}节说明了外层 Offset 组合选择在最坏情形下为何困难，却没有规定唯一的求解方法。候选较少时，完整枚举、CP-SAT 和分支定界仍可提供精确结果或可验证的对照；实际网段则需要在更大的候选域和有限时间预算之间取舍。
 
 本文选择 GCLS，是因为实际多网段输入要求算法在可控运行时间内处理较大的有限候选域，同时保持给定输入、种子与消歧规则下的可复现性，并持续生成可供后续精确对照和联合内层评价的高质量 Offset 候选。因此，GCLS 是在问题最坏情形困难性背景下，对计算规模、解质量、复现性和时间预算作出的工程选择；它不是定理\ref{thm:explicit-offset-peak-complexity}的唯一算法推论。
 
@@ -1096,7 +1096,6 @@ Balanced 模式据此采用比较键
 在 $\widetilde{\mathcal N}_2$ 内，GCLS 按照 $\symbf F_{\pi}$ 比较已生成的候选，接受其中最佳的严格改善，并同时更新两条报文的 Offset。每次协同移动后，算法在新的分配上重新执行完整 1-opt，以处理仍可通过单报文移动实现的改进；更新后的负载分布随后用于下一轮热点识别。由于搜索范围同时受到热点、候选报文数和 Offset 候选数的限制，该过程只在 $\widetilde{\mathcal N}_2$ 中寻找改进，不保证达到完整 $\mathcal N_2$ 上的局部最优。
 \subsection{多起点搜索与候选保留}
 \label{subsec:gcls-restart-pool}
-\label{subsubsec:gcls-three-opt}
 
 经过 1-opt 与有界双报文搜索后，一个构造起点只能到达相应搜索盆地的终点，所得结果仍可能依赖贪心构造顺序。多起点搜索通过改变部分构造次序扩展可到达的局部结构；对于 Balanced 模式，还需在可接受的 Peak 候选之间保留不同相位结构，避免过早压缩后续搜索入口。
 
@@ -1361,7 +1360,7 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
 
 对 $n$ 条报文直接枚举 MainFunction 划分，候选数量按 Bell 数增长。固定 $\boldsymbol O$ 后，每条报文的 $D_i$ 已由式\eqref{eq:message-max-tick}确定，分组调用周期由组内 $D_i$ 的最大公约数决定。因此，在进入精确枚举前需要回答：具有相同 $D_i$ 的多条报文，是否仍有必要作为彼此不同的个体参与划分？
 
-以下压缩与精确性结论共同采用本章的既定模型前提：全部时间量位于共同整数栅格，所有分组共享同一个正参数 $\rho$，组成本为线性且不区分报文身份的形式；可行划分不含禁止同组、容量、节点归属或报文特异执行成本等附加约束，$P^\star$ 采用精确有理数比较。在这些条件下，对任意非空组 $G$，其代理成本可写为
+以下压缩与精确性结论共同采用本章的既定模型前提：全部时间量位于共同整数栅格，所有分组共享同一个正参数 $\rho$，组成本为线性且不区分报文身份，即不依赖报文名称、CAN ID 或其他身份信息；可行划分不含禁止同组、容量、节点归属或报文特异执行成本等附加约束，$P^\star$ 采用精确有理数比较。在这些条件下，对任意非空组 $G$，其代理成本可写为
 \begin{equation}
  c(G)
  =
@@ -1369,7 +1368,7 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
  {\gcd_{i\in G}D_i}.
 \label{eq:fixed-offset-group-cost}
 \end{equation}
-式\eqref{eq:fixed-offset-group-cost}表明，一个分组的评价只依赖其中的 $D_i$ 取值、相同取值的出现次数及 $\rho$，而不依赖报文名称、CAN ID、定义位置或原始输入顺序。这些身份信息仅在类型级结果映射回具体报文时使用。
+式\eqref{eq:fixed-offset-group-cost}表明，一个分组的评价只依赖其中的 $D_i$ 取值、相同取值的出现次数及 $\rho$；具体报文身份只在类型级结果映射回报文时使用。
 
 将不同的 $D$ 值按升序记为 $d_1<d_2<\cdots<d_m$，令 $c_j$ 表示 $D_i=d_j$ 的报文数量。相应的 D 类型直方图为
 \begin{equation}
@@ -1385,10 +1384,10 @@ $B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可�
 \end{proposition}
 
 \begin{proof}[\normalfont 证明思路]
-若同一 D 类型分散在两个组中，记两组的 TimeBase 满足 $B_1\le B_2$，并将第一组内的一条该类型报文移入第二组。接收组的最大公约数不变；若移出后第一组仍非空，其最大公约数保持不变或增大，线性报文数项的变化使总成本不增加。若第一组原为单例，则 $B_1=B_2$，合并还会省去一次固定调用成本。有限次执行这一操作，即可从任一最优方案得到一个不拆分相同 D 类型的最优方案。完整交换证明见附录第~\ref{subsubsec:appendix-same-d-proof}~节。
+若同一 D 类型分散在两个组中，记两组的 TimeBase 满足 $B_1\le B_2$，并将第一组内的一条该类型报文移入第二组。接收组的最大公约数不变；若移出后第一组仍非空，其最大公约数保持不变或增大，线性报文数项的变化使总成本不增加。若第一组原为单例，则 $B_1=B_2$，合并还会省去一次固定调用成本。有限次执行这一操作，即可从任一最优方案得到一个不拆分相同 D 类型的最优方案。完整交换证明见附录第~\ref{subsec:appendix-same-d-compression-proof}~节。
 \end{proof}
 
-命题\ref{prop:same-d-compression}只保证至少存在一个具有该结构的最优解，并不声称所有最优解都不拆分相同 D 类型。因此，类型压缩在保留至少一个全局最优方案的同时，将组合维度从 $n$ 条报文降为 $m$ 个不同 D 类型；重数 $c_j$ 仍保留各类型的报文数量。类型集合本身仍需划分，但外层 Offset 对软件最优值的影响已经可以只通过其诱导的 D 结构传递。
+命题\ref{prop:same-d-compression}保证至少存在一个不拆分相同 D 类型的最优解，而不是断言所有最优解都具有这一结构。类型压缩据此把组合维度从 $n$ 条报文降为 $m$ 个不同 D 类型，并以重数 $c_j$ 保留各类型的报文数量。类型集合仍需划分，但外层 Offset 对软件最优值的影响已经可以通过其诱导的 D 结构传递。
 
 \begin{proposition}[软件代理成本对 D 结构的依赖]
 \label{prop:pstar-d-structure}
@@ -1405,7 +1404,7 @@ $H_D(\boldsymbol O)=H_D(\boldsymbol O')$，式\eqref{eq:pstar-same-d-vector}仍�
 D 向量相同时，每个报文级划分中各组的最大公约数、组大小和成本均保持不变。D 直方图相同时，两个实例具有相同的类型值及重数；由命题\ref{prop:same-d-compression}，两者都可无损压缩为同一个类型级划分问题，故精确最优值相同。保持 D 类型的报文双射证明、可达约数集合及必要反例见附录第~\ref{subsec:appendix-d-structure-proof}~节。
 \end{proof}
 
-因此，$H_D(\boldsymbol O)$ 足以表示当前软件侧精确子问题，可作为缓存键，并支持类型压缩和后续可达软件代价水平诊断。该表示并非 $P^\star$ 的一一编码：不同直方图仍可能得到相同的最优软件代理成本。若模型加入报文特异执行成本、兼容性或容量约束，报文身份将重新影响组成本，直方图表示也未必继续充分。软件代价水平数与二维非支配目标向量数的组合上界见推论~\ref{cor:pstar-pareto-cardinality}。
+因此，$H_D(\boldsymbol O)$ 可以表示当前软件侧精确子问题，并用于缓存和可达软件代价水平诊断。不同直方图仍可能得到相同的 $P^\star$；若模型加入报文特异执行成本、兼容性或容量约束，直方图也可能不再足以确定最优成本。相应的软件代价水平数与二维非支配目标向量数上界见推论~\ref{cor:pstar-pareto-cardinality}。确定这一压缩后，下一节只需在 D 类型集合上求解剩余的划分问题。
 
 \subsection{基于子集动态规划的精确分组求解}
 \label{subsec:deterministic-subset-dp}
@@ -1488,7 +1487,7 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 \end{theorem}
 
 \begin{proof}[\normalfont 证明思路]
-命题\ref{prop:same-d-compression}保证至少存在一个报文级全局最优方案可以表示为 D 类型划分。引理\ref{lem:anchor-block-uniqueness}保证锚点递推对类型划分不重不漏，最优子结构则使每个状态由一个锚点组与余集最优状态组成。由集合大小归纳即可得到 $F(\mathcal U)$ 的全局最小性。完整归纳证明见附录第~\ref{subsubsec:appendix-dp-induction}~节。
+命题\ref{prop:same-d-compression}保证至少存在一个报文级全局最优方案可以表示为 D 类型划分。引理\ref{lem:anchor-block-uniqueness}保证锚点递推对类型划分不重不漏，最优子结构则使每个状态由一个锚点组与余集最优状态组成。由集合大小归纳即可得到 $F(\mathcal U)$ 的全局最小性。完整归纳证明见附录第~\ref{subsubsec:appendix-anchor-proof}~节。
 \end{proof}
 
 这里的“固定参数可解”是指，当不同 D 类型数保持较小时，即使报文数量增加，指数搜索仍被限制在类型层面\cite{downey2013,mnich2015}；它不是关于报文数 $n$ 的一般多项式算法，当 $m=n$ 时指数项仍可能随全部报文增长。通用集合划分的精确算法与子集递推已有成熟研究\cite{bjorklund2009}，本文的结构性内容在于当前 gcd 型组成本允许无损压缩到 $m$ 个 D 类型，而非递推模板本身。
@@ -1599,16 +1598,14 @@ D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消
 存在一个仅含两条等周期报文、每条只有两个 Offset 候选的实例，使某一合法 Offset 调整严格降低 $Q^{\mathrm{ss}}$，同时严格提高最优软件代理成本 $P^\star$。
 \end{proposition}
 
-式\eqref{eq:two-message-q-conflict}与式\eqref{eq:two-message-pstar-conflict}给出命题\ref{prop:two-message-strict-conflict}的见证，说明两目标在一般模型中不具有天然的单调一致性。方案 A 与 B 的稳态 Peak 分别为 $2w$ 和 $w$；Peak hard guardrail 同时接纳二者时冲突保留，预算位于 $[w,2w)$ 时方案 A 被排除，该冲突则可从可行域中消失。因此，这一见证为联合优化提供非冗余的数学基础，但不表示每个预算或真实网段都必然产生多点前沿。
+式\eqref{eq:two-message-q-conflict}与式\eqref{eq:two-message-pstar-conflict}给出命题\ref{prop:two-message-strict-conflict}的见证，说明两目标在一般模型中不具有天然的单调一致性。方案 A 与 B 的稳态 Peak 分别为 $2w$ 和 $w$；Peak 硬约束同时接纳二者时冲突保留，预算位于 $[w,2w)$ 时方案 A 被排除，该冲突则可从可行域中消失。这一见证说明联合评价并非冗余，但不表示每个预算或真实网段都必然产生多点前沿。
 
-四个 Offset assignment、全部两报文分组及完整目标像的枚举见附录第~\ref{subsec:appendix-two-message-conflict-proof}~节。
+四种 Offset 分配、全部两报文分组及完整目标像的枚举见附录第~\ref{subsec:appendix-two-message-conflict-proof}~节。
 
-由此，单独最小化 $Q^{\mathrm{ss}}$ 可能牺牲 $P^\star$，反之也可能保留通信热点。本文先以 Peak hard guardrail 限定可接受的通信峰值，再用既有的 $\varepsilon$-constraint 方法分析二者折中；外层仍为启发式候选搜索，所得是观测 Pareto 前沿，而不是完整前沿。
+单独最小化 $Q^{\mathrm{ss}}$ 可能提高 $P^\star$，只优化软件成本也可能保留通信热点。下一节因此先用 Peak 硬约束限定可接受的通信峰值，再以 $\varepsilon$-constraint 分析两者折中；外层仍是启发式候选搜索，所得前沿只覆盖已访问的候选。
 
 \subsection{Peak 约束下的 \texorpdfstring{$\varepsilon$-constraint}{Epsilon-constraint} 联合模型}
 \label{subsec:joint-epsilon-model}
-\label{subsubsec:joint-peak-cpu-budget}
-\label{subsubsec:weighted-sum-limit}
 
 式\eqref{eq:joint-evaluation-map}给出的 $Q^{\mathrm{ss}}$ 与 $P^\star$ 量纲不同，且相位调整可能使二者相互冲突。直接使用 $\alpha Q^{\mathrm{ss}}+\beta P^\star$，既需要人为处理尺度与偏好，也可能遗漏离散非凸目标集中的非支撑非支配区域。$\varepsilon$-constraint 将 CPU 开销代理指标转化为显式预算，同时保留 $Q^{\mathrm{ss}}$ 的原始均衡含义，更适合呈现不同软件预算下的通信侧变化\cite{mavrotas2009}。
 
@@ -1671,8 +1668,6 @@ Peak 在这里是候选准入约束，而不是 Pareto 分析的第三个目标�
 一次联合运行维护累积候选集 $\mathcal A$，跨初始搜索、各次重启、$\varepsilon$ 扫描和细化轮次保存完整 Offset 分配方案。相同分配依据稳定标识去重；候选的来源、预算和精确评价结果随分配一并保留，具体字段见附录第~\ref{subsubsec:appendix-joint-refinement-details}~节。在当前 Peak 约束下过滤 $\mathcal A$ 得到 $\mathcal A_{\rm f}$ 后，观测 CAN 端点优先选择较小的 $Q^{\mathrm{ss}}$，再比较 $P^\star$；观测 CPU 端点则按相反次序比较。端点因此表示当前归档候选中已经观察到的两侧边界，并随 $\mathcal A$ 的增长而更新。累积候选集的作用不止于保存历史结果：新增候选可能改变 Peak 参考和两个观测端点，预算区间也必须随之调整。
 
 \subsubsection{累积细化与终止判据}
-\label{subsubsec:peak-reference-refinement}
-\label{subsubsec:refinement-stability}
 
 每轮细化先搜索新的 Peak 候选，并从累积候选集中重新选择正式 Peak 参考。参考改善后，$Z_{\rm budget}$ 随之重算，历史候选也依据新的式\eqref{eq:joint-peak-feasible-set}重新过滤；不再满足约束的候选仍可保留用于审计，但不进入当前端点与 Pareto 集合。随后分别细化 CAN 与 CPU 端点，按更新后的 $P_{\min}$ 和 $P_{\max}$ 重新生成 $\varepsilon$ 预算，并将各预算下发现的候选继续并入 $\mathcal A$。算法~\ref{alg:joint-refinement}给出这一研究级流程，其中 $R_{\max}$ 为最大细化轮数。
 
@@ -1706,8 +1701,6 @@ Peak 在这里是候选准入约束，而不是 Pareto 分析的第三个目标�
 
 \subsection{观测 Pareto 前沿}
 \label{subsec:observed-pareto-front}
-\label{subsubsec:pareto-dominance-representative}
-\label{subsubsec:observed-global-boundary}
 
 迭代细化留下的是一组满足当前 Peak 约束的候选。为了去除在通信与软件两侧都不具优势的方案，对 $a,b\in\mathcal A_{\rm f}$ 定义二维支配关系：
 \begin{equation}
@@ -1742,9 +1735,6 @@ Pareto 过滤给出的是一组互不支配的方案，而不是默认选择。�
 
 \subsection{折中候选的几何后处理}
 \label{subsec:geometric-knee}
-\label{subsubsec:knee-normalization}
-\label{subsubsec:knee-fallback}
-\label{subsubsec:knee-interpretation}
 
 几何后处理只读取最终观测 Pareto 前沿。记其两个目标范围分别为 $[Q_{\min},Q_{\max}]$ 与 $[P_{\min},P_{\max}]$，第 $i$ 个候选的归一化坐标为
 \begin{equation}
@@ -1917,7 +1907,7 @@ Variance 以减小 $Q^{\mathrm{ss}}$ 为首要目标，因而可能接受更高�
 \subsubsection{\texorpdfstring{\texttt{FEASIBLE}}{FEASIBLE} 状态与证据含义}
 \label{subsubsec:exp-rq3-status}
 
-三个 CP-SAT 运行均以 \texttt{FEASIBLE} 而非 \texttt{OPTIMAL} 状态结束。表中结果证明存在优于相应 GCLS 解的可行分配，但既不是经证明的 CP-SAT 最优值，也不能用于计算 GCLS 相对于真实全局最优值的精确差距；求解日志中的下界与 incumbent 之间仍存在间隙。RQ3 因而支持对这三个 GCLS 解全局最优性的否定，但不形成所有网段上两类方法的统一性能排序。
+三个 CP-SAT 运行均以 \texttt{FEASIBLE} 而非 \texttt{OPTIMAL} 状态结束。表中结果证明存在优于相应 GCLS 解的可行分配，但既不是经证明的 CP-SAT 最优值，也不能用于计算 GCLS 相对于真实全局最优值的精确差距；求解日志中的下界与当前最佳可行解之间仍存在间隙。RQ3 因而支持对这三个 GCLS 解全局最优性的否定，但不形成所有网段上两类方法的统一性能排序。
 
 \subsection{RQ4：MainFunction 精确子问题的正确性与计算规模}
 \label{subsec:exp-rq4}
@@ -1950,7 +1940,7 @@ Variance 以减小 $Q^{\mathrm{ss}}$ 为首要目标，因而可能接受更高�
 \subsubsection{完整枚举方法与完成状态}
 \label{subsubsec:exp-rq5-enumeration}
 
-命题~\ref{prop:pstar-d-structure} 已经证明，在当前身份对称的开销代理模型下，$P^\star(\boldsymbol O)$ 只依赖 Offset 所诱导的 $D$ 结构。基于这一性质，本节不枚举完整的 Offset 笛卡尔积，而是在 $D$ 直方图层面精确回答每个真实网段能够形成多少种软件侧结构，以及这些结构对应多少个不同的 $P^\star$ 水平。该问题与联合 Pareto 前沿是否完整无关：它只刻画软件侧的完整可达结构，不同时穷举每个 Offset 分配的 $Q^{\mathrm{ss}}$。
+命题~\ref{prop:pstar-d-structure} 已经证明，当组成本不区分报文身份时，$P^\star(\boldsymbol O)$ 只依赖 Offset 所诱导的 $D$ 结构。基于这一性质，本节不枚举完整的 Offset 笛卡尔积，而是在 $D$ 直方图层面精确回答每个真实网段能够形成多少种软件侧结构，以及这些结构对应多少个不同的 $P^\star$ 水平。该问题与联合 Pareto 前沿是否完整无关：它只刻画软件侧的完整可达结构，不同时穷举每个 Offset 分配的 $Q^{\mathrm{ss}}$。
 
 具体而言，首先将每条报文的合法 Offset 候选映射为其可达 $D_i$ 集合；随后按报文逐步更新直方图动态规划，得到全部可达 $D$ 直方图；再对每个直方图调用一次固定 Offset 精确内层，并以精确有理数对 $P^\star$ 去重。九个网段最终均完成了完整枚举。IC 的首次运行在直方图枚举完成后，于 $P^\star$ 评价阶段达到 $300\,\mathrm{s}$ 超时；仅将单网段超时提高到 $600\,\mathrm{s}$ 后，全部 $49\,946$ 个直方图均完成评价，候选域、$\rho$、输入和状态上限均未改变。因此，表~\ref{tab:exp-d-structure} 所列九网段结果均为完整结果。
 
@@ -1984,13 +1974,13 @@ SU & 672 & 114 & 4 & 1 \\
 
 从完整枚举的规模看，可达直方图数由 EP 的 371 个到 GL 的 $95\,238$ 个不等，可达 $P^\star$ 水平数则由 EP 的 91 个到 GL 的 412 个不等。两组数量的变化幅度并不一致，说明直方图到软件成本的压缩程度同样依赖网段结构。这些计数用于描述软件侧可达性的差异，不用于推断某网段的外层优化必然更困难，也不建立直方图数量与 Pareto 点数之间的单调关系。
 
-完整枚举中的“可达”表示至少存在一个合法 Offset 分配能够诱导相应直方图或软件成本，但不保留产生它的全部分配数量。该处理足以完整回答软件侧结构问题，因为当前 $P^\star$ 对报文身份对称；通信侧的 $Q^{\mathrm{ss}}$ 仍取决于具体报文及其释放相位，不能按同一计数直接恢复。因而，RQ5 的完整性严格限定在 $D/P^\star$ 层面，不扩展为完整 Offset 分配覆盖或联合目标覆盖。
+完整枚举中的“可达”表示至少存在一个合法 Offset 分配能够诱导相应直方图或软件成本，但不保留产生它的全部分配数量。由于当前组成本不区分报文身份，这足以完整回答软件侧结构问题；通信侧的 $Q^{\mathrm{ss}}$ 仍取决于具体报文及其释放相位，不能由同一计数恢复。因而，RQ5 的完整性严格限定在 $D/P^\star$ 层面，不扩展为完整 Offset 分配覆盖或联合目标覆盖。
 
 EP、LC 和 SU 的联合归档本身分别已经观察到 2、2 和 4 个不同的 $P^\star$ 水平，但经二维支配筛选后均只保留一个前沿点。这进一步说明“归档内只有一个非支配点”与“归档内只出现一个软件水平”也不是同一事实。完整枚举把可达水平扩展到 91、114 和 114 个，却仍不能仅凭软件成本判断其中哪些分配满足 Peak 约束并在二维目标上非支配。
 
 EP、LC 与 SU 的完整合法 Offset 空间分别包含 91、114 和 114 个可达 $P^\star$ 水平。因此，三个网段在当前联合归档中仅保留一个非支配点，不能归因于软件目标在全空间中退化为常数。该现象可能由 Peak 约束、二维支配关系和有限候选覆盖共同形成，现有证据尚不能进一步分离三者的影响。反过来，多个可达软件水平本身也不保证形成多个 Pareto 点。
 
-完整结构枚举说明软件侧存在丰富的可达水平，但只有同时评价具体 Offset 分配的 $Q^{\mathrm{ss}}$，才能判断哪些二维组合非支配。联合外层尚未穷举全部 Offset assignment 或完整的 $Q^{\mathrm{ss}}$--$P^\star$ 目标像；下一节因此转向有限预算联合搜索实际观察到的二维前沿。
+完整结构枚举说明软件侧存在多个可达水平，但只有同时评价具体 Offset 分配的 $Q^{\mathrm{ss}}$，才能判断哪些二维组合非支配。联合外层尚未穷举全部 Offset 分配或完整的 $Q^{\mathrm{ss}}$--$P^\star$ 目标像；下一节因此转向有限预算联合搜索实际观察到的二维前沿。
 
 \FloatBarrier
 
@@ -2028,7 +2018,7 @@ CH、EP、LC、PT 和 SU 在第 2 或第 3 轮同时满足目标前沿与分配�
 
 \input{generated/ch7/table_recommendations.tex}
 
-PT 的推荐不属于几何膝点，三个单点网段也不具有可供解释的前沿曲率。其余五个几何膝点同样只是当前观测前沿及归一化、弦距规则下的折中候选，并非唯一工程最优。总体上，九网段均得到满足既定约束的观测解，其中六个网段呈现 CAN 均衡与 CPU 开销代理指标之间的多点权衡；工程选择仍可结合峰值裕量、配置变更代价和平台约束，在同一前沿上采用其他方案。
+PT 的推荐不属于几何膝点，三个单点网段也没有可供解释的前沿曲率。其余五个几何膝点只是当前观测前沿及既定归一化、弦距规则下的折中候选，并非唯一工程最优。九网段均得到满足既定约束的观测解，其中六个网段呈现多点权衡；推荐是否稳定还取决于模型参数和外层搜索配置，下一节对此进行检验。
 
 \subsection{RQ7：联合优化敏感性}
 \label{subsec:exp-rq7}
@@ -2061,9 +2051,9 @@ PT 的推荐不属于几何膝点，三个单点网段也不具有可供解释�
 
 图~\ref{fig:exp-joint-sensitivity}（b）同时给出 $K=21$ 与 $K=41$ 之间的前沿差异：DK、GL 和 IC 的公共尺度归一化对称 Hausdorff 距离分别为 $0.186824$、$0.089373$ 和 $0.131505$。网格加密后三个网段的推荐点均发生移动，DK 与 GL 的部分观测端点也随之变化，三网运行时间均有所增加。
 
-这一变化不只是预算网格分辨率的提高。外层求解采用启发式搜索，改变 $\varepsilon$ 预算点会同时改变实际访问的约束搜索路径、incumbent 与 warm-start 的演化，以及候选解归档集中能够发现的分配方案。因此，当前 $K$ 敏感性同时包含网格采样效应和启发式搜索路径效应，不能据此把 $K=41$ 的结果解释为全局 Pareto 前沿。
+这一变化不只是预算网格分辨率的提高。外层求解采用启发式搜索，改变 $\varepsilon$ 预算点还会改变实际访问的约束搜索路径、在位解与热启动的演化，以及候选归档能够发现的分配方案。因此，当前 $K$ 敏感性同时包含网格采样效应和启发式搜索路径效应，不能据此把 $K=41$ 的结果解释为全局 Pareto 前沿。
 
-综合来看，当前联合结果能够展示实际的 $Q^{\mathrm{ss}}$--$P^\star$ 权衡，但具体推荐仍依赖 CPU 开销代理模型参数与有限启发式搜索条件。
+当前联合结果能够展示已访问候选中的 $Q^{\mathrm{ss}}$--$P^\star$ 权衡，但具体推荐仍依赖 CPU 开销代理模型参数与有限启发式搜索条件。下一章据此把完整软件结构、精确内层和观测联合前沿分开讨论。
 
 \FloatBarrier
 
@@ -2088,60 +2078,48 @@ Offset 提供的是相位重排自由度，实际能够形成的局部释放模�
 \subsection{为什么固定 Offset 后能够精确评价}
 \label{subsec:discussion-exact-evaluation}
 
-外层 Offset 一旦固定，每条报文的 $D_i$ 随之确定。当前软件代理成本对报文身份对称，命题~\ref{prop:same-d-compression} 保证至少存在一个不拆分相同 $D$ 类型的最优方案，因此报文级划分可以无损压缩为类型级问题。精确动态规划的指数部分只依赖不同 $D$ 类型数 $m$；九个真实网段的 $m$ 为 4--6，使该关于 $m$ 的 FPT 精确算法在当前输入上具有实际可用性。运行时间测量说明这些实例可处理，但不作为复杂度证明。
+外层 Offset 一旦固定，$D_i=\gcd(T_i,O_i)$ 就确定单报文最大可行调用周期，组内 $D_i$ 的最大公约数进一步确定 MainFunction 的 TimeBase。由于当前组成本不区分报文身份，命题~\ref{prop:same-d-compression} 保证至少存在一个不拆分相同 D 类型的最优方案；类型级锚点递推因而能够精确覆盖所需划分。该算法的指数部分只依赖不同 D 类型数 $m$，九个真实网段的 $m$ 为 4--6。运行时间说明这些实例可处理，但不代替关于 $m$ 的参数化复杂度证明。
 
-这一精确性来自固定 Offset 后决策结构的变化，而不是把外层困难问题近似地忽略。给定 $\boldsymbol O$ 后，$D_i=\gcd(T_i,O_i)$ 确定单报文最大可行调用周期；一个 MainFunction 组的 TimeBase 又由组内 $D_i$ 的最大公约数确定。组成本因此可以对每个类型子集精确计算，规范锚点递推再不重不漏地组合全部类型划分。same-D 压缩只保证至少存在一个具有该结构的最优方案，但这已经足以使类型级最优值等于报文级最优值。
-
-对于外层已访问的每个 $\boldsymbol O$，求解器给出的 $P^\star(\boldsymbol O)$ 是当前代理模型下的最小分组成本。定理~\ref{thm:fixed-offset-dp-exactness} 提供数学依据，141/141 组报文级穷举对照则交叉核验当前实现；后者不是定理证明。RQ5 进一步精确枚举全部可达 $D$ 直方图，并为每个直方图求得 $P^\star$，说明九网段的软件目标均由有限但非单一的离散水平构成。由此，固定 Offset 的软件评价及完整软件结构枚举都是精确的，搜索不确定性集中在联合外层。
+对于外层已访问的每个 $\boldsymbol O$，求解器给出的 $P^\star(\boldsymbol O)$ 是当前代理模型下的最小分组成本。定理~\ref{thm:fixed-offset-dp-exactness} 给出数学依据，141/141 组报文级穷举则交叉核验当前实现。RQ5 进一步枚举全部可达 D 直方图并精确计算对应的 $P^\star$，说明九网段均具有多个离散软件代价水平。固定 Offset 评价和软件结构枚举由此保持精确，搜索不确定性集中在联合外层；有限枚举本身不替代定理证明。
 
 可达直方图数与可达 $P^\star$ 水平数之间的差异也说明，软件结构与软件成本并非一一对应。不同 $D$ 组合可能在精确分组后得到同一最优成本，因此不能根据直方图数量直接推断联合优化难度，也不能据此预测 Pareto 点数。RQ5 的价值在于把软件侧“有哪些结构、有哪些成本水平”完整列出，而不是为外层搜索建立经验复杂度模型。
 
 \subsection{完整软件结构与观测联合前沿的区别}
 \label{subsec:discussion-structure-front}
 
-RQ5 的完整枚举覆盖所有合法 Offset 所能诱导的 $D$ 直方图，并据此得到全部可达 $P^\star$ 水平；它利用的是软件成本只依赖当前 $D$ 结构这一性质。该结果没有穷举每个 Offset assignment，也没有为完整合法空间建立全部 $Q^{\mathrm{ss}}$--$P^\star$ 目标向量。多个 Offset 分配可以共享同一 $D$ 直方图和软件成本，却产生不同的通信释放结构与 $Q^{\mathrm{ss}}$。
+RQ5 的完整枚举覆盖所有合法 Offset 所能诱导的 D 直方图，并据此得到全部可达 $P^\star$ 水平。它没有逐一穷举 Offset 分配，也没有建立完整的 $Q^{\mathrm{ss}}$--$P^\star$ 目标像：多个分配可以共享同一 D 直方图和软件成本，却产生不同的通信释放结构与 $Q^{\mathrm{ss}}$。
 
 这一差别可以从表~\ref{tab:exp-d-structure} 的两组计数直接看出。联合归档在各网段只观察到 2--52 个不同的 $P^\star$ 水平，而完整空间包含 91--412 个可达水平；归档中的软件水平随后还要与各自的 $Q^{\mathrm{ss}}$ 一起接受二维支配筛选，所以观测前沿点数又可能更少。即使某网段未来覆盖了全部软件水平，只要尚未在各水平内找到相应的最小通信成本，也仍不能据此宣称完整联合前沿。
 
-完整软件结构枚举能够避开 Offset assignment 的重复，是因为当前成本不区分承载同一 $D$ 值的具体报文身份；通信侧却不能作相同压缩。帧时间权重、释放相位和报文身份共同决定时隙负载，同一直方图下的不同分配仍可能产生不同 $Q^{\mathrm{ss}}$。因此，软件结构完整与联合目标完整之间缺少的不是内层求解精度，而是对身份相关 Offset 分配及其通信结果的完整覆盖。
+软件侧能够避开重复分配，是因为当前成本不区分承载同一 D 值的具体报文；通信侧却不能作相同压缩。帧时间权重、释放相位和报文身份共同决定时隙负载，同一直方图下的不同分配仍可能产生不同 $Q^{\mathrm{ss}}$。软件结构完整与联合目标完整之间缺少的不是内层求解精度，而是对具体 Offset 分配及其通信结果的完整覆盖。
 
-RQ6 的观测 Pareto 前沿则只从 GCLS、有限 $\varepsilon$ 网格和迭代细化访问到的累积候选中提取。DA 在达到轮数上限时目标签名稳定而分配签名未稳定；DK、GL 和 IC 达到上限时两类签名均未稳定。RQ7 的种子和网格敏感性也表明搜索配置会改变候选覆盖。因此，完整 $D/P^\star$ 结构不能把观测前沿升级为完整 Pareto 前沿；准确的分层口径仍是 fixed-Offset exact inner 与 heuristic outer。
-
-目标稳定与分配稳定同样需要分开解释。相同的观测目标点可能由多个 Offset 分配实现，前沿几何保持不变并不表示配置唯一；反之，细化轮数达到上限只表示预算耗尽，也不是未找到任何有价值候选。累计归档和确定性消歧提高了结果的可审阅性，但它们不会把有限候选搜索转化为数学收敛或全局最优性证明。
+RQ6 的观测 Pareto 前沿只从 GCLS、有限 $\varepsilon$ 网格和迭代细化访问到的累积候选中提取。DA 达到轮数上限时仅目标签名稳定，DK、GL 和 IC 的目标与分配签名均未稳定；RQ7 也显示种子和网格会改变候选覆盖。相同目标点还可能对应不同 Offset 分配，因此目标稳定不表示配置唯一，达到轮数上限也只表示预算耗尽。完整 $D/P^\star$ 结构不能把这些观测结果升级为完整 Pareto 前沿；准确口径仍是“固定 Offset 内层精确、联合外层启发式”。
 
 \subsection{单点与多点结果如何解释}
 \label{subsec:discussion-single-multi}
 
-CH、DA、DK、GL、IC 和 PT 的多点观测前沿说明，在当前联合归档中确实观察到通信均衡与软件代理成本之间的离散取舍，但不说明这些点构成完整目标像。EP、LC 和 SU 的单点观测前沿只表示归档经二维支配筛选后各保留一个点，也不说明完整合法空间没有其他软件水平。完整枚举已经分别得到 91、114 和 114 个可达 $P^\star$ 水平，因而排除了“软件目标在全空间恒定”这一解释。
+CH、DA、DK、GL、IC 和 PT 的当前联合归档形成多点观测前沿，说明已访问候选中存在离散取舍。EP、LC 和 SU 经二维支配筛选后各保留一个点，但完整枚举分别得到 91、114 和 114 个可达 $P^\star$ 水平，因此三个单点结果不能解释为软件目标在全空间恒定。
 
-多点取舍的模型来源可以沿同一 Offset 的两条作用路径理解。在通信侧，$O_i$ 改变释放相位和时隙负载；在软件侧，$(T_i,O_i)$ 先确定 $D_i$，各 $D_i$ 再通过组内最大公约数决定 TimeBase 与调用频率。分散高权重释放可能降低部分 $D_i$，而形成较大公共 TimeBase 的选择也可能使释放重新聚集。第~\ref{subsec:joint-strict-conflict} 节的两报文构造证明两种偏好一般不天然同向，但并不证明每个网段或每个 Peak 预算下都一定产生多点前沿。
+这种取舍来自同一 Offset 的两条作用路径：$O_i$ 在通信侧改变释放相位和时隙负载，在软件侧则与 $T_i$ 共同确定 $D_i$，并经组内最大公约数影响 TimeBase 与调用频率。第~\ref{subsec:joint-strict-conflict} 节的两报文构造证明两种偏好可能严格冲突，但不证明每个网段或每个 Peak 预算下都有多点前沿。
 
-单点现象仍可能由 Peak 约束排除部分分配、二维支配关系消去候选，以及外层搜索覆盖有限共同形成；现有证据不能进一步分离三者的影响，也不能断定单点必由搜索遗漏或 Peak 约束单独造成。同理，存在多个可达 $P^\star$ 水平并不保证出现多个非支配点。几何膝点、理想点回退和唯一观测解都只是联合归档内的后处理结果，为工程审阅提供候选顺序，而不是唯一全局最优配置。
-
-对于六个多点网段，当前归档已经提供可比较的通信倾向端点、软件倾向端点和内部折中候选，工程人员可以结合峰值裕量、配置变更成本与平台约束进行选择。对于三个单点网段，返回唯一观测解只是对现有归档的诚实退化处理，不应命名为几何膝点，也不应被扩展解释为不存在通信--软件权衡。两类输出都服务于归档内的候选审阅，而不是替代对完整目标空间的证明。
+单点现象可能由 Peak 约束、二维支配和有限搜索覆盖共同形成，现有证据不能分离三者；多个可达 $P^\star$ 水平也不保证形成多个非支配点。多点网段可从当前归档的端点和内部候选中选择，单点网段则返回唯一观测解而不称几何膝点。几何膝点、理想点回退和唯一观测解都只为归档内审阅提供顺序，不是唯一全局最优配置。
 
 \subsection{模型与工程边界}
 \label{subsec:discussion-boundaries}
 
-本文模型完成了两项可复核工作：以帧时间权重评价周期释放热点，并以固定调用成本与逐报文增量成本的比例比较软件周期组织。正式联合实验采用 $\rho=1$ 作为未标定基准；第~\ref{subsubsec:exp-rq7-rho} 节表明改变 $\rho$ 可能改变分组和观测前沿，因此目标 ECU 仍需通过性能剖析估计 $C_0$、$C_1$ 及其比例。若实际成本依赖报文身份、处理路径或兼容约束，当前 D 直方图压缩也需要重新建模和证明。
-
-CPU 开销代理保留了 MainFunction 数量、组内报文数、最大可行 TimeBase 以及固定调用成本与逐报文增量成本之间的关系，适合比较不同 Offset 诱导的软件周期组织。它不等同于实际 CPU 利用率，也没有包含调度抢占、缓存行为和异质执行路径。完成平台标定后，固定 Offset 的评价框架仍可复用，但 $P^\star$ 的数值解释、最优分组乃至直方图压缩是否成立，都必须由更新后的成本模型重新确认。
+本文以帧时间权重评价周期释放热点，并以固定调用成本与逐报文增量成本的比例比较软件周期组织。正式联合实验中的 $\rho=1$ 是未标定基准；目标 ECU 仍需通过性能剖析估计 $C_0$、$C_1$ 及其比例。该代理保留 MainFunction 数量、组内报文数和最大可行 TimeBase 等结构关系，但不等同于实际 CPU 利用率，也不包含调度抢占、缓存行为和异质执行路径。若标定后的成本依赖报文身份、处理路径或兼容约束，$P^\star$ 的数值解释、最优分组和 D 直方图压缩都需重新确认。
 
 通信侧直接优化的是周期报文进入仲裁前的 release shaping。降低热点改善了总线竞争的输入条件，但尚未计入优先级仲裁、非抢占阻塞、排队、错误重传及系统任务干扰，不能据此给出响应时间或可调度性结论。实验中的 \texttt{frame\_time\_us} 是物理帧时间估计；T1 归约采用的则是抽象正整数权重，当前证明不覆盖物理帧时间所限定的更窄权重子类。
 
 九个真实 CAN FD 网段使方法能够在实际工程规模、周期组合和候选相位上接受检验，但数据仍来自有限项目环境。向其他车型、ECU、协议配置或更复杂路由场景推广时，需要重新确认输入资格、Offset 来源语义与软件执行架构。本文的网段依赖性结论适用于当前锁定数据，不被扩展为跨项目的普遍收益保证。
 
-工程工具已经把 CAN-only 与 CAN--CPU Joint 纳入同一工作流。CAN-only 路径完成输入资格筛选、Offset 优化、结果审阅与 DBC Offset 输出；Joint 路径在相同输入语义上执行联合搜索，展示以 $Q^{\mathrm{ss}}$ 和 CPU Cost Proxy 为坐标的观测 Pareto 前沿，并生成 MainFunctionTx 分组和 TimeBase 建议。成功网段还可导出联合结果、观测前沿及软件侧建议，使论文中的模型能够进入可交互、可复核的工程流程。
-
-正式工程输出统一绑定核心算法返回的同一推荐分配。该分配同时驱动 Offset 表、负载曲线、热力图、DBC replacement、MainFunction 分组和联合导出，避免界面展示、配置写回与软件侧建议采用不同候选。观测前沿用于说明取舍，GUI 不在显示层重新计算推荐，也不把任意手选 Pareto 点替换为正式输出；若核心算法没有返回合法推荐，工具保留诊断信息，但不伪造 Offset 分配、不生成 MainFunction 建议，也不写回 DBC。
+工程工具已经把 CAN-only 与 CAN--CPU Joint 纳入同一工作流。前者完成输入资格筛选、Offset 优化、结果审阅与 DBC Offset 输出，后者在相同输入语义上执行联合搜索，展示观测 Pareto 前沿并生成 MainFunctionTx 分组和 TimeBase 建议。核心算法返回的同一推荐分配同时驱动 Offset 表、负载图、DBC replacement、MainFunction 分组和联合导出；GUI 不在显示层重新计算或替换推荐。若核心算法没有返回合法结果，工具只保留诊断信息，不伪造分配、软件建议或 DBC 写回。
 
 该工具已投入实际工程使用，现场应用观察到周期释放热点改善。九网段锁定实验回答方法在受控真实输入上的可重复表现，工程使用反馈则说明其能够进入输入检查、结果审阅和配置输出流程；两类证据承担不同作用，不作合并统计。现有工程事实支持“热点输入条件得到改善”，但尚不支持直接宣称总线响应时间、任务可调度性或整车性能已经获得同等幅度的提升。
 
-从验证链条看，当前工作已经完成模型与配置一致性检查：输入资格、候选合法性、Peak 约束、二维非支配性、MainFunction 覆盖关系和导出候选均可由机器可读产物复核；九网段结构枚举又给出了软件侧完整可达水平。下一层验证应把通信释放指标与总线级时序相连，在保留相同 Offset 候选的条件下，引入报文优先级、控制器队列、背景流量和错误恢复，比较热点降低是否转化为最坏响应时间或超时风险的变化。更高一层才是任务调度、ECU 负载和整车功能回归，不能由前两层指标直接替代。
+当前机器可读产物能够复核输入资格、候选合法性、Peak 约束、二维非支配性、MainFunction 覆盖关系和导出候选，九网段结构枚举还给出了软件侧全部可达水平。下一步通信验证应引入优先级、控制器队列、背景流量和错误恢复，检验热点降低能否转化为响应时间或超时风险的改善；软件验证则需测量不同 MainFunction 数量、组规模和 TimeBase 的执行成本，并在真实任务配置下考虑抢占、缓存和共享资源。
 
-软件侧也需要类似的分层标定。首先应在目标 ECU 上对不同 MainFunction 数量、组规模和 TimeBase 组合进行重复测量，分离固定入口成本与逐报文处理成本，并检查线性代理是否足以描述观测数据；若不能，则需引入报文特异成本、非线性批处理开销或兼容约束。随后应把选定分组接入真实任务配置，在抢占、优先级、缓存和共享资源条件下进行时序分析。只有这些步骤完成后，$P^\star$ 才能从结构比较指标进一步解释为平台相关的软件执行代价。
-
-当前能力已经覆盖 Joint 推荐以及 MainFunctionTx 与 TimeBase 建议，但这些建议尚未自动物化为目标项目可直接使用的 AUTOSAR 软件配置。后续部署需要把推荐映射到具体 ARXML 与 ECU 构建流程，结合目标硬件性能剖析完成 $\rho$ 标定，再开展 CAN 与任务时序分析、硬件在环和整车回归。由此，本文已经形成从工程输入到配置候选的工作链，而从候选到可执行配置及系统级验证仍需后续闭环。这些边界限定了现阶段结论的适用范围，而不否定完整软件结构枚举、固定 Offset 精确评价和观测联合权衡各自已经完成的作用。
+当前工具已经给出 Joint 推荐及 MainFunctionTx、TimeBase 建议，但尚未自动生成目标项目可直接使用的 AUTOSAR 配置。后续需将推荐映射到 ARXML 与 ECU 构建流程，完成 $\rho$ 标定，再开展 CAN 与任务时序分析、硬件在环和整车回归。因此，本文完成的是从工程输入到配置候选的工作链；从候选到可执行配置及系统级保证仍属于后续工作。
 
 \clearpage
 \section{结论}
@@ -2172,9 +2150,9 @@ CPU 开销代理保留了 MainFunction 数量、组内报文数、最大可行 T
 \subsection{研究局限与后续工作}
 \label{subsec:conclusion-limitations}
 
-理论方面，受物理 \texttt{frame\_time\_us} 权重限制的 Offset 峰值问题复杂性仍待研究；外层还需要更强的精确算法、近似保证或参数化结果，以提供可验证的解质量与覆盖界。对于 EP、LC 和 SU 的单点观测，还需通过受控对照分别量化 Peak guardrail、二维支配关系和搜索覆盖的作用，而不能把任一因素预设为唯一原因。
+理论方面，受物理 \texttt{frame\_time\_us} 权重限制的 Offset 峰值问题复杂性仍待研究；外层还需要更强的精确算法、近似保证或参数化结果，以提供可验证的解质量与覆盖界。对于 EP、LC 和 SU 的单点观测，还需通过受控对照分别量化 Peak 约束、二维支配关系和搜索覆盖的作用，而不能把任一因素预设为唯一原因。
 
-模型方面，需要在目标 ECU 上通过性能剖析估计 $C_0$、$C_1$ 与 $\rho$，并结合实际执行时间和系统时序分析校准软件代理。进一步扩展到报文特异执行成本和分组兼容约束时，现有 same-D 压缩与直方图表示需要重新检验其适用性。
+模型方面，需要在目标 ECU 上通过性能剖析估计 $C_0$、$C_1$ 与 $\rho$，并结合实际执行时间和系统时序分析校准软件代理。进一步扩展到报文特异执行成本和分组兼容约束时，现有相同 D 类型压缩与直方图表示需要重新检验其适用性。
 
 工程方面，后续需将 Offset、MainFunctionTx 与 TimeBase 建议自动映射为目标项目可执行的 AUTOSAR 配置，接入 ECU 构建和实际软件配置流程，并通过硬件在环、整车回归及跨项目数据完成系统级验证。这些工作将把当前的结构评价和配置建议推进到平台标定、时序保证与部署闭环。
 \clearpage
@@ -2627,7 +2605,7 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 \begin{proof}[定理~\ref{thm:explicit-offset-peak-complexity} 的完整证明]
 先证该问题属于 NP。给定完整 Offset 分配作为证书，验证器逐条检查 $O_i\in\Oset_i$，扫描所选候选的显式命中列表，并按出现次数把 $w_i$ 累加到相应时隙，最后将每个累计负载与 $\Theta$ 比较。扫描次数不超过所选列表的总长度；累计值的位长至多在权重最大位长上增加关于报文数和列表长度的对数量级。因此，候选合法性、负载累计和阈值比较都能在显式输入长度的多项式时间内完成。这里的 NP 成员资格依赖命中列表显式给出；若只用二进制周期隐式描述可能指数长的超周期展开，上述验证时间结论不能直接沿用。
 
-再从经典 \textsc{Partition} 问题归约\cite{karp1972}。给定正整数 $a_1,\ldots,a_n$。若其总和为奇数，则输出一个固定 no-instance：取两条权重分别为 1 和 2 的报文，每条均可选择只命中两个时隙之一的候选，并令阈值为 1。总负载为 3，无论如何分配，至少一个时隙的负载不小于 2，故该实例必为否。
+再从经典 \textsc{Partition} 问题归约\cite{karp1972}。给定正整数 $a_1,\ldots,a_n$。若其总和为奇数，则输出如下固定 no-instance：取两条权重分别为 1 和 2 的报文，令二者周期均为 $10\,\mathrm{ms}$、Offset 候选均为 $\{15,20\}\,\mathrm{ms}$，并采用 $5\,\mathrm{ms}$ 时隙、稳态窗口 $[20,30)\,\mathrm{ms}$ 和阈值 1。每个候选恰在两个时隙之一命中一次，总负载为 3，故任意分配都使至少一个时隙的负载不小于 2。该固定实例不仅为否，也满足定理~\ref{thm:explicit-offset-peak-complexity} 所列的同周期、二候选、二时隙和单次命中限制。
 
 若总和为偶数 $2B$，对每个 $a_i$ 构造一条权重 $w_i=a_i$ 的报文，并令
 \begin{equation}
@@ -2643,11 +2621,10 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 该构造产生 $O(n)$ 个候选及显式命中项；除复制 $a_i$ 与 $B$ 外，所有时间数值均为常数，输出数值的二进制编码长度关于原输入长度为多项式。因此这是多项式 many-one 归约。结合 NP 成员资格，判定问题即使限制为同周期、每条报文两个候选、两个稳态时隙且每候选只命中一次，仍为 NP-complete；相应峰值最小化问题为 NP-hard。
 \end{proof}
 
-该证明由 \textsc{Partition} 得到的是受限子类的弱数值困难性，不支持 strong NP-hardness，也不覆盖由合法 \texttt{frame\_time\_us} 产生的物理权重子类或隐式超周期表示。它同样不排除伪多项式、近似、参数化或实际规模上的精确方法。定理的作用是刻画显式外层选择的最坏情形，而不是推出“只能采用启发式”。
+该证明由 \textsc{Partition} 得到的是受限子类的弱数值困难性，不支持 strong NP-hardness，也不覆盖由合法 \texttt{frame\_time\_us} 产生的物理权重子类或隐式超周期表示。它不排除伪多项式、近似、参数化或实际规模上的精确方法。外层困难性明确后，下一节转向固定 Offset 内层能够利用的 D 类型结构。
 
 \subsection{same-D 类型压缩与最优性保持}
 \label{subsec:appendix-same-d-compression-proof}
-\label{subsubsec:appendix-same-d-proof}
 
 本节补全命题~\ref{prop:same-d-compression} 的交换证明。目标不是证明每个最优划分都不拆分相同 D 类型，而是从任一全局最优划分出发，通过有限次不增成本的移动得到至少一个具有该结构的最优划分。
 
@@ -2685,7 +2662,7 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 三种情形均不增加成本。对一个分散类型反复移动，有限次后该类型集中到一个组；依次处理全部分散类型不会重新拆分已经集中的类型。由类型和报文数均有限，过程终止。若初始划分全局最优，所得划分的成本不可能低于全局最优值，又不高于初始成本，因而仍为全局最优。
 \end{proof}
 
-该结论依赖所有组共享公共正参数 $\rho$、变量成本对报文数线性且不区分身份，并且不存在禁止同组、容量、节点归属或其他兼容约束。它只保证存在一个结构化最优解，不排除另有拆分相同 D 类型的等成本最优解。
+该结论依赖所有组共享公共正参数 $\rho$、变量成本对报文数线性且不区分身份，并且不存在禁止同组、容量、节点归属或其他兼容约束。它只保证存在一个结构化最优解，不排除另有拆分相同 D 类型的等成本最优解；这一存在性正是下一节把报文级划分压缩为类型级动态规划的依据。
 
 \subsection{类型级子集动态规划的精确性与参数化复杂度}
 \label{subsec:appendix-dp-proof}
@@ -2694,7 +2671,6 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 
 \subsubsection{锚点递推与精确性}
 \label{subsubsec:appendix-anchor-proof}
-\label{subsubsec:appendix-dp-induction}
 
 令 $\mathcal U=\{1,\ldots,m\}$ 为 D 类型索引全集，$F(S)$、$a(S)$、$N(A)$、$B(A)$ 与 $C(A)$ 沿用式~\eqref{eq:subset-message-count}--\eqref{eq:anchor-subset-dp}。任一非空 $S$ 的无序划分中，各组两两不交且并集为 $S$，因此恰有一个组包含锚点 $a(S)$。记该组为 $A$，则余下各组唯一构成 $S\setminus A$ 的无序划分；反之，把任一满足 $a(S)\in A\subseteq S$ 的集合 $A$ 与余集的任一无序划分合并，也唯一得到 $S$ 的一个无序划分。故枚举所有包含锚点的 $A$ 对无序划分不重不漏，这同时补全引理~\ref{lem:anchor-block-uniqueness}。
 
@@ -2731,7 +2707,7 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 \begin{equation}
  O\!\left(3^m\operatorname{poly}(|I|)\right).
 \end{equation}
-该形式符合参数 $m$ 下 $f(m)|I|^{O(1)}$ 的 FPT 定义\cite{downey2013,mnich2015}。它不是关于报文数 $n$ 的一般多项式算法；当每条报文都有不同 D 类型时，$m=n$，指数项仍可达到 $3^n$。规范锚点递推采用的是既有集合划分思想\cite{bjorklund2009}，本文的结构依据是 same-D 交换性质允许把报文级实例无损压缩到类型级实例。
+该形式符合参数 $m$ 下 $f(m)|I|^{O(1)}$ 的 FPT 定义\cite{downey2013,mnich2015}。它不是关于报文数 $n$ 的一般多项式算法；当每条报文都有不同 D 类型时，$m=n$，指数项仍可达到 $3^n$。规范锚点递推采用的是既有集合划分思想\cite{bjorklund2009}，本文的结构依据是相同 D 类型的交换性质允许把报文级实例无损压缩到类型级实例。
 
 空间上，若每个状态只保存一个最优有理数值与一个前驱 mask，共有 $2^m$ 个状态，所需空间为
 \begin{equation}
@@ -2741,7 +2717,7 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 \begin{equation}
  O\!\left(m2^m\operatorname{poly}(|I|)\right).
 \end{equation}
-两者分别对应抽象值/前驱表示和当前对象表示，不能混为同一个空间结论。规范消歧只在成本完全相等时选择稳定代表，不改变上述最优值证明。
+两者分别对应抽象值/前驱表示和当前对象表示，不能混为同一个空间结论。规范消歧只在成本完全相等时选择稳定代表，不改变上述最优值证明。动态规划的输入仅由 D 类型及其重数构成，下一节进一步说明 Offset 如何通过这一结构决定软件最优成本。
 
 \subsection{软件代理成本对 D 结构的依赖}
 \label{subsec:appendix-d-structure-proof}
@@ -2767,19 +2743,19 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 
 直方图充分不意味着它与软件代价水平一一对应。取 $\rho=1$，D 向量 $(10,10)$ 的合并成本为 $3/10$；D 向量 $(10,20)$ 的合并成本也是 $3/10$，两个单例的总成本同样为 $2/10+2/20=3/10$。两种直方图不同，却有相同的 $P^\star=3/10$。
 
-身份对称假设也不可删除。考虑扩展组成本
+组成本不区分报文身份这一条件也不可删除。考虑扩展组成本
 \begin{equation}
  \frac{\rho+\sum_{i\in G}c_i}{\gcd_{i\in G}D_i},
 \label{eq:appendix-identity-specific-cost}
 \end{equation}
 令 $\rho=1$，两个报文的特异变量成本分别为 1 和 10。实例一的 D 向量为 $(20,5)$，实例二把 D 值对换为 $(5,20)$；两者直方图相同。逐一比较合并与两个单例后，前者最优成本为 $23/10$，后者为 $19/20$。因此，一旦成本依赖报文身份，相同 D 直方图也可能产生不同最优值。
 
-综上，当前结论依赖公共 $\rho$、身份对称线性成本和无额外兼容约束。它说明 D 直方图足以确定当前 $P^\star$，但不说明不同直方图必对应不同成本，也不能用于压缩身份相关的扩展模型。
+当前结论依赖公共 $\rho$、不区分报文身份的线性成本和无额外兼容约束。D 直方图足以确定当前 $P^\star$，但不同直方图仍可能对应同一成本，身份相关的扩展模型也不能沿用这一压缩。下一节据此只对可达软件代价水平和不同二维目标向量计数。
 
 \subsection{软件代价水平与二维非支配目标点数上界}
 \label{subsec:appendix-structure-bounds}
 
-令 $n$ 为报文数，$\mathcal R=\bigcup_i\mathcal D_i$，$r=|\mathcal R|$，并令 $\mathcal H_{\mathrm{reachable}}$ 为合法 Offset 分配实际能够诱导的 D 直方图集合。以下推论只计数不同软件代价值和不同二维目标向量，不计数产生同一结构或目标的 assignment 数量。
+令 $n$ 为报文数，$\mathcal R=\bigcup_i\mathcal D_i$，$r=|\mathcal R|$，并令 $\mathcal H_{\mathrm{reachable}}$ 为合法 Offset 分配实际能够诱导的 D 直方图集合。以下推论只计数不同软件代价值和不同二维目标向量，不计数产生同一结构或目标的分配数量。
 
 \begin{corollary}[软件代价水平与二维目标前沿的组合上界]
 \label{cor:pstar-pareto-cardinality}
@@ -2813,21 +2789,21 @@ Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},
 
 命题~\ref{prop:pstar-d-structure} 又说明每个可达直方图至多对应一个 $P^\star$ 值，因此代价水平数不超过 $|\mathcal H_{\mathrm{reachable}}|$。可达直方图由可达 D 向量诱导，所以其数量不超过 $\prod_i|\mathcal D_i|$。另一方面，若暂时忽略每条报文各自的可达集合限制，只计数 $r$ 个 D 值上的非负整数重数且总和为 $n$ 的直方图，stars-and-bars 给出 $\binom{n+r-1}{r-1}$ 个可能向量。实际可达直方图只是其中的子集，故式~\eqref{eq:appendix-pstar-histogram-bound} 成立；该组合数不是“每个直方图均可达”的断言。
 
-最后固定任一软件水平 $P^\star=p$。在所有具有该第二维坐标的不同目标向量中，只有 $Q^{\mathrm{ss}}$ 最小者可能非支配；同层更大的 $Q^{\mathrm{ss}}$ 被它支配。因此每个软件水平至多贡献一个不同的非支配目标向量，得到式~\eqref{eq:appendix-pareto-level-bound}。Peak 约束若存在，只会缩小可行 assignment 集，不改变这一计数论证。
+最后固定任一软件水平 $P^\star=p$。在所有具有该第二维坐标的不同目标向量中，只有 $Q^{\mathrm{ss}}$ 最小者可能非支配；同层更大的 $Q^{\mathrm{ss}}$ 被它支配。因此每个软件水平至多贡献一个不同的非支配目标向量，得到式~\eqref{eq:appendix-pareto-level-bound}。Peak 约束若存在，只会缩小可行分配集合，不改变这一计数论证。
 \end{proof}
 
-该推论提供的是结构性上界，不保证达到等号，也不能把目标向量数解释为 Offset 分配数。特别地，多个 assignment 可以共享同一目标向量，而不同可达直方图也可以共享同一软件代价水平。
+该推论提供的是结构性上界，不保证达到等号，也不能把目标向量数解释为 Offset 分配数。多个分配可以共享同一目标向量，不同可达直方图也可以共享同一软件代价水平。
 
 \subsection{两报文严格冲突构造的完整枚举}
 \label{subsec:appendix-two-message-conflict-proof}
 
-本节补全命题~\ref{prop:two-message-strict-conflict}。证明在正文式~\eqref{eq:two-message-conflict-instance} 的实例上枚举四个 Offset assignment 及全部可能的两报文分组，然后直接比较完整目标像。
+本节补全命题~\ref{prop:two-message-strict-conflict}。证明在正文式~\eqref{eq:two-message-conflict-instance} 的实例上枚举四种 Offset 分配及全部可能的两报文分组，然后直接比较完整目标像。
 
 取 $T_1=T_2=20\,\mathrm{ms}$、$\Oset_1=\Oset_2=\{20,25\}\,\mathrm{ms}$、$w_1=w_2=w>0$、$\rho>0$，稳态窗口为 $[25,45)\,\mathrm{ms}$，时隙宽度为 $5\,\mathrm{ms}$。Offset 20 在窗口内于 $40\,\mathrm{ms}$ 释放，Offset 25 于 $25\,\mathrm{ms}$ 释放，每条报文恰释放一次。表~\ref{tab:appendix-two-message-enumeration} 使用毫秒倒数的无公共尺度成本；生产值只相差不改变排序的正比例因子。
 
 \begin{table}[htbp]
 \centering
-\caption{两报文实例的四个 Offset assignment 与完整目标值}
+\caption{两报文实例的四种 Offset 分配与完整目标值}
 \label{tab:appendix-two-message-enumeration}
 \scriptsize
 \setlength{\tabcolsep}{3.2pt}
@@ -2844,7 +2820,7 @@ $(25,25)$ & 同槽 & $4w^2$ & $(5,5)$ & $(\rho+2)/5$ & $2(\rho+1)/5$ & $(\rho+2)
 \end{table}
 
 \begin{proof}[命题~\ref{prop:two-message-strict-conflict} 的完整证明]
-两报文只有合并和两个单例两种无序划分，表中已经全部列出。对于 $(20,20)$，合并成本比两个单例少 $\rho/20>0$，故 $P^\star=(\rho+2)/20$；对 $(25,25)$ 同理有 $P^\star=(\rho+2)/5$。两个混合 assignment 只交换报文身份，在当前身份对称成本下产生相同目标向量，其 $P^\star$ 为 $(\rho+2)/5$ 与 $(\rho+1)/4$ 的较小者。
+两报文只有合并和两个单例两种无序划分，表中已经全部列出。对于 $(20,20)$，合并成本比两个单例少 $\rho/20>0$，故 $P^\star=(\rho+2)/20$；对 $(25,25)$ 同理有 $P^\star=(\rho+2)/5$。两个混合分配只交换报文身份，在当前不区分报文身份的成本下产生相同目标向量，其 $P^\star$ 为 $(\rho+2)/5$ 与 $(\rho+1)/4$ 的较小者。
 
 记 A 为 $(20,20)$，B 为任一混合方案。对任意 $\rho>0$，
 \begin{equation}
@@ -2853,7 +2829,7 @@ $(25,25)$ & 同槽 & $4w^2$ & $(5,5)$ & $(\rho+2)/5$ & $2(\rho+1)/5$ & $(\rho+2)
  \frac{\rho+2}{20}<\frac{\rho+1}{4},
 \label{eq:appendix-two-message-pstar-order}
 \end{equation}
-故 $P_A^\star<P_B^\star$；同时 $Q_B^{\mathrm{ss}}=2w^2<4w^2=Q_A^{\mathrm{ss}}$。因此 A 与 B 在两个最小化目标上严格不可比。$(25,25)$ 与 A 具有相同的 $Q^{\mathrm{ss}}$，但软件成本严格更高，故受 A 支配。两个混合 assignment 又映射到同一个 B。由此，完整目标像恰有 A、B 两个非支配目标点。
+故 $P_A^\star<P_B^\star$；同时 $Q_B^{\mathrm{ss}}=2w^2<4w^2=Q_A^{\mathrm{ss}}$。因此 A 与 B 在两个最小化目标上严格不可比。$(25,25)$ 与 A 具有相同的 $Q^{\mathrm{ss}}$，但软件成本严格更高，故受 A 支配。两个混合分配又映射到同一个 B。由此，完整目标像恰有 A、B 两个非支配目标点。
 \end{proof}
 
 A 与 B 的 Peak 分别为 $2w$ 与 $w$。上述两点前沿结论适用于没有 Peak 约束，或 Peak 预算同时接纳两者的情形；若预算位于 $[w,2w)$，A 被排除，严格权衡可从可行域中消失。因此该构造只证明两个目标一般不天然同向，不证明每个真实网段、每个预算或每次有限外层搜索都必然产生多点前沿。
@@ -3046,7 +3022,7 @@ IC & 32/21 & $44\,001\,873$ & 否 \\
 DK 在池规模由 1 增至 4 时，$Q^{\mathrm{ss}}$ 由 $17\,384\,489$ 降至 $17\,079\,489$，且分配方案发生变化；继续扩大请求规模没有观察到更低的 $Q^{\mathrm{ss}}$。GL 与 IC 在所测规模内均返回单候选结果。该现象说明候选池有时能够提供不同的相位搜索入口，但收益具有实例依赖性；它既不能证明候选池对一般实例有效，也不能据此把池规模 4 认定为最优配置。
 
 \noindent\textbf{3-opt 消融。}
-第~\ref{subsubsec:gcls-three-opt}~节的 3-opt 只在冲突导向筛选后的有限三报文集合内枚举候选，且默认关闭。为隔离其作用，表~\ref{tab:appendix-three-opt} 比较同一单候选入口在关闭和启用该扩展时的结果。
+第~\ref{subsubsec:gcls-balanced-pool}~节说明的 3-opt 只在冲突导向筛选后的有限三报文集合内枚举候选，且默认关闭。为隔离其作用，表~\ref{tab:appendix-three-opt} 比较同一单候选入口在关闭和启用该扩展时的结果。
 
 \begin{table}[htbp]
 \centering
