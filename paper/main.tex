@@ -1,0 +1,2917 @@
+% !TeX program = xelatex
+% !TeX encoding = UTF-8
+\documentclass[UTF8,a4paper,twoside,zihao=-4]{ctexart}
+
+\usepackage[a4paper,top=2.8cm,bottom=2.5cm,left=2.5cm,right=2.5cm,headheight=0.45cm,headsep=0.75cm,footskip=1.0cm]{geometry}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\usepackage{setspace}
+\usepackage{indentfirst}
+\usepackage{ragged2e}
+\usepackage{amsmath,mathtools,amsthm}
+\usepackage{unicode-math}
+\usepackage{graphicx}
+\usepackage{booktabs,longtable,tabularx,array,multirow}
+\usepackage{algorithm2e}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{placeins}
+\usepackage{siunitx}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{tocloft}
+\usepackage{etoolbox}
+
+% 中文正文采用宋体/黑体，西文、数字和西文符号采用 Times New Roman。
+% 编译环境中已安装 Times New Roman；仅粗体、斜体在缺少对应字形时使用字体级仿粗/仿斜。
+\setmainfont{Times New Roman}[AutoFakeBold=2.0,AutoFakeSlant=0.18]
+% Windows 环境优先使用模板指定的宋体、黑体；其他 TeX Live 环境回退到同类 Fandol 字体。
+\IfFontExistsTF{SimSun}{%
+  \setCJKmainfont{SimSun}[AutoFakeBold=2.0,ItalicFont=KaiTi]
+  \setCJKsansfont{SimHei}[AutoFakeBold=2.0]
+  \setCJKmonofont{FangSong}
+  \setCJKfamilyfont{zhsong}{SimSun}[AutoFakeBold=2.0]
+  \setCJKfamilyfont{zhhei}{SimHei}[AutoFakeBold=2.0]
+  \setCJKfamilyfont{zhkai}{KaiTi}
+  \setCJKfamilyfont{zhfs}{FangSong}
+}{%
+  \setCJKmainfont{FandolSong-Regular.otf}[BoldFont=FandolSong-Bold.otf,ItalicFont=FandolKai-Regular.otf]
+  \setCJKsansfont{FandolHei-Regular.otf}[BoldFont=FandolHei-Bold.otf]
+  \setCJKmonofont{FandolFang-Regular.otf}
+  \setCJKfamilyfont{zhsong}{FandolSong-Regular.otf}[BoldFont=FandolSong-Bold.otf]
+  \setCJKfamilyfont{zhhei}{FandolHei-Regular.otf}[BoldFont=FandolHei-Bold.otf]
+  \setCJKfamilyfont{zhkai}{FandolKai-Regular.otf}
+  \setCJKfamilyfont{zhfs}{FandolFang-Regular.otf}
+}
+\setmathfont{STIX Math}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black,
+  pdftitle={一种周期报文 Offset 均衡与软件调度代价的协同优化方法},
+  pdfauthor={辛昊},
+  pdfsubject={本科生毕业设计（论文）}
+}
+\urlstyle{same}
+
+% 模板正文：小四号、1.5 倍行距、首行缩进 2 字符、段前段后为 0。
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0pt}
+\onehalfspacing
+\raggedbottom
+\setlength{\emergencystretch}{2em}
+\setlength{\abovedisplayskip}{0.55\baselineskip}
+\setlength{\belowdisplayskip}{0.55\baselineskip}
+\setlength{\abovedisplayshortskip}{0.30\baselineskip}
+\setlength{\belowdisplayshortskip}{0.40\baselineskip}
+\setlist[itemize]{leftmargin=2em,itemsep=0pt,topsep=0.35em,partopsep=0pt,parsep=0pt}
+\setlist[enumerate]{leftmargin=2.5em,itemsep=0pt,topsep=0.35em,partopsep=0pt,parsep=0pt}
+\setcounter{topnumber}{5}
+\setcounter{bottomnumber}{3}
+\setcounter{totalnumber}{8}
+\renewcommand{\topfraction}{0.90}
+\renewcommand{\bottomfraction}{0.80}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.85}
+
+% 标题格式：章标题四号宋体加粗居中；节、小节小四号宋体加粗左对齐。
+% 标题编号与标题文字之间统一空一个汉字宽度。
+\ctexset{
+  section = {
+    format = \centering\songti\bfseries\zihao{4},
+    aftername = \hspace{1em},
+    beforeskip = 0pt,
+    afterskip = 0.75\baselineskip
+  },
+  subsection = {
+    format = \raggedright\songti\bfseries\zihao{-4},
+    aftername = \hspace{1em},
+    beforeskip = 0.65\baselineskip,
+    afterskip = 0.28\baselineskip
+  },
+  subsubsection = {
+    format = \raggedright\songti\bfseries\zihao{-4},
+    aftername = \hspace{1em},
+    beforeskip = 0.50\baselineskip,
+    afterskip = 0.22\baselineskip
+  }
+}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+
+% 图、表、公式和算法按章编号。
+\numberwithin{equation}{section}
+\numberwithin{figure}{section}
+\numberwithin{table}{section}
+\renewcommand{\thefigure}{\thesection-\arabic{figure}}
+\renewcommand{\thetable}{\thesection-\arabic{table}}
+\DeclareCaptionFont{songfive}{\songti\zihao{5}}
+\captionsetup{font=songfive,labelfont=normalfont,labelsep=space,justification=centering,singlelinecheck=true}
+\captionsetup[table]{position=top,skip=5pt}
+\captionsetup[figure]{position=bottom,skip=5pt}
+\AtBeginEnvironment{tabular}{\songti\zihao{5}\singlespacing}
+\AtBeginEnvironment{tabularx}{\songti\zihao{5}\singlespacing}
+\AtBeginEnvironment{longtable}{\songti\zihao{5}\singlespacing}
+
+% 目录及图表清单格式。
+\renewcommand{\contentsname}{目\hspace{2em}录}
+\renewcommand{\listfigurename}{插图清单}
+\renewcommand{\listtablename}{表格清单}
+\renewcommand{\cfttoctitlefont}{\hfill\heiti\bfseries\zihao{-2}}
+\renewcommand{\cftaftertoctitle}{\hfill}
+\renewcommand{\cftloftitlefont}{\hfill\heiti\bfseries\zihao{-2}}
+\renewcommand{\cftafterloftitle}{\hfill}
+\renewcommand{\cftlottitlefont}{\hfill\heiti\bfseries\zihao{-2}}
+\renewcommand{\cftafterlottitle}{\hfill}
+\renewcommand{\cftsecfont}{\heiti\bfseries\zihao{-4}}
+\renewcommand{\cftsecpagefont}{\rmfamily\bfseries\zihao{-4}}
+\renewcommand{\cftsubsecfont}{\songti\zihao{-4}}
+\renewcommand{\cftsubsecpagefont}{\rmfamily\zihao{-4}}
+\renewcommand{\cftsubsubsecfont}{\songti\zihao{-4}}
+\renewcommand{\cftsubsubsecpagefont}{\rmfamily\zihao{-4}}
+\renewcommand{\cftsecaftersnum}{\hspace{1em}}
+\renewcommand{\cftsubsecaftersnum}{\hspace{1em}}
+\renewcommand{\cftsubsubsecaftersnum}{\hspace{1em}}
+\setlength{\cftsubsecindent}{2em}
+\setlength{\cftsubsubsecindent}{4em}
+\renewcommand{\cftfigfont}{\songti\zihao{-4}}
+\renewcommand{\cftfigpagefont}{\rmfamily\zihao{-4}}
+\renewcommand{\cfttabfont}{\songti\zihao{-4}}
+\renewcommand{\cfttabpagefont}{\rmfamily\zihao{-4}}
+\setlength{\cftfigindent}{0pt}
+\setlength{\cfttabindent}{0pt}
+\setlength{\cftbeforefigskip}{0.20\baselineskip}
+\setlength{\cftbeforetabskip}{0.20\baselineskip}
+
+% 奇偶页页眉与居中页码：奇数页为学校名，偶数页为姓名和完整题目。
+\newcommand{\fullpapertitle}{一种周期报文 Offset 均衡与软件调度代价的协同优化方法}
+\newcommand{\evenpageheader}{辛昊：\fullpapertitle}
+\fancypagestyle{thesis}{
+  \fancyhf{}
+  \fancyhead[CO]{\songti\zihao{-5}安徽信息工程学院毕业设计（论文）}
+  \fancyhead[CE]{\songti\zihao{-5}\evenpageheader}
+  \fancyfoot[C]{\rmfamily\zihao{-5}\thepage}
+  \renewcommand{\headrulewidth}{0.4pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyhead[CO]{\songti\zihao{-5}安徽信息工程学院毕业设计（论文）}
+  \fancyhead[CE]{\songti\zihao{-5}\evenpageheader}
+  \fancyfoot[C]{\rmfamily\zihao{-5}\thepage}
+  \renewcommand{\headrulewidth}{0.4pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\fancypagestyle{firstbody}{
+  \fancyhf{}
+  \fancyfoot[C]{\rmfamily\zihao{-5}\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\pagestyle{thesis}
+
+
+% 参考文献标题沿用章节标题格式：四号宋体加粗居中，并与正文空一行。
+\renewcommand{\refname}{参考文献}
+\theoremstyle{definition}
+\newtheorem{definition}{定义}
+\newtheorem{proposition}{命题}
+\newtheorem{lemma}{引理}
+\newtheorem{theorem}{定理}
+\newtheorem{remark}{说明}
+\renewcommand{\proofname}{\normalfont 证明}
+
+\DeclareMathOperator{\lcm}{lcm}
+\DeclareMathOperator{\argmin}{arg\,min}
+\DeclareMathOperator{\Var}{Var}
+\newcommand{\ind}[1]{\mathbf{1}_{\{#1\}}}
+\newcommand{\Oset}{\mathcal{A}}
+\newcommand{\Rset}{\mathcal{R}}
+\newcommand{\Sset}{\mathcal{S}}
+\newcommand{\Mset}{\mathcal{M}}
+\newcommand{\Hset}{\mathcal{H}}
+\newcommand{\Eset}{\mathcal{E}}
+\newcommand{\Pset}{\mathcal{P}}
+\newcommand{\Xset}{\mathcal{X}}
+\newcommand{\Fset}{\mathcal{F}}
+
+\SetKwInput{KwInput}{输入}
+\SetKwInput{KwOutput}{输出}
+\SetKw{KwTo}{至}
+\SetKw{KwAnd}{且}
+\SetKw{KwBreak}{跳出}
+\SetKwFunction{Evaluate}{Evaluate}
+\SetKwFunction{Apply}{Apply}
+\SetKwFunction{Remove}{Remove}
+\SetKwFunction{Greedy}{GreedyConstruct}
+\SetKwFunction{Local}{SingleRelocation}
+\SetKwFunction{Pair}{ConflictPairSearch}
+\SetAlgorithmName{算法}{算法}{算法目录}
+\SetAlgoCaptionSeparator{：}
+\numberwithin{algocf}{section}
+\renewcommand{\thealgocf}{\thesection-\arabic{algocf}}
+\newcommand{\PaperAlgorithmStyle}{\small}
+\newcommand{\PaperAlgorithmCaption}[1]{%
+  \DontPrintSemicolon
+  \mbox{}\;
+  \noindent\hbox to\hsize{\hfil{\songti\zihao{5}算法~\thealgocf：#1}\hfil}\;
+  \PrintSemicolon
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  showstringspaces=false
+}
+
+% 封面信息栏。
+\newcommand{\coverlabel}[2]{%
+  \node[anchor=base east,font=\songti\bfseries\fontsize{16pt}{20pt}\selectfont]
+    at (6.15,#1) {\makebox[3.35cm][s]{#2}};%
+}
+\newcommand{\coverfield}[2]{%
+  \node[anchor=base,align=center,text width=11.45cm,
+        font=\songti\fontsize{14pt}{18pt}\selectfont]
+    at (12.40,#1) {#2};%
+  \draw[line width=0.45pt] (6.65,#1+0.28) -- (18.15,#1+0.28);%
+}
+\newcommand{\makecover}{%
+  \thispagestyle{empty}%
+  \begin{tikzpicture}[remember picture,overlay,x=1cm,y=-1cm]
+    \coordinate (O) at (current page.north west);
+    \begin{scope}[shift={(O)}]
+      \node[anchor=north] at (10.5,2.95)
+        {\includegraphics[width=11.66cm]{school_header.png}};
+      \node[anchor=north,align=center,font=\songti\bfseries\fontsize{26pt}{31pt}\selectfont]
+        at (10.5,7.75) {2027 届本科生毕业设计（论文）};
+      \coverlabel{12.20}{题\hfil 目}
+      \node[anchor=base,align=center,text width=11.45cm,
+            font=\songti\fontsize{14pt}{18pt}\selectfont]
+        at (12.40,12.20) {一种周期报文 Offset 均衡与};
+      \draw[line width=0.45pt] (6.65,12.51) -- (18.15,12.51);
+      \node[anchor=base,align=center,text width=11.45cm,
+            font=\songti\fontsize{14pt}{18pt}\selectfont]
+        at (12.40,12.92) {软件调度代价的协同优化方法};
+      \draw[line width=0.45pt] (6.65,13.23) -- (18.15,13.23);
+      \coverlabel{14.35}{学\hfil 生\hfil 姓\hfil 名}
+      \coverfield{14.35}{辛昊}
+      \coverlabel{15.50}{学\hfil 号}
+      \coverfield{15.50}{{\rmfamily\zihao{4}3233011627}}
+      \coverlabel{16.65}{专\hfil 业\hfil 班\hfil 级}
+      \coverfield{16.65}{计算机科学与技术2306班}
+      \coverlabel{17.80}{学\hfil 院}
+      \coverfield{17.80}{计算机与软件工程学院}
+      \coverlabel{18.95}{指\hfil 导\hfil 老\hfil 师}
+      \coverfield{18.95}{时雪涵}
+      \coverlabel{20.10}{完\hfil 成\hfil 日\hfil 期}
+      \coverfield{20.10}{\rmfamily 2027\songti 年\rmfamily 5\songti 月\rmfamily 4\songti 日}
+      \node[anchor=south,align=center,font=\songti\bfseries\fontsize{16pt}{20pt}\selectfont]
+        at (10.5,27.05) {教务处\quad 制};
+    \end{scope}
+  \end{tikzpicture}%
+  \null\clearpage
+}
+
+\newcommand{\fronttitlecn}[1]{%
+  \begin{center}
+    \heiti\bfseries\zihao{-2}#1
+  \end{center}
+  \vspace{\baselineskip}
+}
+\newcommand{\fronttitleen}[1]{%
+  \begin{center}
+    \rmfamily\bfseries\zihao{-2}#1
+  \end{center}
+  \vspace{\baselineskip}
+}
+
+\begin{document}
+\makecover
+
+% 前置部分采用大写罗马数字页码。
+\pagenumbering{Roman}
+\setcounter{page}{1}
+
+\fronttitlecn{摘\hspace{2em}要}
+\noindent\hspace*{\parindent}车载周期报文的 Offset 配置既决定总线时间轴上的释放相位，也会影响 ECU 软件侧周期入口的调用周期。针对通信侧局部释放均衡与软件周期调度代价通常分开处理的问题，本文提出一种面向周期 CAN/CAN FD 报文的 Offset 协同优化方法。通信侧在统一离散时间轴上建立带权释放负载模型，以稳态峰值和负载平方和分别刻画局部聚集与整体均衡，并采用 GCLS 启发式方法在有限 Offset 空间中搜索相位配置。
+
+在共同整数时间原点与精确周期触发假设下，本文进一步建立 Offset 与软件调用周期之间的耦合关系，推导单报文最大可行调用周期，并构造反映周期入口调用结构的 CPU 开销代理指标。给定 Offset 分配后，MainFunction 分组可通过 D 类型压缩与确定性子集动态规划精确求解，由此形成“外层 Offset 启发式搜索—内层软件分组精确求解”的分层结构。在此基础上，采用带峰值约束的 $\varepsilon$-constraint 方法协调通信均衡与软件调度代价，并通过观测 Pareto 前沿及几何膝点刻画和选择不同 CPU 预算下的折中方案。
+
+在九个真实 CAN FD 网段上的实验表明，相较原始配置，Peak 模式在其中六个网段降低了稳态峰值；CAN--CPU 联合优化中，六个网段形成多点观测 Pareto 前沿，三个网段未观察到明显的软件侧权衡；固定 Offset 下的 MainFunction 分组结果经独立枚举对照验证。结果表明，Offset 调整能够有效重塑周期报文的局部释放分布，但通信收益与软件调度代价之间的权衡具有明显的网段依赖性。在此基础上，本文方法已形成面向实际工程输入的优化工具，该工具已经投入实际工程使用，并在实际应用中观察到明显的周期释放热点改善。
+
+\noindent{\heiti\bfseries\zihao{-4}关键词：}{\songti\zihao{-4}CAN FD； 周期报文； Offset； GCLS； 协同优化}
+
+\clearpage
+\fronttitleen{ABSTRACT}
+\begingroup
+\rmfamily\zihao{-4}\justifying
+\noindent\hspace*{\parindent}The Offset configuration of periodic in-vehicle messages determines their release phases on the bus timeline and also affects the invocation periods of periodic entry functions on the ECU software side. To address the common separation between local release balancing in communication and software scheduling cost optimization, this thesis proposes a joint Offset optimization method for periodic CAN/CAN FD messages. On the communication side, a weighted release-load model is established on a unified discrete timeline. The steady-state peak and the sum of squared loads are used to characterize local clustering and overall balance, respectively, while a GCLS heuristic searches for phase configurations in a finite Offset space.
+
+Under the assumptions of a common integer time origin and exact periodic triggering, the coupling between Offset and software invocation periods is further established. The maximum feasible invocation period of a single message is derived, and a CPU cost proxy is constructed to represent the invocation structure of periodic entry functions. Given an Offset assignment, MainFunction grouping can be solved exactly through D-type compression and deterministic subset dynamic programming, forming a hierarchical architecture with heuristic Offset search in the outer layer and exact software grouping in the inner layer. On this basis, a peak-constrained $\varepsilon$-constraint method coordinates communication balancing and software scheduling cost. Observed Pareto fronts and geometric knee points are then used to characterize and select trade-off solutions under different CPU budgets.
+
+Experiments on nine real CAN FD networks show that, compared with the original configurations, Peak mode reduces the steady-state peak on six networks. In the joint CAN--CPU optimization, six networks exhibit multi-point observed Pareto fronts, while no evident software-side trade-off is observed on the remaining three. The MainFunction grouping results under fixed Offset assignments are independently verified by enumeration. These results indicate that Offset adjustment can effectively reshape the local release distribution of periodic messages, whereas the trade-off between communication benefit and software scheduling cost is strongly network-dependent. The proposed method has also been implemented as an optimization tool for practical engineering inputs, deployed in engineering use, and shown to produce clear improvements in periodic-release hotspots in practical applications.
+
+\par\noindent{\rmfamily\bfseries\zihao{-4}Key words:} {\rmfamily\zihao{-4}CAN FD; periodic messages; Offset; GCLS; joint optimization}
+\endgroup
+
+\clearpage
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+
+% 正文改用阿拉伯数字页码。
+\pagenumbering{arabic}
+\setcounter{page}{1}
+\thispagestyle{firstbody}
+\begin{center}
+  {\heiti\bfseries\zihao{-2}\fullpapertitle\par}
+  \vspace{0.8\baselineskip}
+  {\songti\zihao{5}（计算机与软件工程学院 2027届 计算机科学与技术2306班）\quad 指导教师：时雪涵\par}
+\end{center}
+\vspace{0.75\baselineskip}
+\section{引言}
+
+\subsection{问题背景与研究动机}
+
+车载控制、状态监测与故障诊断等功能持续产生具有固定周期的通信需求。周期报文在长期尺度上的平均发送量通常较为稳定，但多条报文可能因初始相位接近，或因周期之间的倍数关系而在某些局部时间范围内集中释放。对于采用优先级仲裁且同一时刻只能传输一帧的 CAN 与 CAN FD 总线，这种释放聚集会形成短时竞争；即使平均负载并不高，也不能据此判断局部时间窗口内不存在较大的发送压力。
+
+Offset 决定周期序列相对于公共时间原点的初始相位，因而为改变局部释放分布提供了配置自由度。在不改变报文周期和单次发送工作量的前提下，调整 Offset 不会改变长期平均释放工作量，却能够改变各次释放在有限时间窗口内的位置。由此，周期通信中的局部聚集并非只能被动接受，而可以转化为有限 Offset 候选空间中的配置问题。要使这种配置具有可比较性，还需要同时考虑报文帧长和传输时间的差异，而不能仅以“错开发送”作为评价依据。
+
+然而，Offset 并不是一个只影响总线时间轴的“免费”变量。周期报文最终需要由 ECU 软件中的周期入口组织和触发；以 AUTOSAR COM 为例，\texttt{Com\_\allowbreak Main\allowbreak FunctionTx} 及其调度基准周期为周期发送提供了软件执行入口\cite{autosarcom}。一个周期入口若要同时覆盖若干报文，既要与这些报文的周期关系相容，也要能够表达各自的释放相位。Offset 的改变因此可能迫使周期入口采用更短的调用周期，使其调用更加频繁，并增加单位时间内固定调度开销的累积量。对 CAN 侧有利的相位分散，未必有利于软件侧的周期组织；反之，便于合并软件入口的相位配置，也未必能够缓解总线上的局部释放聚集。
+
+同一 Offset 由此连接了两个通常分开处理的问题：它在通信侧决定周期流的释放相位，在软件侧约束周期入口能够采用的调用周期。若只优化 CAN 侧的局部均衡，所得改善可能以更短的调用周期和更高的调用频率为代价；若只压低软件侧的周期调用开销，又可能重新造成报文集中释放。本文据此关注如下核心问题：如何在离散 Offset 配置空间中，在改善 CAN 局部释放分布的同时控制软件周期调度代价，并为二者发生冲突时提供可解释的折中方案？
+
+\subsection{相关研究与本文定位}
+
+CAN/CAN FD 周期报文的 Offset 与相位配置首先服务于通信时序分析。经典响应时间分析从固定优先级非抢占传输中的阻塞与高优先级干扰出发，建立报文最坏响应时间和可调度性判据\cite{tindell1994}；在此基础上，CAN Offset 配置与 Offset-aware 响应时间分析表明，利用相位关系使周期流去同步，能够改善部分高负载场景的时序表现\cite{grenier2008,yomsi2012}。这些工作确立了 Offset 作为通信配置自由度的意义。本文不以离散释放负载替代完整的响应时间或可调度性分析，而是在有限 Offset 候选上评价各稳态时隙中的带权释放聚集。
+
+周期任务与周期资源的 phase 分配还形成了独立的峰值最小化研究方向。周期监测请求调度通过选择请求起始相位降低服务器峰值负载，并给出了复杂性与启发式算法结果\cite{zeng2006periodic}；后续研究指出，当周期以紧凑数值给出且验证需要处理隐式超周期时，输入表示会改变问题的复杂度分类\cite{short2010periodic}。这类结果与本文的峰值目标相近，也说明复杂性结论必须连同编码方式陈述。本文第3章考察的是另一种明确受限的输入：有限 Offset 候选及其稳态时隙命中列表均被显式给出，且每次命中带有正整数权重。
+
+在软件执行侧，AUTOSAR COM 规范规定了 \texttt{Com\_\allowbreak Main\allowbreak FunctionTx} 与 \texttt{Com\allowbreak MainTx\allowbreak TimeBase} 等周期发送配置语义\cite{autosarcom}，基础软件调度研究则讨论了周期入口的组织及平台执行成本\cite{zhang2011autosar,denil2011devs}。任务--消息协同调度还对周期、Offset、deadline 与抖动约束进行联合配置，说明计算与通信时序可以在统一模型中处理\cite{pimentel2007,minaeva2018,lesi2020}。更接近本文软件结构的 runnable-to-task 映射工作已经利用 activation Offset 组织不同周期 runnable，并以周期与 Offset 的最大公约数约束任务周期\cite{khenfri2015,khenfri2020}。其主要目标是任务数量、响应时间与可调度性；本文沿用这一已知的 Offset/gcd 关系，但将对象限定为 MainFunction 分组，并采用只依赖组内报文数和共同调用周期、而不依赖报文身份的代理成本。
+
+固定 Offset 后的软件分组属于集合划分问题。通用集合划分的指数时间精确算法已有系统研究\cite{bjorklund2009}，调度问题中按不同数值或类型数量进行参数化求解也已有成熟背景\cite{mnich2015}；因此，子集动态规划和 distinct-type 参数化思想本身并非本文的新颖点。对于通信与软件两个不同量纲的目标，Pareto 支配、$\varepsilon$-constraint 与膝点同样是成熟的多目标分析工具\cite{mavrotas2009,debgupta2011}。本文的具体区别在于：同一 Offset 同时进入显式稳态时隙的带权释放评价和特定身份对称的 MainFunction 代理成本；固定 Offset 后的软件分组采用精确内层，而外层仅对实际搜索到的 Offset 候选形成观测结果，并与可精确分析的 D 结构严格区分。
+
+\subsection{研究方法与主要贡献}
+
+围绕外层 Offset 组合选择、固定 Offset 后的软件分组及二者的联合评价，本文形成以下六项主要贡献。
+
+\begin{enumerate}
+  \item 建立周期报文 Offset 的带权离散时隙模型，以 Peak 与 $Q^{\mathrm{ss}}$ 分别刻画局部峰值和稳态整体均衡；同时由周期与 Offset 的最大公约数刻画单报文最大可行调用周期，使通信释放位置与软件调用周期在同一 Offset 决策上形成明确耦合。
+
+  \item 针对有限候选及稳态命中列表均显式给出的带权 Offset 峰值判定模型，证明其即使在同周期、二候选和二时隙的受限情形下仍为 NP-complete，并据此刻画外层 Offset 组合选择的最坏情形困难性；该结论不扩展为对隐式超周期表示或真实帧时间权重子类的宽泛断言。
+
+  \item 固定完整 Offset 后，利用当前 gcd 型、身份对称组成本的 same-D 结构，把报文级 MainFunction 分组压缩为带重数的 D 类型集合划分，并以确定性子集动态规划精确求解。该贡献落在特定成本的结构保持与精确内层，而非通用集合划分递推本身。
+
+  \item 在上述复杂度背景下采用 GCLS 处理外层 Offset 搜索，将其定位为对实际网段规模、解质量、可复现性和运行时间预算的工程权衡。小规模精确枚举、CP-SAT 与分支定界仍可用于对照或受控实例，NP-hardness 并不排除这些方法。
+
+  \item 在固定 Offset 精确内层之上构造受 Peak 约束的 $\varepsilon$-constraint CAN--CPU 联合搜索，并以观测 Pareto 前沿组织候选。D 直方图对软件代价的压缩、通信与软件目标的冲突以及九网段结构结果在引言中仅作主线预告，其完整性质和证据边界由后续章节展开。
+
+  \item 实现面向实际工程输入的 Offset 优化工具，并在九个真实 CAN FD 网段上分别验证通信侧搜索、固定 Offset 精确内层与有限预算联合候选。工程工具、理论性质和九网段实验各承担不同证据角色，不作重复计数。
+\end{enumerate}
+
+固定 Offset 后的 MainFunction 分组能够精确求解，Offset 外层与联合搜索仍属于启发式；所得观测 Pareto 前沿仅描述已搜索候选。CPU 开销代理指标刻画调度结构代价，不等同于目标平台的实际 CPU 利用率。后文通过九个真实 CAN FD 网段验证上述方法及其网段依赖的权衡特征。
+
+\clearpage
+\section{问题描述与系统模型}
+
+本章从周期报文的释放序列出发，依次规定 Offset 的离散候选空间与评价时间域，明确进入模型的报文集合，并建立局部释放聚集的时隙评价量。前述对象共同回答 CAN 侧“Offset 改变什么、在何处观察以及如何评价”的问题；章末再说明同一 Offset 对软件调用周期的约束，为后续联合优化建立连接。
+
+\subsection{周期报文释放模型}
+
+周期报文的局部聚集，本质上来自多条周期序列在共同时间轴上的相位重合。Offset 决定各序列相对于公共时间原点的位置，因而分析相位调整对局部释放分布的作用，需要将周期与 Offset 统一表示为报文实例的释放序列。
+
+\begin{definition}[周期释放序列]
+设周期报文集合为
+\begin{equation}
+ \Mset=\{m_1,m_2,\ldots,m_N\}.
+\label{eq:message-set}
+\end{equation}
+
+对每条报文 $m_i$，定义其参数为
+\begin{equation}
+ m_i=(T_i,O_i,w_i,\Oset_i,\ldots).
+\label{eq:message-parameters}
+\end{equation}
+其中，$T_i$ 为周期，$O_i$ 为相对于共同时间原点的 Offset，$w_i$ 为一次释放的评价权重，$\Oset_i$ 为有限 Offset 候选集合。参数满足
+\begin{equation}
+ T_i>0,\qquad O_i\in\Oset_i,\qquad w_i>0.
+\label{eq:message-parameter-domain}
+\end{equation}
+
+报文 $i$ 的第 $k$ 次释放时刻为
+\begin{equation}
+ r_{i,k}=O_i+kT_i,\qquad k\in\mathbb Z_{\ge0}.
+\label{eq:release-model}
+\end{equation}
+相邻两次释放的间隔始终为
+\begin{equation}
+ r_{i,k+1}-r_{i,k}=T_i.
+\label{eq:release-spacing}
+\end{equation}
+\end{definition}
+
+所有时间量在进入模型前统一换算为同一整数时间单位；本文实现采用整数微秒，正文中的毫秒表示仅为等价换算。式\eqref{eq:release-model}中的释放是报文实例进入总线竞争或软件发送处理的模型时刻，并非实际传输开始时刻；后者还受到仲裁、阻塞、控制器队列和其他流量影响。由式\eqref{eq:release-spacing}可知，Offset 只移动释放序列的初始相位，不改变报文自身的释放间隔。
+
+释放间隔保持不变并不直接排除有限窗口内计数差异。为区分相位位置变化与长期工作量变化，记报文 $i$ 在半开区间 $[0,\tau)$ 内的释放次数为
+\begin{equation}
+ N_i(\tau;O_i)
+ =\left|\left\{k\in\mathbb Z_{\ge0}\mid
+ 0\le O_i+kT_i<\tau\right\}\right|.
+\label{eq:release-count-prefix}
+\end{equation}
+
+\begin{proposition}[Offset 的长期平均不变性]
+\label{prop:offset-invariance}
+当周期 $T_i$ 和单次权重 $w_i$ 固定时，单条报文的长期平均释放率满足
+\begin{equation}
+ \lim_{\tau\to\infty}\frac{N_i(\tau;O_i)}{\tau}
+ =\frac{1}{T_i}.
+\label{eq:single-rate}
+\end{equation}
+对有限报文集合加权求和，长期平均释放工作量为
+\begin{equation}
+ \lim_{\tau\to\infty}
+ \frac{\sum_{i=1}^{N}w_iN_i(\tau;O_i)}{\tau}
+ =\sum_{i=1}^{N}\frac{w_i}{T_i}.
+\label{eq:weighted-long-run-rate}
+\end{equation}
+两式右端均与 Offset 分配方案无关。
+\end{proposition}
+
+\begin{proof}
+当 $\tau>O_i$ 时，
+$N_i(\tau;O_i)=\left\lceil(\tau-O_i)/T_i\right\rceil$，其与
+$(\tau-O_i)/T_i$ 的差位于 $[0,1)$。两边除以 $\tau$ 并令
+$\tau\to\infty$，即可得到式\eqref{eq:single-rate}；再对有限报文集合按固定权重求和，得到式\eqref{eq:weighted-long-run-rate}。
+\end{proof}
+
+命题\ref{prop:offset-invariance}将 Offset 的作用限定在释放事件的时间位置，而非长期通信总量。局部峰值的变化来自有限时间范围内的相位差异及多条周期序列的重合方式。不同相位配置只有置于统一的离散时间体系中才具有可比性，这同时涉及 Offset 的可选空间以及观察释放分布的评价时间域。
+
+\subsection{离散 Offset 与评价时间窗口}
+
+有限时间内的释放分布只有在统一时间语义下才可比较。工程 Offset 来自有限候选，而评价量由离散时隙内的释放事件构成。本文将二者映射到同一整数时间轴：Offset 候选给出可行相位，时隙与窗口则规定同一时间轴上的观测尺度。
+
+设时隙宽度为 $\Delta>0$。对报文 $m_i$，给定候选下界 $O_i^{\min}$、候选上界 $O_i^{\max}$ 和步长 $\delta_i>0$，其 Offset 候选集合定义为
+\begin{equation}
+ \Oset_i
+ =\left\{O_i^{\min}+k\delta_i\ \middle|\
+ k\in\mathbb Z_{\ge0},\
+ O_i^{\min}+k\delta_i\le O_i^{\max}\right\}.
+\label{eq:offset-candidates}
+\end{equation}
+集合端点由规则栅格确定。令
+$k_i^{\max}=\left\lfloor
+ (O_i^{\max}-O_i^{\min})/\delta_i
+ \right\rfloor$，则最后一个合法候选为
+$O_i^{\rm last}=O_i^{\min}+k_i^{\max}\delta_i$。
+因此，即使 $O_i^{\max}$ 不在栅格上，也不会将其作为额外的栅格外候选；仅当
+$O_i^{\max}-O_i^{\min}$ 能被 $\delta_i$ 整除时，
+$O_i^{\rm last}=O_i^{\max}$。
+
+Offset 决策与释放评价共享同一离散时间轴，候选下界和步长必须与评价时隙满足统一对齐关系：
+\begin{equation}
+ O_i^{\min}\equiv0\pmod{\Delta},
+ \qquad
+ \delta_i\equiv0\pmod{\Delta}.
+\label{eq:offset-grid-alignment}
+\end{equation}
+由此，任意 $o\in\Oset_i$ 均落在公共时间栅格上。周期、Offset、时隙宽度和窗口边界均使用同一整数时间单位，使候选相位及其释放时刻能够无损映射到离散时隙。
+
+用 $x\in\{\mathrm{st},\mathrm{ss}\}$ 区分启动阶段与稳态阶段。对半开窗口 $I^x=[a_x,b_x)$，若其长度可被 $\Delta$ 整除，则窗口包含
+$M^x=(b_x-a_x)/\Delta$ 个时隙，索引集合为
+$\Sset^x=\{0,1,\ldots,M^x-1\}$。对任意 $s\in\Sset^x$，相应时隙为
+\begin{equation}
+ I_s^x=[a_x+s\Delta,\ a_x+(s+1)\Delta).
+\label{eq:slot-discretization}
+\end{equation}
+半开区间使位于公共边界上的释放只计入右侧时隙。
+
+稳态评价窗口若任意截取，边界截断可能使不同 Offset 对应不同的释放计数，从而混入统计总量差异。为使稳态比较只反映释放位置的分布，评价窗口覆盖完整周期结构。基础超周期及其评价长度定义为
+\begin{equation}
+ H_0=\lcm\{T_i\mid m_i\in\Mset\},
+ \qquad
+ H=qH_0,\quad q\in\mathbb Z_{>0}.
+\label{eq:evaluation-hyperperiod}
+\end{equation}
+由此，$H$ 是每个 $T_i$ 的整数倍；同时要求 $H/\Delta\in\mathbb Z_{>0}$，以保持窗口与公共时隙对齐。
+
+记候选集合中的最晚首次释放位置为
+$O_{\max}=\max_{m_i\in\Mset}O_i^{\rm last}$。启动与稳态窗口定义为
+\begin{equation}
+ I^x=
+ \begin{cases}
+  [0,O_{\max}), & x=\mathrm{st},\\
+  [O_{\max},O_{\max}+H), & x=\mathrm{ss}.
+ \end{cases}
+\label{eq:evaluation-windows}
+\end{equation}
+启动窗口保留首次释放延迟产生的边界效应；稳态窗口从最晚首次释放位置开始，并覆盖完整超周期。当 $O_{\max}=0$ 时，启动窗口为空，只评价稳态窗口。
+
+\begin{proposition}[完整超周期内的释放次数]
+\label{prop:hyperperiod-count}
+若 $O_i\le a$，且 $H$ 是 $T_i$ 的正整数倍，则报文 $m_i$ 在任意半开区间 $[a,a+H)$ 内恰好释放 $H/T_i$ 次。因此，在式\eqref{eq:evaluation-windows}定义的稳态窗口内，每条报文的释放总次数与其 Offset 无关。
+\end{proposition}
+
+\begin{proof}
+记 $H=q_iT_i$。释放点以 $T_i$ 为间隔，任意长度为 $T_i$ 的半开区间恰含一个释放点；将 $[a,a+H)$ 分为 $q_i$ 个互不重叠的此类区间，即得释放次数 $q_i=H/T_i$。
+\end{proof}
+
+完整超周期固定了稳态释放总量，使均衡指标只比较释放事件在窗口内的分布；启动窗口则保留首次释放的边界效应。实际求解仅对能够在统一整数时间单位下无损构造候选空间和评价窗口的实例进行评价。
+
+候选空间与评价窗口给出了优化实例的时间结构，而实例的组成还取决于周期序列是否具有明确的本机发送和相位归属语义。DBC 中的接收、事件及路由对象不能直接等同于可优化的本机周期发送报文，研究集合必须由相应资格关系确定。
+
+\subsection{研究对象与配置边界}
+\label{sec:eligible-set}
+
+统一时间模型中的报文并非 DBC 原始报文的全集，而是具有明确本机周期发送语义、且相位不受外部路由来源支配的对象。设原始报文集合为 $\Mset^{0}$，按发送节点、周期发送资格和路由来源依次筛选：
+\begin{equation}
+ \Mset^{0}
+ \ \longrightarrow\
+ \Mset^{\rm snd}
+ \ \longrightarrow\
+ \Mset^{\rm ptx}
+ \ \longrightarrow\
+ \Mset^{\rm ptx}\setminus\Xset^{\rm route}
+ \ =\ \Eset .
+\label{eq:eligible-chain}
+\end{equation}
+
+对每个 DBC 文件 $d$，工程输入显式给出所研究的本机发送节点集合 $\Sigma_d$。若报文 $m_i$ 的声明发送节点集合为 $\operatorname{Senders}(m_i)$，则本机发送报文集合为
+\begin{equation}
+ \Mset^{\rm snd}
+ =
+ \left\{m_i\in\Mset^{0}\ \middle|\
+ \Sigma_{d(i)}\cap\operatorname{Senders}(m_i)\ne\varnothing\right\}.
+\label{eq:selected-sender-set}
+\end{equation}
+本机发送资格仅由上述显式发送节点关系确定；一次优化实例对应明确的物理网段、DBC 与发送节点集合。
+
+在 $\Mset^{\rm snd}$ 中，具有有效正周期并按周期方式发送的 TX 报文构成 $\Mset^{\rm ptx}$。事件报文、接收报文、诊断触发流量以及周期发送语义无法确认的对象不满足这一资格。
+
+网关路由报文虽然可能出现在本机通信矩阵中，其相位却由其他网段或转发链决定。将目标网段 $\nu^\star$ 与无损规范化后的整数 CAN 标识组成匹配键
+\begin{equation}
+ \kappa_i=
+ \left(\nu^\star,\operatorname{NormID}(\mathrm{ID}_i)\right).
+\label{eq:routing-key}
+\end{equation}
+记 $\Rset$ 为权威路由数据源中的匹配键集合，则路由排除集合为
+\begin{equation}
+ \Xset^{\rm route}
+ =\left\{m_i\in\Mset^{\rm ptx}\mid\kappa_i\in\Rset\right\}.
+\label{eq:routed-message-set}
+\end{equation}
+实际评价集合为
+\begin{equation}
+ \Eset=\Mset^{\rm ptx}\setminus\Xset^{\rm route}.
+\label{eq:routing-exclusion}
+\end{equation}
+后文在不引起歧义时，以 $\Mset$ 简记该集合：
+\begin{equation}
+ \Mset\equiv\Eset.
+\label{eq:evaluation-set-alias}
+\end{equation}
+路由匹配以目标网段和数值化 CAN ID 为主键，报文名仅用于识别命名不一致或标识冲突。
+
+路由排除与“保留但固定”具有不同语义。$\Xset^{\rm route}$ 位于研究对象之外，不参与 CAN 或软件侧评价；当前联合优化以 $O^{\rm lim}$ 控制长周期报文的 Offset 搜索范围，并定义
+\begin{equation}
+ \Fset=\{m_i\in\Eset\mid T_i>O^{\rm lim}\}.
+\label{eq:fixed-long-period}
+\end{equation}
+对任意 $m_i\in\Fset$，候选集合固定为
+\begin{equation}
+ \Oset_i=\{0\}.
+\label{eq:fixed-long-period-offset}
+\end{equation}
+固定报文仍贡献时隙负载，只是不产生 Offset 决策自由度；该规则是控制联合搜索空间的工程策略。
+
+上述释放集合及筛选关系不依赖 Classic CAN 或 CAN FD，协议差异主要体现在合法帧格式和释放权重计算。工程输入中的原始 Offset 由 DBC 属性 \texttt{GenMsgStart\allowbreak Delay\allowbreak Time} 取得。
+
+集合 $\Eset$ 确定了参与评价的周期释放序列，但不同报文的一次释放对应不同的总线服务需求，差异来自帧长、帧格式和传输速率。单纯统计同一时隙内的报文条数不足以完整表征局部发送压力，这种差异需要通过释放权重进入时隙负载。
+
+\subsection{CAN 释放负载的离散时隙评价}
+
+\subsubsection{释放权重}
+\label{subsubsec:frame-payload-unit-weight}
+
+将 $\Eset$ 中不同报文的释放事件叠加到同一时隙，需要先用权重 $w_i$ 表示一次释放的相对工作量。设 $\ell_i$ 为报文 $m_i$ 的 Payload 字节数，$\widehat C_i$ 为依据协议字段与通道定时参数得到的整数微秒帧时间估计，定义
+\begin{equation}
+ w_i=
+ \begin{cases}
+  \widehat C_i, & \text{帧时间权重},\\
+  \max(1,\ell_i), & \text{Payload 字节权重},\\
+  1, & \text{单位计数权重}.
+ \end{cases}
+\label{eq:weight-modes}
+\end{equation}
+单位计数权重仅区分释放实例数；Payload 权重在此基础上计入数据长度，并使零 Payload 帧保持非零权重；帧时间权重进一步纳入协议开销、帧格式、BRS 状态以及 nominal/data bitrate，因而更接近一次释放对总线服务需求的贡献。主实验采用帧时间权重。
+
+对于 CAN FD，$\widehat C_i$ 由帧字段组成、动态与固定填充规则、BRS 前后的位数划分和通道速率计算，完整位数分解及时间换算见附录第~\ref{subsec:appendix-canfd-frame-time}~节。三种权重具有不同量纲，相应指标仅在同一权重口径内比较。
+
+\subsubsection{局部峰值与稳态均衡指标}
+\label{subsubsec:slot-load-metrics}
+
+释放权重刻画了单次释放的相对工作量，局部聚集则由不同报文的释放事件在同一时隙内叠加形成。给定 Offset 向量 $\symbf O=(O_i)_{m_i\in\Eset}$，对阶段 $x\in\{\mathrm{st},\mathrm{ss}\}$ 和时隙 $s\in\Sset^x$，报文 $i$ 在该时隙内的释放次数定义为
+\begin{equation}
+ n_{i,s}^{x}(O_i)
+ =\sum_{k\in\mathbb Z_{\ge0}}
+ \ind{r_{i,k}\in I_s^x}.
+\label{eq:slot-release-count}
+\end{equation}
+该值采用计数而非布尔量，可以覆盖 $T_i<\Delta$ 时同一报文在单个时隙内多次释放的情形。叠加各报文的释放权重，得到时隙负载
+\begin{equation}
+ L_s^{x}(\symbf O)
+ =\sum_{m_i\in\Eset}w_i n_{i,s}^{x}(O_i).
+\label{eq:slot-load-model}
+\end{equation}
+$L_s^x$ 表示给定 Offset 分配方案下单个时隙承受的释放工作量，是 CAN 侧各评价量的基础。
+
+最严重的局部聚集由阶段 $x$ 的最大时隙负载刻画：
+\begin{equation}
+ Z^{x}(\symbf O)
+ =\max_{s\in\Sset^{x}}L_s^{x}(\symbf O),
+ \qquad x\in\{\mathrm{st},\mathrm{ss}\}.
+\label{eq:peak-metrics}
+\end{equation}
+当启动窗口为空时，$Z^{\mathrm{st}}$ 不定义。Peak $Z^x$ 回答最高负载时隙的聚集程度，但无法区分超限分布的范围，也不反映整个窗口的均匀程度。
+
+若工程上给定与 $w_i$ 同量纲的时隙阈值 $\Gamma>0$，稳态超限时隙数定义为
+\begin{equation}
+ N_{\rm vio}(\symbf O)
+ =\sum_{s\in\Sset^{\mathrm{ss}}}
+ \ind{L_s^{\mathrm{ss}}(\symbf O)>\Gamma}.
+\label{eq:violation-metrics}
+\end{equation}
+稳态总超限量为
+\begin{equation}
+ V_{\rm vio}(\symbf O)
+ =\sum_{s\in\Sset^{\mathrm{ss}}}
+ \max\!\left\{0,L_s^{\mathrm{ss}}(\symbf O)-\Gamma\right\}.
+\label{eq:violation-amount}
+\end{equation}
+$N_{\rm vio}$ 描述超限影响的范围，$V_{\rm vio}$ 则累计各时隙超过阈值的程度；阈值 $\Gamma$ 与当前权重口径保持相同量纲。
+
+Peak 与超限量主要刻画高负载区域，尚不足以评价所有时隙共同构成的分布。为使评价量对整个窗口内的负载变化同时响应，定义
+\begin{equation}
+ Q^{x}(\symbf O)
+ =\sum_{s\in\Sset^{x}}
+ \left(L_s^{x}(\symbf O)\right)^2,
+ \qquad x\in\{\mathrm{st},\mathrm{ss}\}.
+\label{eq:phase-load-square}
+\end{equation}
+平方项对高负载时隙赋予更大贡献，同时保留全窗口信息；稳态均衡评价采用 $Q^{\mathrm{ss}}$，并与只取最大值的 $Z^{\mathrm{ss}}$ 形成互补。其方差含义由完整超周期内的总量不变性确定。
+
+\begin{proposition}[稳态平方和与方差的等价性]
+\label{prop:qss-variance}
+在固定稳态窗口、固定时隙宽度和固定报文集合下，若 $H$ 为各周期的公倍数，则稳态总工作量满足
+\begin{equation}
+ W^{\mathrm{ss}}
+ =\sum_{s\in\Sset^{\mathrm{ss}}}L_s^{\mathrm{ss}}(\symbf O)
+ =H\sum_{m_i\in\Eset}\frac{w_i}{T_i}.
+\label{eq:steady-total-work}
+\end{equation}
+式\eqref{eq:steady-total-work}与 $\symbf O$ 无关。此时，最小化 $Q^{\mathrm{ss}}$ 等价于最小化稳态时隙负载方差。
+\end{proposition}
+
+\begin{proof}
+由命题\ref{prop:hyperperiod-count}，报文 $i$ 在稳态窗口内释放 $H/T_i$ 次，故稳态总工作量为式\eqref{eq:steady-total-work}。以 $\overline L$ 表示稳态时隙平均负载，则
+\begin{equation}
+ \sum_{s\in\Sset^{\mathrm{ss}}}
+ \left(L_s^{\mathrm{ss}}-\overline L\right)^2
+ =Q^{\mathrm{ss}}
+ -\frac{\left(W^{\mathrm{ss}}\right)^2}{M^{\mathrm{ss}}},
+ \qquad
+ \overline L=\frac{W^{\mathrm{ss}}}{M^{\mathrm{ss}}}.
+\label{eq:qss-variance-identity}
+\end{equation}
+右端第二项与 Offset 无关，故两种最小化具有相同的最优解集合。
+\end{proof}
+
+若忽略释放权重，还可记录单个时隙内的释放实例数
+\begin{equation}
+ K_s^{x}(\symbf O)
+ =\sum_{m_i\in\Eset}n_{i,s}^{x}(O_i).
+\label{eq:slot-release-multiplicity}
+\end{equation}
+其最大值为
+\begin{equation}
+ K_{\max}^{x}(\symbf O)
+ =\max_{s\in\Sset^x}K_s^{x}(\symbf O).
+\label{eq:max-release-multiplicity}
+\end{equation}
+当启动窗口为空时，$K_{\max}^{\mathrm{st}}$ 不定义。$K_s^x$ 与 $K_{\max}^x$ 仅作为释放实例数的辅助统计量，其中 $K_{\max}^x$ 用于词典序目标中的低优先级确定性比较。
+
+附录第~\ref{subsec:appendix-conservative-service}~节给出独立的保守总线服务时间诊断，该诊断不参与 Offset 优化目标。式\eqref{eq:slot-load-model}、式\eqref{eq:peak-metrics}与式\eqref{eq:phase-load-square}描述释放结构，而非包含优先级仲裁、控制器排队和错误重传的完整响应时间模型。
+
+给定 $\symbf O$ 后，上述指标能够刻画 CAN 时间轴上的局部释放分布；但 $O_i$ 并非只存在于评价模型中的抽象相位，它最终必须由 ECU 的软件周期入口实际产生。周期入口能否重复表达同一释放序列，取决于其调度基准周期能否同时表示 $T_i$ 与 $O_i$。
+
+\subsection{Offset 与软件调用周期的耦合关系}
+
+CAN 侧的 $O_i$ 指定报文相对于公共时间原点的期望释放相位。在共同整数时间原点和精确周期触发的假设下，设软件周期入口的调度基准周期为 $B\in\mathbb Z_{>0}$。该入口对报文周期和相位的精确表达要求
+\begin{equation}
+ T_i=a_iB,\qquad O_i=b_iB,
+ \qquad
+ a_i\in\mathbb Z_{>0},\quad b_i\in\mathbb Z_{\ge0}.
+\label{eq:software-period-multiple}
+\end{equation}
+两项条件等价于
+\begin{equation}
+ B\mid T_i,\qquad B\mid O_i.
+\label{eq:software-tick-divisibility}
+\end{equation}
+
+$B$ 表示周期入口的调度基准周期，较小的 $B$ 对应更高的入口调用频率。仅满足 $B\mid T_i$ 时，入口能够重复报文周期；同时满足 $B\mid O_i$，才能在共同时间原点下精确命中释放相位。因此，Offset 的变化会改变软件侧可采用的调用周期集合。
+
+同一 Offset 一方面通过式\eqref{eq:slot-load-model}决定 CAN 侧局部释放分布，另一方面通过式\eqref{eq:software-tick-divisibility}约束软件侧的可行调度基准周期。通信侧更有利的相位配置不必然对应更低的软件周期调用代价，以软件周期组织为导向的相位选择也未必改善通信侧均衡；两类目标对 $O_i$ 的共同依赖构成协同优化的结构基础。
+
+\subsection{候选 Offset 诱导的可达 D 结构}
+\label{subsec:reachable-d-structure}
+
+式\eqref{eq:software-tick-divisibility}表明，候选 Offset 对软件侧的直接影响可以归结为它与报文周期的公共正约数。为刻画不同候选在这一关系上的作用，对任意 $o\in\Oset_i$ 定义
+\begin{equation}
+ D_i(o)=\gcd(T_i,o),
+ \qquad
+ \mathcal D_i
+ =\left\{\gcd(T_i,o)\mid o\in\Oset_i\right\}.
+\label{eq:reachable-d-set}
+\end{equation}
+其中，$D_i(o)$ 是报文 $i$ 采用候选 $o$ 时的单报文最大可行调用周期，第5章将给出该最大性的证明。集合 $\mathcal D_i$ 收集有限候选实际能够产生的 D 值。每个元素都整除 $T_i$，但 $\mathcal D_i$ 只占 $T_i$ 正约数集合中的可达部分，不必包含全部正约数，也不必在整除关系下构成子格。
+
+一个可达 D 值通常可能由多个 Offset 产生。对 $d\in\mathcal D_i$，将产生该值的候选集合记为
+\begin{equation}
+ \mathcal F_{i,d}
+ =\left\{o\in\Oset_i\mid\gcd(T_i,o)=d\right\}.
+\label{eq:reachable-d-fiber}
+\end{equation}
+集合 $\mathcal F_{i,d}$ 也称为候选域上的 gcd 纤维，用来把产生同一 D 值的 Offset 汇集在一起；它不应一般地理解为一个普通同余类。相应的软件侧 D 等价关系定义为
+\begin{equation}
+ o\sim_i o'
+ \quad\Longleftrightarrow\quad
+ \gcd(T_i,o)=\gcd(T_i,o').
+\label{eq:offset-d-equivalence}
+\end{equation}
+同一等价类中的 Offset 对报文 $i$ 的最大可行调用周期具有相同影响，但它们在 CAN 时间轴上的释放位置仍可能不同。因而，D 等价类能够压缩软件侧结构，却不能替代通信侧对具体 Offset 的评价；这一差异为后续“外层选择具体 Offset、固定 Offset 后精确处理软件分组”的求解层次提供了依据。
+
+\clearpage
+\section{周期报文 Offset 均衡优化模型}
+\label{sec:offset-balancing-model}
+
+离散释放模型为每个合法 Offset 分配方案给出了相应的启动与稳态负载分布。在有限候选空间中寻找更优配置，还需要规定不同分配方案之间的优先关系。工程阈值超限、最坏局部峰值和全窗口均衡分别描述不同性质，不能简单视为同一目标的不同写法。由此，Offset 优化模型不仅需要组合各报文的可选相位，还需要建立这些评价量的词典序准则。
+
+\subsection{决策变量与可行域}
+
+合法 Offset 分配由各报文可调整的相位范围共同决定。评价集合中的报文据此划分为决策报文集合 $\mathcal D$ 和固定报文集合 $\Fset$：
+\begin{equation}
+ \Eset=\mathcal D\cup\Fset,
+ \qquad
+ \mathcal D\cap\Fset=\varnothing.
+\label{eq:decision-fixed-partition}
+\end{equation}
+对 $m_i\in\mathcal D$，Offset 从离散候选集合 $\Oset_i$ 中选择；对 $m_i\in\Fset$，其 Offset 由当前优化实例给定为 $\bar O_i$。两种情况共同定义配置量
+\begin{equation}
+ O_i\in
+ \begin{cases}
+  \Oset_i, & m_i\in\mathcal D,\\
+  \{\bar O_i\}, & m_i\in\Fset.
+ \end{cases}
+\label{eq:decision-fixed-offset}
+\end{equation}
+固定报文仍属于 $\Eset$，其 Offset 不再作为决策变量，但释放贡献继续进入 CAN 侧评价量；当实例中不存在固定报文时，允许 $\Fset=\varnothing$。
+
+将全部评价报文的 Offset 写成向量
+\begin{equation}
+ \symbf O=(O_i)_{m_i\in\Eset}.
+\label{eq:offset-decision-vector}
+\end{equation}
+由式\eqref{eq:decision-fixed-offset}得到有限可行域
+\begin{equation}
+ \Omega=
+ \left(\prod_{m_i\in\mathcal D}\Oset_i\right)
+ \times
+ \left(\prod_{m_i\in\Fset}\{\bar O_i\}\right).
+\label{eq:offset-feasible-domain}
+\end{equation}
+若 $\Fset=\varnothing$，第二个笛卡尔积按空积约定为单元素集合，不对决策报文引入额外限制。由此，$\Omega$ 完整描述了当前实例允许的 Offset 组合，但可行性本身尚不能区分候选方案的质量；这种区分取决于各方案产生的超限状态、局部峰值与整体负载形状。
+
+\subsection{超限、峰值与稳态均衡的评价层级}
+
+不同可行方案首先在工程阈值风险上表现出差异。时隙负载超过工程阈值 $\Gamma$ 时，超限时隙数和累计超限量分别反映影响范围与严重程度。对任意 $\symbf O\in\Omega$，定义超限二元组
+\begin{equation}
+ \symbf G(\symbf O)=
+ \left(
+  N_{\rm vio}(\symbf O),
+  V_{\rm vio}(\symbf O)
+ \right).
+\label{eq:violation-key}
+\end{equation}
+$\symbf G$ 按词典序比较：优先减少超限时隙数，再在前者相同时降低累计超限量。由此，$\symbf G$ 构成评价层级的最高优先项；即使某个实例无法完全消除超限，这一顺序仍可区分候选方案的超限程度。
+
+当超限二元组相同时，稳态最大时隙负载 $Z^{\mathrm{ss}}$ 用于区分局部竞争最严重的位置。它回答稳态窗口中最高负载时隙的聚集程度，却不描述其余时隙共同构成的负载形状。即使两个方案具有相同的 $Z^{\mathrm{ss}}$，其全窗口分布仍可能明显不同。
+
+稳态负载平方和 $Q^{\mathrm{ss}}$ 对全部时隙同时响应。由命题\ref{prop:qss-variance}，在稳态总工作量固定时，最小化 $Q^{\mathrm{ss}}$ 等价于最小化稳态时隙负载方差，因而可用于比较全窗口的均衡程度。$Z^{\mathrm{ss}}$ 只关注最高点，$Q^{\mathrm{ss}}$ 则关注整体分布；较低的 $Z^{\mathrm{ss}}$ 不保证较低的 $Q^{\mathrm{ss}}$，反之亦然。超限二元组具有共同的最高优先级，而 $Z^{\mathrm{ss}}$ 与 $Q^{\mathrm{ss}}$ 的相对次序决定削峰或整体均衡的不同优化偏好。
+
+\subsection{三种词典序目标模式}
+
+上述评价量对应不同的工程诉求：局部峰值控制关注最不利时隙，整体均衡关注全窗口的负载分布，实际配置还可能要求在限制峰值变化的条件下改善整体均衡。若将这些指标直接合成为加权和，不仅需要处理量纲差异，权重选择也会模糊各项诉求的优先关系。因此，本文提出 Peak、Variance 和 Balanced 三种词典序目标模式。
+
+在三种模式中，目标向量均按最小化意义下的词典序比较，即前一分量的差异优先于后一分量。由于各评价量均由同一 Offset 分配 $\symbf O$ 唯一确定，以下比较键省略重复自变量。
+
+\subsubsection{Peak 与 Variance}
+
+若最优先关注稳态窗口中的最坏局部聚集，Peak 模式采用比较键
+\begin{equation}
+ \symbf F_{\rm Peak}(\symbf O)=
+ \left(
+  N_{\rm vio},
+  V_{\rm vio},
+  Z^{\mathrm{ss}},
+  Q^{\mathrm{ss}},
+  Z^{\mathrm{st}},
+  Q^{\mathrm{st}},
+  K_{\max}^{\mathrm{ss}}
+ \right).
+\label{eq:peak-objective-key}
+\end{equation}
+若研究重点转向全窗口的稳态均衡，则交换 $Z^{\mathrm{ss}}$ 与 $Q^{\mathrm{ss}}$ 的优先位置，得到 Variance 模式
+\begin{equation}
+ \symbf F_{\rm Variance}(\symbf O)=
+ \left(
+  N_{\rm vio},
+  V_{\rm vio},
+  Q^{\mathrm{ss}},
+  Z^{\mathrm{ss}},
+  Z^{\mathrm{st}},
+  Q^{\mathrm{st}},
+  K_{\max}^{\mathrm{ss}}
+ \right).
+\label{eq:variance-objective-key}
+\end{equation}
+两种模式均先按式\eqref{eq:violation-key}处理工程阈值超限。超限状态相同时，Peak 先比较 $Z^{\mathrm{ss}}$，再比较 $Q^{\mathrm{ss}}$；Variance 采用相反次序，作为揭示削峰与全窗口均衡冲突的对照偏好。$Z^{\mathrm{st}}$、$Q^{\mathrm{st}}$ 与 $K_{\max}^{\mathrm{ss}}$ 只在主要稳态指标均相同时承担确定性消歧和辅助比较作用。
+
+\subsubsection{Balanced：峰值预算下的稳态均衡}
+
+Peak 能够优先控制最坏局部峰值，Variance 则可能通过接受较高峰值获得更均匀的全窗口分布。若只允许 Peak 性能在给定范围内变化，同时继续改善 $Q^{\mathrm{ss}}$，需要以 Peak 参考方案建立显式峰值预算。
+
+记当前 GCLS 搜索在给定配置与搜索预算下由 Peak 模式得到的参考分配为 $\symbf O^{\rm ref}$，其稳态峰值和平方和为
+\begin{equation}
+ \symbf O^{\rm ref}\in\Omega,
+ \qquad
+ Z_{\rm ref}=Z^{\mathrm{ss}}(\symbf O^{\rm ref}),
+ \qquad
+ Q_{\rm ref}=Q^{\mathrm{ss}}(\symbf O^{\rm ref}).
+\label{eq:balanced-reference}
+\end{equation}
+该参考方案用于构造预算与验收条件，不承担全局最优性证明。
+
+设 $\tau\ge0$ 为相对容差，$\delta\ge0$ 为与 $Z_{\rm ref}$ 同量纲的绝对容差。稳态峰值预算定义为
+\begin{equation}
+ Z_{\rm budget}=
+ \begin{cases}
+  \left\lceil (1+\tau)Z_{\rm ref}\right\rceil,
+    & \text{采用相对容差},\\
+  Z_{\rm ref}+\delta,
+    & \text{采用绝对容差}.
+ \end{cases}
+\label{eq:balanced-peak-budget}
+\end{equation}
+工程阈值 $\Gamma$ 用于逐时隙计算超限二元组，$Z_{\rm budget}$ 则给出相对于 Peak 参考方案的稳态最大时隙负载预算。该预算对应的稳态峰值约束为
+\begin{equation}
+ Z^{\mathrm{ss}}(\symbf O)\le Z_{\rm budget}.
+\label{eq:steady-peak-guardrail}
+\end{equation}
+
+候选方案超过峰值预算的程度定义为
+\begin{equation}
+ E_{\rm peak}(\symbf O)=
+ \max\!\left\{0,\,
+ Z^{\mathrm{ss}}(\symbf O)-Z_{\rm budget}
+ \right\}.
+\label{eq:peak-budget-excess}
+\end{equation}
+Balanced 模式据此采用比较键
+\begin{equation}
+ \symbf F_{\rm Balanced}(\symbf O)=
+ \left(
+  N_{\rm vio},
+  V_{\rm vio},
+  E_{\rm peak},
+  Q^{\mathrm{ss}},
+  Z^{\mathrm{ss}},
+  Z^{\mathrm{st}},
+  Q^{\mathrm{st}},
+  K_{\max}^{\mathrm{ss}}
+ \right).
+\label{eq:balanced-objective-key}
+\end{equation}
+当候选满足 $Z^{\mathrm{ss}}(\symbf O)\le Z_{\rm budget}$ 时，$E_{\rm peak}=0$，比较重点转向 $Q^{\mathrm{ss}}$；候选超过预算时，预算超出量优先于 $Q^{\mathrm{ss}}$ 的改善。
+
+记 $\preceq_{\rm lex}$ 为二元组的词典序不劣关系。Balanced 最终允许输出的安全集合为
+\begin{equation}
+ \Omega_{\rm safe}=
+ \left\{
+  \symbf O\in\Omega\ \middle|\
+  \begin{gathered}
+   \symbf G(\symbf O)
+   \preceq_{\rm lex}
+   \symbf G(\symbf O^{\rm ref}),\\
+   Z^{\mathrm{ss}}(\symbf O)\le Z_{\rm budget},
+   \qquad
+   Q^{\mathrm{ss}}(\symbf O)\le Q_{\rm ref}
+  \end{gathered}
+ \right\}.
+\label{eq:balanced-safe-set}
+\end{equation}
+非负容差保证 $\symbf O^{\rm ref}\in\Omega_{\rm safe}$，从而提供保底方案。Balanced 只接受同时满足超限不劣、峰值预算和平方和不劣条件的候选，否则保留参考方案。该机制保证输出满足参考方案定义的验收条件，不改变外层搜索的启发式性质。
+
+三种模式共享同一可行域和原始评价量：Peak 表达削峰偏好，Variance 表达全窗口均衡偏好，Balanced 则以显式峰值预算在二者之间建立受约束折中。模式差异体现为核心指标的优先关系，各比较键在其对应模式及相同预算定义内使用。
+
+\subsection{带权离散 Offset 峰值分配的计算复杂性}
+\label{subsec:explicit-offset-peak-complexity}
+
+上述模型需要从每条报文的有限候选中选择一个 Offset。即使暂不考虑 $Q^{\mathrm{ss}}$ 等后续比较项，仅判断能否把全部稳态时隙负载控制在给定峰值内，候选之间仍存在组合耦合。为使复杂性结论与实际输入表示一致，考虑如下显式判定版本：输入包含报文集合、正整数权重、每条报文的有限 Offset 候选、每个候选显式列出的稳态时隙命中列表以及非负整数峰值阈值 $\Theta$。命中列表允许同一时隙重复出现，以表示一个稳态窗口内的多次释放。
+
+记 $\Hset_{i,o}^{\mathrm{ss}}$ 为候选 $o$ 的显式稳态命中列表，$\operatorname{mult}_s(\Hset_{i,o}^{\mathrm{ss}})$ 为时隙 $s$ 在列表中的出现次数。该判定问题询问是否存在一个 Offset 分配 $\symbf O$，使
+\begin{equation}
+ L_s^{\mathrm{ss}}(\symbf O)
+ =\sum_i w_i
+ \operatorname{mult}_s\!\left(\Hset_{i,O_i}^{\mathrm{ss}}\right)
+ \le\Theta,
+ \qquad \forall s\in\Sset^{\mathrm{ss}}.
+\label{eq:explicit-offset-peak-decision}
+\end{equation}
+式\eqref{eq:explicit-offset-peak-decision}与前文时隙负载模型具有相同的加权累加含义，区别只在于这里把候选命中的有限列表直接作为输入，从而可以相对于列表总长度讨论证书验证时间。
+
+\begin{theorem}[显式带权离散 Offset 峰值判定的复杂性]
+\label{thm:explicit-offset-peak-complexity}
+式\eqref{eq:explicit-offset-peak-decision}定义的判定问题属于 NP。即使所有报文周期相同、每条报文只有两个 Offset 候选、稳态窗口只有两个时隙且每个候选只命中一次，该问题仍为 NP-complete；相应的峰值最小化问题为 NP-hard。
+\end{theorem}
+
+\begin{proof}[\normalfont 证明思路]
+给定一个 Offset 分配后，只需扫描所选候选的显式命中列表，累加各时隙负载并与 $\Theta$ 比较，因此证书可在显式输入长度的多项式时间内验证。困难性由经典 PARTITION 问题归约\cite{karp1972}：把每个正整数 $a_i$ 作为一条报文的权重，并为该报文设置分别只命中两个时隙之一的两个 Offset 候选。若总权重为 $2B$，取阈值 $\Theta=B$，则两个时隙的负载都不超过 $B$ 当且仅当原整数集合存在等和划分。该构造已经满足定理所列的同周期、二候选、二时隙和单次命中限制；判定版本的 NP-completeness 随即推出对应最小化问题的 NP-hardness。
+\end{proof}
+
+该归约只给出受限子类的弱数值困难性，不证明 strong NP-hardness，也不证明由合法 CAN FD \texttt{frame\_time\_us} 产生的物理权重子类具有同样困难性。NP 成员资格依赖命中列表显式给出；当周期与超周期采用紧凑数值隐式编码时，展开验证未必对输入位长为多项式，周期 phase 峰值问题中已知的表示差异也说明这一边界不可省略\cite{zeng2006periodic,short2010periodic}。上述最坏情形结果同样不排除精确枚举、伪多项式算法、全多项式时间近似方案（FPTAS）、CP-SAT 或分支定界在特定规模和结构上有效。它说明的是外层 Offset 选择具有组合困难性，而不是下一章只能采用启发式方法。
+
+\hyphenation{Offset}
+
+\clearpage
+\section{GCLS 求解方法}
+\label{sec:gcls-method}
+
+\subsection{复杂度与工程求解选择}
+\label{subsec:gcls-engineering-choice}
+
+第\ref{subsec:explicit-offset-peak-complexity}节的结果刻画了显式命中模型中外层 Offset 组合选择的最坏情形困难性，但 NP-hardness 并不意味着只能使用启发式算法。对于候选较少的小规模实例，完整枚举、CP-SAT、分支定界及其他精确方法仍可用于求得或逼近可验证的基准，并可作为启发式结果的对照。复杂性结论在本文中的作用，是说明外层搜索需要面对随候选组合增长的计算压力，而不是排除所有精确求解路径。
+
+本文选择 GCLS，是因为实际多网段输入要求算法在可控运行时间内处理较大的有限候选域，同时保持给定输入、种子与消歧规则下的可复现性，并持续生成可供后续精确对照和联合内层评价的高质量 Offset 候选。因此，GCLS 是在问题最坏情形困难性背景下，对计算规模、解质量、复现性和时间预算作出的工程选择；它不是定理\ref{thm:explicit-offset-peak-complexity}的唯一算法推论。
+
+第\ref{sec:offset-balancing-model}章已经规定不同 Offset 分配之间的正式优先关系，但可行域 $\Omega$ 是各决策报文候选集合的笛卡尔积，其规模随报文数量和候选数量快速增长，完整枚举并不适合作为本文面向实际网段的默认求解方法。GCLS 利用候选释放结构可预计算、单次相位移动只影响有限时隙以及高负载位置能够暴露主要冲突等离散特征，逐步构造并改进 Offset 分配。该方法属于有限候选空间上的启发式搜索，给定目标策略 $\pi$ 后，所有候选始终按照第3章定义的完整比较向量 $\symbf F_{\pi}$ 进行评价。
+
+\subsection{候选映射与贪心初始解}
+\label{subsec:gcls-greedy}
+
+对任意决策报文 $m_i\in\mathcal D$ 及合法候选 $o\in\Oset_i$，该候选在启动窗口和稳态窗口命中的时隙均由第2章的释放模型唯一确定。搜索开始前，GCLS 建立“报文--候选 Offset--时隙命中序列”映射，并分别保存两个窗口中的非零贡献。后续试探候选时，只需更新该报文实际影响的时隙，无须反复展开全部周期释放序列。固定报文的贡献在搜索状态建立时一次加入，此后始终参与完整目标评价，但不进入候选枚举。
+
+候选评价能够快速完成后，仍需构造第一个完整 Offset 分配。以 $C_i$ 表示报文 $m_i$ 的帧时间，$d_i$ 表示其在输入定义中的位置，贪心构造按以下确定性键排列决策报文：
+\begin{equation}
+ \kappa_i^{\rm g}
+ =
+ \left(
+  T_i,-C_i,\operatorname{ID}_i,d_i,\operatorname{name}_i
+ \right).
+\label{eq:gcls-greedy-order}
+\end{equation}
+较短周期的报文释放更频繁，较长帧的单次贡献更大，因而优先确定这类报文的相位；CAN ID、定义位置和名称仅用于确定性消歧，不赋予该顺序额外的最优性含义。
+
+处理报文 $m_i$ 时，算法按 Offset 升序枚举 $\Oset_i$，将候选临时加入当前部分状态，并按照 $\symbf F_{\pi}$ 选择完整词典序目标最优的候选。若目标向量完全相同，则保留较小的 Offset。选定结果随即进入部分分配，直至所有决策报文均获得合法 Offset。
+
+贪心阶段的每次选择都基于尚未完成的部分分配，早期确定的 Offset 不会随后续报文加入而自动调整。完整起点形成后，固定其余报文并重新考察单条报文的全部合法相位，构成最直接的局部改进。
+
+\subsection{基于精确增量的单报文局部搜索}
+\label{subsec:gcls-one-opt}
+
+贪心构造完成后，每条报文已经具有合法 Offset，但该选择是在构造过程的局部状态下作出的。1-opt 因而固定其余报文，将报文 $m_i$ 从当前 Offset $o$ 重定位至另一合法 Offset $o'$。稳态时隙 $s$ 的负载净变化为
+\begin{equation}
+ \delta_s
+ =
+ w_i
+ \left[
+  n_{i,s}^{\mathrm{ss}}(o')
+  -
+  n_{i,s}^{\mathrm{ss}}(o)
+ \right].
+\label{eq:gcls-slot-load-delta}
+\end{equation}
+其中，$w_i$ 沿用式\eqref{eq:slot-load-model}的负载权重；未被旧候选或新候选命中的时隙满足 $\delta_s=0$。
+
+由式\eqref{eq:phase-load-square}，该移动引起的稳态负载平方和变化为
+\begin{equation}
+ \Delta Q^{\mathrm{ss}}
+ =
+ \sum_{s:\,\delta_s\ne0}
+ \left[
+  \left(L_s^{\mathrm{ss}}+\delta_s\right)^2
+  -
+  \left(L_s^{\mathrm{ss}}\right)^2
+ \right]
+ =
+ \sum_{s:\,\delta_s\ne0}
+ \left(
+  2L_s^{\mathrm{ss}}\delta_s+\delta_s^2
+ \right).
+\label{eq:gcls-exact-delta-q}
+\end{equation}
+式\eqref{eq:gcls-exact-delta-q}是移动前后平方和的恒等差值，只需累加受影响时隙即可得到与完整重算完全一致的 $Q^{\mathrm{ss}}$。启动窗口负载和两个窗口中的释放计数按相同的逐报文贡献更新。
+
+精确增量降低的是候选评价成本，并不改变目标定义。候选是否接受仍完全由第3章给出的 $\symbf F_{\pi}$ 决定，而非由单独的 $\Delta Q^{\mathrm{ss}}$ 符号决定。候选试探在同一增量状态上完成：未接受的候选恢复到试探前状态，接受后的状态成为后续比较基准；增量状态与完整重构的等价性及回滚不变量见附录第~\ref{subsec:appendix-gcls-proof}~节。
+
+1-opt 按固定报文顺序进行坐标式最佳重定位。处理一条报文时，算法暂时移除其当前贡献，枚举全部合法 Offset，并在完整比较准则下选出该报文的当前最佳位置；只有该位置严格优于处理前的完整状态时才接受，并立即更新后续报文的比较基准。若一轮完整扫描接受过移动，则从相同顺序重新扫描；完整一轮没有接受移动时终止。
+
+对完整分配 $\symbf O\in\Omega$，单报文重定位邻域定义为
+\begin{equation}
+ \mathcal N_1(\symbf O)
+ =
+ \left\{
+  \symbf O^{(i\leftarrow o)}
+  \ \middle|\
+  m_i\in\mathcal D,\;
+  o\in\Oset_i,\;
+  o\ne O_i
+ \right\}.
+\label{eq:gcls-one-neighborhood}
+\end{equation}
+其中，$\symbf O^{(i\leftarrow o)}$ 仅改变第 $i$ 条决策报文的 Offset。
+
+\begin{proposition}[1-opt 的有限终止与局部最优性]
+\label{prop:gcls-one-opt}
+若所有候选集合 $\Oset_i$ 均有限，且 1-opt 仅接受使完整比较向量严格改善的移动，则该过程必在有限步后终止。其终止分配 $\symbf O^\star$ 满足
+\begin{equation}
+ \symbf F_{\pi}(\symbf O^\star)
+ \preceq_{\rm lex}
+ \symbf F_{\pi}(\symbf O'),
+ \qquad
+ \forall\,\symbf O'\in\mathcal N_1(\symbf O^\star).
+\label{eq:gcls-one-local-optimum}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+可行域 $\Omega$ 有限，而每次接受都使 $\symbf F_{\pi}$ 严格下降，故接受序列不可能无限延续。终止前的完整扫描枚举了每条决策报文的全部合法 Offset；若 $\mathcal N_1(\symbf O^\star)$ 中仍有严格改善，该扫描必会接受相应报文的某个候选，与终止条件矛盾。完整证明见附录第~\ref{subsec:appendix-gcls-proof}~节。
+\end{proof}
+
+该结论仅针对 $\mathcal N_1$。某些配置中，任意单报文移动都会使目标变差或保持不变，但两条在热点中形成冲突的报文协同调整后仍可能产生严格改善。
+
+\subsection{冲突导向的有界双报文搜索}
+\label{subsec:gcls-pair}
+
+双报文协同移动可以越过单报文邻域中的局部障碍，但若完整枚举所有报文对及其 Offset 组合，候选规模将随问题规模迅速增长。GCLS 因而利用当前负载分布缩小搜索范围：先定位高负载时隙，再识别其中的主要冲突报文，并仅为这些报文构造有限的协同 Offset 候选。
+
+筛选从负载热点开始。Peak 模式关注最坏局部聚集，选择负载最高的有限个时隙，并在负载相同时按较小索引确定顺序；Variance 与 Balanced 模式面向全窗口平方和，选择负载严格高于稳态平均值的时隙，若不存在此类时隙，则退化为最高负载时隙。由此得到的热点集合，分别对应局部峰值和整体均衡两类目标所关注的高负载区域。
+
+确定热点后，再从中识别对当前负载结构影响较大的报文。候选仅限于当前 Offset 确实在热点中产生释放的报文。Peak 模式按照报文在热点中的帧时间加权贡献排序，使局部峰值的主要来源优先进入搜索；Variance 与 Balanced 模式则按照移除报文后 $Q^{\mathrm{ss}}$ 的精确下降量排序，以识别对平方和影响较大的报文。每种模式均只保留配置允许的前若干条候选，从而将后续搜索集中于较为显著的冲突关系。
+
+随后为候选报文限定待考察的 Offset。对于候选报文 $m_i$ 与 $m_j$，候选值包括各自当前 Offset 周围的合法邻点、二者当前 Offset 的合法互换，以及非 Peak 模式下按照精确 $\Delta Q^{\mathrm{ss}}$ 选出的有限个低增量重定位方案。为避免重复考察 1-opt 已经覆盖的移动，两条报文必须同时改变当前 Offset。经过上述筛选，得到实际搜索邻域
+\begin{equation}
+ \widetilde{\mathcal N}_2(\symbf O)
+ \subset
+ \mathcal N_2(\symbf O).
+\label{eq:gcls-bounded-pair-neighborhood}
+\end{equation}
+其中，$\widetilde{\mathcal N}_2$ 是由负载热点、候选报文和有限 Offset 候选共同限定的双报文邻域。
+
+在 $\widetilde{\mathcal N}_2$ 内，GCLS 按照 $\symbf F_{\pi}$ 比较已生成的候选，接受其中最佳的严格改善，并同时更新两条报文的 Offset。每次协同移动后，算法在新的分配上重新执行完整 1-opt，以处理仍可通过单报文移动实现的改进；更新后的负载分布随后用于下一轮热点识别。由于搜索范围同时受到热点、候选报文数和 Offset 候选数的限制，该过程只在 $\widetilde{\mathcal N}_2$ 中寻找改进，不保证达到完整 $\mathcal N_2$ 上的局部最优。
+\subsection{多起点搜索与候选保留}
+\label{subsec:gcls-restart-pool}
+\label{subsubsec:gcls-three-opt}
+
+经过 1-opt 与有界双报文搜索后，一个构造起点只能到达相应搜索盆地的终点，所得结果仍可能依赖贪心构造顺序。多起点搜索通过改变部分构造次序扩展可到达的局部结构；对于 Balanced 模式，还需在可接受的 Peak 候选之间保留不同相位结构，避免过早压缩后续搜索入口。
+
+\subsubsection{自适应重启}
+\label{subsubsec:gcls-restart}
+
+第一次尝试采用式\eqref{eq:gcls-greedy-order}的确定性基本顺序。后续尝试不任意打乱全部决策报文，而只在周期和帧时间均相同的组内重排。对给定的 $T$ 与 $C$，该组定义为
+\begin{equation}
+ \mathcal G_{T,C}
+ =
+ \left\{
+  m_i\in\mathcal D
+  \ \middle|\
+  T_i=T,\;
+  C_i=C
+ \right\}.
+\label{eq:gcls-restart-group}
+\end{equation}
+其中，$C_i$ 仍表示帧时间。不同组之间保持短周期、长帧优先的总体顺序，组内重排仅改变前两项排序键无法区分的同类报文次序。
+
+各次组内排列由基础随机种子确定性派生。重启采用由最少尝试数、周期检查、停滞耐心和最大尝试数共同限制的有界自适应预算；达到最大尝试数时按预算终止，不将其解释为搜索空间收敛。完整的种子派生和停止规则见附录第~\ref{subsubsec:appendix-gcls-restart-budget}~节，正式实验参数见第7章。
+
+搜索同时维护由合法基线配置局部改进得到的保留方案；原始 Offset 缺失或不合法时，以相应报文的最小合法 Offset 构造基线。最终候选须满足当前模式的验收条件，并在完整 $\symbf F_{\pi}$ 上严格更优，才替换该方案。算法~\ref{alg:gcls-default}给出 GCLS 的默认主流程，其中不包含 Balanced 候选池和默认关闭的 3-opt 扩展。
+
+\begin{algorithm}[htbp]
+\PaperAlgorithmStyle
+\refstepcounter{algocf}
+\label{alg:gcls-default}
+\KwInput{决策报文、候选 Offset、目标策略 $\pi$、重启策略与基础种子}
+\KwOutput{给定搜索预算下所得的最佳合法分配}
+预计算各报文在不同候选 Offset 下的启动与稳态时隙命中\;
+由合法基线配置构造并局部改进初始保留方案 $\symbf O_{\rm best}$\;
+\ForEach{搜索尝试}{
+  第一次尝试采用确定性基本顺序，后续尝试依据派生种子在同周期、同帧时间组内重排\;
+  依次执行贪心构造、1-opt 和冲突导向的有界双报文搜索，得到完整分配 $\symbf O$\;
+  记录正式目标、完整分配及搜索统计\;
+  \If{$\symbf O$ 满足当前模式的验收条件且严格优于 $\symbf O_{\rm best}$}{
+    更新 $\symbf O_{\rm best}$\;
+  }
+  \If{达到固定上限或满足自适应预算的停止条件}{
+    终止搜索尝试\;
+  }
+}
+输出 $\symbf O_{\rm best}$\;
+\PaperAlgorithmCaption{GCLS 默认主流程}
+\end{algorithm}
+
+\subsubsection{Balanced 候选池}
+\label{subsubsec:gcls-balanced-pool}
+
+Peak 重启可能得到多个正式目标相同或接近、但相位结构不同的 Offset 分配。若只将一个 Peak 代表解交给 Balanced，部分可能有利于降低 $Q^{\mathrm{ss}}$ 的相位结构会在局部搜索前被丢弃。因此，Balanced 从 Peak 重启阶段已经观察到的完整 CAN Offset 分配中保留若干候选，扩展后续局部搜索起点的相位多样性；该候选池不同于第6章联合优化的 Pareto 候选解归档集。
+
+候选先按完整分配去重，并须与严格 Peak 参考解具有相同的超限二元组且满足 $Z^{\mathrm{ss}}\le Z_{\rm budget}$；严格 Peak 参考解始终保留。对候选 $c$，报文 $m_i$ 的周期内相位定义为
+\begin{equation}
+ \phi_i^{(c)}
+ =
+ O_i^{(c)}\bmod T_i,
+ \qquad m_i\in\mathcal D.
+\label{eq:gcls-candidate-phase}
+\end{equation}
+候选 $a$ 与 $b$ 的相位距离采用 Hamming 距离
+\begin{equation}
+ d(a,b)
+ =
+ \sum_{m_i\in\mathcal D}
+ \ind{\phi_i^{(a)}\ne\phi_i^{(b)}}.
+\label{eq:gcls-phase-distance}
+\end{equation}
+该距离表示两个候选中具有不同周期内相位的决策报文数量。相位向量相同的候选只保留一个代表。
+
+设 $\mathcal C$ 为可选候选集合，$\mathcal P$ 为当前已选集合。固定 Peak 参考解后，后续候选采用 farthest-first 规则：
+\begin{equation}
+ c^\star
+ =
+ \operatorname*{arg\,max}_{c\in\mathcal C\setminus\mathcal P}
+ \min_{p\in\mathcal P}d(c,p).
+\label{eq:gcls-farthest-first}
+\end{equation}
+最大值不唯一时，依次按照正式目标、来源尝试编号和完整分配标识确定代表，使候选选择保持可重复。
+
+每个入选候选均以其完整分配为起点，依次执行 1-opt 和冲突导向的有界双报文搜索，再按照式\eqref{eq:balanced-safe-set}的验收条件筛选，并以式\eqref{eq:balanced-objective-key}选择结果。候选池扩展的是局部搜索起点的相位多样性，其本身不保证 $Q^{\mathrm{ss}}$ 必然改善。
+
+当前方法还提供可选的冲突导向有界 3-opt，用于困难实例中尝试跨越双报文邻域仍未突破的局部结构。该扩展限制候选报文、三元组合和搜索轮数，默认关闭，因而不属于算法~\ref{alg:gcls-default}的默认主流程；其设计与补充消融见附录第~\ref{subsec:appendix-pool-triple}~节。
+
+\subsection{计算规模与可复现性}
+\label{subsec:gcls-boundaries}
+
+候选映射减少了重复展开释放序列的开销，但 GCLS 的总体计算量仍同时取决于候选规模和实际搜索轨迹。为描述这些因素，记 $N=|\mathcal D|$，$A_i=|\Oset_i|$；以 $C$ 表示双报文阶段的冲突候选报文数上限，以 $R$ 表示每条候选报文所考察 Offset 数量的上限，以 $A_{\rm run}$ 表示实际执行的重启尝试数。
+
+贪心构造的工作量随全部合法候选总数增长，1-opt 在此基础上还受到完整扫描轮数的影响。双报文阶段的单轮规模由 $C$ 和 $R$ 显式限制，而多起点搜索的总成本又随 $A_{\rm run}$ 以及不同起点经历的局部搜索轮数增加。预计算后的单次候选评价仍需更新该候选实际命中的有限时隙，其成本不能无条件视为常数。候选目标评价次数的具体计数及上界见附录第~\ref{subsubsec:appendix-gcls-evaluation-scale}~节。
+
+搜索规模受预算和局部轨迹影响，但在相同研究条件下，候选生成与比较过程应保持可重复。在输入、配置、基础随机种子、tie-break 规则和软件版本均固定时，构造顺序、候选遍历顺序、正式目标和最终 Offset 分配可以复现；墙钟时间受运行环境影响，不属于确定性结果。搜索记录保留各次尝试的种子、正式目标、完整 Offset 分配、完整分配标识及主要统计，以支持结果复查与恢复，其中 SHA-256 仅作为完整分配的身份标识和去重键。
+
+因此，GCLS 的严格性质限于 1-opt 的完整单报文邻域；贪心构造、冲突导向的有界双报文搜索、重启、候选池和可选 3-opt 用于扩展搜索覆盖，但并未穷举 $\Omega$。本文将最终输出称为给定配置与搜索预算下的 best-found Offset 分配。
+
+GCLS 至此得到一个具体的 CAN 侧相位配置 $\symbf O=(O_1,\ldots,O_N)$。该配置不仅决定总线时间轴上的释放分布，也同时携带第2章末所揭示的软件调用周期约束，从而使 CAN 侧搜索结果进一步成为软件周期组织的输入。
+\hyphenation{MainFunction TimeBase}
+
+\clearpage
+\section{Offset 约束下的 MainFunction 调用周期与分组优化}
+\label{sec:main-function-exact}
+
+第~\ref{sec:gcls-method}~章已经给出一个具体的离散 Offset 分配方案。相位确定后，研究重点由总线侧转向软件周期入口：这些报文的周期与释放相位能否通过周期调用准确表达？当多条报文共享一个 MainFunction 时，还需要确定共同采用的调用周期以及报文之间的分组方式。因此，给定完整 Offset 分配后，软件侧仍有两个核心未知量，即各 MainFunction 能够采用的共同调用周期和报文集合的分组方案。
+
+\subsection{共同时间基准与周期调用可表示性}
+\label{subsec:integer-tick-alignment}
+
+软件周期入口能否准确表达给定 Offset 所确定的释放相位，取决于报文周期、Offset 与入口调用时刻能否在同一时间基准上对齐。为明确这种周期调用的可表示性，所有时间量在进入本章模型前均换算为共同的整数时间单位，当前实现采用整数微秒。各 MainFunction 周期入口共享时间原点 $t=0$，调用周期 $B$ 为正整数；作为配置参数时，$B$ 对应调度基准周期（TimeBase）。入口调用时刻构成集合
+\begin{equation}
+ \mathcal T_B
+ =
+ \left\{qB\mid q\in\mathbb Z_{\ge 0}\right\}.
+\label{eq:main-function-tick-set}
+\end{equation}
+报文 $i$ 的释放序列已由式\eqref{eq:release-model}给出。若该序列能够由周期为 $B$ 的入口在共同原点下精确表示，则报文周期必须落在相邻调用时刻的整数间隔上，首次释放相位也必须对应某个调用时刻。因此，可行调用周期须满足
+\begin{equation}
+ B\mid T_i,
+ \qquad
+ B\mid O_i.
+\label{eq:exact-tick-alignment}
+\end{equation}
+式\eqref{eq:exact-tick-alignment}称为精确时间刻对齐条件。该条件排除了以浮点舍入近似相位或周期的做法，使整除关系和最大公约数运算具有确定的整数语义。
+
+共同时间基准与精确对齐是本文生成周期调用建议时采用的建模条件；AUTOSAR COM 的 MainFunction 与 TimeBase 配置语义及基础软件的周期组织可参见文献\cite{autosarcom,zhang2011autosar,denil2011devs}，具体部署仍需结合目标平台的实际调度实现。式\eqref{eq:exact-tick-alignment}将单报文的可表示性转化为 $B$ 对 $T_i$ 与 $O_i$ 的共同整除关系，单报文问题因而进一步归结为在这些公共正约数中确定可采用的最大调用周期。
+
+\subsection{单报文最大可行调用周期}
+\label{subsec:message-max-tick}
+
+式\eqref{eq:exact-tick-alignment}已经将单报文的可表示性归结为 $B$ 同时整除 $T_i$ 与 $O_i$。因此，全部可行调用周期恰为二者的公共正约数，其中的最大元素即为保持精确对齐时能够采用的最长调用周期。
+
+\begin{proposition}[单报文最大可行调用周期]
+\label{prop:message-max-tick}
+在共同整数时间原点和精确时间刻对齐假设下，报文 $i$ 能够支持的最大可行正整数调用周期为
+\begin{equation}
+ D_i
+ =
+ \gcd(T_i,O_i).
+\label{eq:message-max-tick}
+\end{equation}
+约定 $\gcd(T_i,0)=T_i$。
+\end{proposition}
+
+\begin{proof}[\normalfont 证明思路]
+$D_i$ 同时整除 $T_i$ 与 $O_i$，因而满足精确时间刻对齐条件。任一其他可行调用周期也是二者的公约数，所以不可能大于 $D_i$。当 $O_i=0$ 时，可行周期仍须整除 $T_i$，其最大值为 $T_i$。完整证明见附录第~\ref{subsubsec:appendix-message-tick-proof}~节。
+\end{proof}
+
+在本文精确时间刻对齐模型下，$D_i$ 表示单独调度报文 $i$ 时可采用的最大调用周期，这里的调用周期是指 MainFunction 的调用周期。例如，$T_i=100\,\mathrm{ms}$、$O_i=15\,\mathrm{ms}$ 时，式\eqref{eq:message-max-tick}给出 $D_i=5\,\mathrm{ms}$。可见，相同周期下 Offset 的改变不仅移动总线时间轴上的释放相位，还可能改变软件周期入口允许采用的调用周期。
+
+$D_i$ 已经给出报文 $i$ 单独调度时能够采用的最大调用周期。然而，实际软件配置通常由一个 MainFunction 承载多条报文，此时共同调用周期必须同时满足组内所有报文的约束。
+
+\subsection{MainFunction 分组的最大可行调用周期}
+\label{subsec:group-max-timebase}
+
+设非空报文集合 $G$ 共享一个 MainFunction。该入口的共同调用周期 $B$ 必须对组内每条报文均保持精确时间刻对齐；由命题\ref{prop:message-max-tick}，这一条件等价于 $B$ 同时整除组内所有 $D_i$，即
+\begin{equation}
+ B\mid D_i,
+ \qquad
+ \forall i\in G.
+\label{eq:group-feasible-timebase}
+\end{equation}
+该组能够采用的最大调用周期也就是其最大可行 TimeBase，记为 $B_G$。
+
+\begin{proposition}[分组最大可行 TimeBase]
+\label{prop:group-max-timebase}
+对固定非空分组 $G$，能够同时精确表示组内全部报文周期与 Offset 的最大正整数 TimeBase 为
+\begin{equation}
+ B_G
+ =
+ \gcd_{i\in G}D_i.
+\label{eq:group-max-timebase}
+\end{equation}
+\end{proposition}
+
+\begin{proof}[\normalfont 证明思路]
+$B_G$ 整除组内每个 $D_i$，因此对整个分组可行。任一其他可行 TimeBase 都是所有 $D_i$ 的公约数，故不超过 $B_G$。完整证明见附录第~\ref{subsubsec:appendix-group-timebase-proof}~节。
+\end{proof}
+
+命题\ref{prop:group-max-timebase}表明，对固定分组 $G$，其最大可行调用周期已经由 $B_G$ 唯一确定，TimeBase 无需另行搜索；尚未确定的是报文集合如何划分。不同划分不仅改变 MainFunction 数量和各组报文数 $N_G$，也会改变各组可采用的调用周期 $B_G$ 及单位时间调用次数。为了比较这些划分，需要建立能够反映软件周期组织代价的统一模型。
+
+\subsection{软件调用开销代理模型}
+\label{subsec:cpu-cost-proxy}
+
+前述结果解决了给定分组能够以多长周期调用的问题，却尚未说明不同划分应如何比较。划分同时决定各个 MainFunction 的调用频率和单次处理规模；若要在候选方案之间取舍，需要将二者纳入同一成本关系。由于目标 ECU 上全部候选分组的执行成本并未逐一测量，本文采用保留主要结构关系的代理模型进行比较。
+
+\subsubsection{调用成本与分组规模}
+\label{subsubsec:cpu-linear-cost}
+
+在理想情况下，若能够直接获得分组 $G$ 所对应 MainFunction 的实际单次执行成本 $C_G$，则其单位时间调用成本可按照频率 $1/B_G$ 累积为\cite{liu1973}：
+\begin{equation}
+ U
+ =
+ \sum_{G\in\Pi}\frac{C_G}{B_G},
+\label{eq:ideal-main-function-cost}
+\end{equation}
+其中 $\Pi$ 表示 MainFunction 分组方案。式\eqref{eq:ideal-main-function-cost}给出了已知单次执行成本时比较不同划分的基础形式。由于当前研究缺少目标 ECU 上全部候选分组的实测 $C_G$，本文采用同时保留固定调用成本与逐报文增量成本的线性组成本假设
+\begin{equation}
+ C_G
+ =
+ C_0+C_1N_G,
+\label{eq:linear-group-cost}
+\end{equation}
+其中 $C_0>0$ 表示一次 MainFunction 调用中与组内报文数量无关的固定成本，$C_1>0$ 表示每增加一条周期报文所对应的平均增量成本，$N_G=|G|$ 为组内报文数。该模型保留了划分影响软件调度代价的两项主要结构：调用周期缩短会增加单位时间内固定成本的累积次数，组内报文增多则会提高单次调用的处理工作量。式\eqref{eq:linear-group-cost}仍包含具有共同尺度的 $C_0$ 与 $C_1$；对于不同划分的相对比较，真正起作用的是固定调用成本相对于逐报文增量成本的比例。
+
+\subsubsection{相对固定开销与代理目标}
+\label{subsubsec:rho-cpu-proxy}
+
+比较不同划分时，无需保留所有候选共有的正尺度 $C_1$；去除该尺度不会改变成本排序，固定调用成本与单报文增量成本的相对作用由二者的比值决定。因此，定义正参数
+\begin{equation}
+ \rho
+ =
+ \frac{C_0}{C_1}.
+\label{eq:rho-definition}
+\end{equation}
+参数 $\rho$ 描述一次调用的固定成本相对于一条报文增量成本的大小。将式\eqref{eq:linear-group-cost}代入式\eqref{eq:ideal-main-function-cost}并消去各划分共有的正尺度 $C_1$，得到本文实际优化的软件调用开销代理指标
+\begin{equation}
+ P_{\rm CPU}(\Pi\mid\boldsymbol O)
+ =
+ \sum_{G\in\Pi}
+ \frac{\rho+N_G}{B_G}.
+\label{eq:cpu-proxy}
+\end{equation}
+这里，$\boldsymbol O$ 是已经固定的完整 Offset 分配方案，$\Pi$ 是待求的 MainFunction 划分，$N_G$ 是组内报文数，$B_G$ 由式\eqref{eq:group-max-timebase}唯一确定。不同划分之间的相对比较由 $\rho$、$N_G$ 和 $B_G$ 共同决定。$P_{\rm CPU}$ 用于比较不同的周期入口组织方案，并不等同于目标硬件上的实测 CPU 利用率。从一般成本形式到式\eqref{eq:cpu-proxy}的代数展开见附录第~\ref{subsubsec:appendix-cpu-proxy-derivation}~节。
+
+实现采用微秒时间单位，输出时统一将指标换算为每秒尺度。该比例缩放不改变不同划分的成本排序，完整单位换算见附录式\eqref{eq:cpu-proxy-per-second}。
+
+对固定分组 $G$，式\eqref{eq:cpu-proxy}中分子 $\rho+N_G$ 保持不变，组成本随 $B_G$ 增大而严格减小。因此，代理目标最小化必然采用命题\ref{prop:group-max-timebase}给出的最大可行调用周期，无需将 TimeBase 作为独立变量再次搜索。调用周期由此确定后，还需说明代理目标为何必须显式保留固定调用成本：如果完全忽略 $\rho$，模型会对分组方式产生怎样的结构性偏好？
+
+\subsubsection{固定调用开销与分组权衡}
+\label{subsubsec:proxy-boundary-split-bias}
+
+固定调用成本的作用可由反事实说明。若忽略每次周期入口调用本身的固定成本，只按组内报文数与调用频率累计，则得到
+\begin{equation}
+ P_0(\Pi)
+ =
+ \sum_{G\in\Pi}\frac{N_G}{B_G}.
+\label{eq:naive-cpu-proxy}
+\end{equation}
+
+\begin{proposition}[朴素指标对分组细化的弱偏置]
+\label{prop:naive-split-bias}
+设分组方案 $\Pi'$ 由 $\Pi$ 中某一非空组 $G$ 细分为非空子组 $G_1,\ldots,G_k$ 得到，其余分组不变，则在式\eqref{eq:naive-cpu-proxy}下，$P_0(\Pi')\le P_0(\Pi)$。当至少一个子组获得严格大于 $B_G$ 的 TimeBase 时，不等式严格成立。
+\end{proposition}
+
+\begin{proof}[\normalfont 证明思路]
+细分后的每个子组均满足 $B_{G_j}\ge B_G$，而各子组的报文数之和仍为 $N_G$。因此，拆分后的朴素成本不超过原组成本；其余分组不变，结论随之成立。完整证明见附录第~\ref{subsubsec:appendix-naive-proxy-proof}~节。
+\end{proof}
+
+命题\ref{prop:naive-split-bias}表明，$P_0$ 对分组细化具有结构性的弱偏好：继续细分既有分组不会使指标增大，并可能因子组调用周期增大而严格下降。因此，该指标无法体现新增 MainFunction 本身带来的固定调用成本。在 $P_{\rm CPU}$ 中加入 $\rho$ 后，每个新增 MainFunction 都会引入固定调用项，分组细化不再天然占优；与此同时，子组 $B_G$ 的增大仍可能降低调用频率。由此，“合并以减少固定调用次数”与“拆分以获得更大的可行调用周期”之间形成了可比较的结构性权衡。
+
+代理模型明确后，固定 $\boldsymbol O$ 下的软件侧问题转化为：在所有 MainFunction 划分中寻找 $P_{\rm CPU}$ 最小的方案。此时，真正的困难不再是成本如何定义，而是报文级集合划分数量会随问题规模迅速增长。
+
+\subsection{D 类型压缩与最优性保持}
+\label{subsec:d-type-compression}
+
+对 $n$ 条报文直接枚举 MainFunction 划分，候选数量按 Bell 数增长。固定 $\boldsymbol O$ 后，每条报文的 $D_i$ 已由式\eqref{eq:message-max-tick}确定，分组调用周期由组内 $D_i$ 的最大公约数决定，而代理成本进一步只依赖各 D 类型、相应报文数量及 $\rho$。因此，在进入精确枚举前需要回答：具有相同 $D_i$ 的多条报文，是否仍有必要作为彼此不同的个体参与划分？对任意非空组 $G$，其代理成本可写为
+\begin{equation}
+ c(G)
+ =
+ \frac{\rho+|G|}
+ {\gcd_{i\in G}D_i}.
+\label{eq:fixed-offset-group-cost}
+\end{equation}
+式\eqref{eq:fixed-offset-group-cost}表明，一个分组的评价只依赖其中的 $D_i$ 取值、相同取值的出现次数及 $\rho$，而不依赖报文名称、CAN ID、定义位置或原始输入顺序。这些身份信息仅在类型级结果映射回具体报文时使用。
+
+将不同的 $D$ 值按升序记为 $d_1<d_2<\cdots<d_m$，令 $c_j$ 表示 $D_i=d_j$ 的报文数量。相应的 D 类型直方图为
+\begin{equation}
+ H_D
+ =
+ \bigl((d_1,c_1),(d_2,c_2),\ldots,(d_m,c_m)\bigr).
+\label{eq:d-histogram}
+\end{equation}
+
+\begin{proposition}[相同 D 类型的整体可分配性]
+\label{prop:same-d-compression}
+在式\eqref{eq:fixed-offset-group-cost}定义的组成本下，至少存在一个全局最优 MainFunction 分组方案，使具有相同 $D_i$ 的全部报文不被拆分到多个组中。
+\end{proposition}
+
+\begin{proof}[\normalfont 证明思路]
+若同一 D 类型分散在两个组中，可将 TimeBase 较小组内的一条同类型报文移入另一组。该移动不改变接收组的最大公约数；移出组的最大公约数保持不变或增大，因而总成本不会上升。反复执行交换即可由任一最优方案得到一个不拆分相同 D 类型的最优方案。完整交换证明见附录第~\ref{subsubsec:appendix-same-d-proof}~节。
+\end{proof}
+
+命题\ref{prop:same-d-compression}只保证至少存在一个具有该结构的最优解，并不声称所有等成本最优解都必须满足这一性质。这意味着，将报文级划分压缩为 D 类型级划分不会排除全部全局最优方案；其意义不只是减少求解状态，而是在保留至少一个全局最优方案的前提下，将决策对象从 $n$ 条具体报文转化为 $m$ 个不同 D 类型，各类型的重数 $c_j$ 仍完整保留相应报文数量。类型集合本身仍存在多种划分，余下的问题是如何不重不漏地枚举这些分组，并利用最优子结构精确求得最小成本。
+
+\subsection{基于子集动态规划的精确分组求解}
+\label{subsec:deterministic-subset-dp}
+
+D 类型压缩将决策对象由具体报文缩减为不同类型，却没有消除类型集合划分本身的组合问题。精确求解仍需不重不漏地遍历类型划分，并利用余集上的最优子结构组合各个分组；为此，可将类型子集作为动态规划状态。
+
+\subsubsection{规范锚点与状态递推}
+\label{subsubsec:anchor-recurrence}
+
+类型集合的划分本身没有顺序。若在每个状态中任意选择当前分组 $A$，同一划分可能因分组选择顺序不同而重复出现。为此，对每个非空状态选取一个规范锚点，并只允许当前分组包含该锚点。设 D 类型索引全集为 $\mathcal U=\{1,2,\ldots,m\}$。对任意非空子集 $A\subseteq\mathcal U$，其中包含的具体报文数定义为
+\begin{equation}
+ N(A)
+ =
+ \sum_{j\in A}c_j.
+\label{eq:subset-message-count}
+\end{equation}
+该类型子集形成一个周期入口时，最大可行调用周期为
+\begin{equation}
+ B(A)
+ =
+ \gcd_{j\in A}d_j.
+\label{eq:subset-timebase}
+\end{equation}
+相应的组成本为
+\begin{equation}
+ C(A)
+ =
+ \frac{\rho+N(A)}{B(A)}.
+\label{eq:subset-group-cost}
+\end{equation}
+
+令 $F(S)$ 表示类型子集 $S\subseteq\mathcal U$ 的最小软件调用开销代理指标，并置 $F(\varnothing)=0$。为避免因 MainFunction 组的排列顺序不同而重复枚举同一无序划分，对任意非空 $S$ 取规范锚点
+\begin{equation}
+ a(S)
+ =
+ \min S.
+\label{eq:subset-anchor}
+\end{equation}
+固定包含锚点的当前分组后，状态递推为
+\begin{equation}
+ F(S)
+ =
+ \min_{\substack{A\subseteq S\\a(S)\in A}}
+ \left\{
+ C(A)+F(S\setminus A)
+ \right\}.
+\label{eq:anchor-subset-dp}
+\end{equation}
+
+\begin{lemma}[锚点分组的唯一性]
+\label{lem:anchor-block-uniqueness}
+对任意非空集合 $S$ 的无序划分，其中恰有一个分组包含锚点 $a(S)$。因此，式\eqref{eq:anchor-subset-dp}枚举所有包含锚点的 $A$ 时，对 $S$ 的每个无序划分不重不漏。
+\end{lemma}
+
+\begin{proof}[\normalfont 证明思路]
+无序划分中的各组两两不交且并集为 $S$，故 $a(S)$ 必须属于其中唯一一组。选定该组后，余下各组恰构成 $S\setminus A$ 的划分，反向组合也唯一成立。完整证明见附录第~\ref{subsubsec:appendix-anchor-proof}~节。
+\end{proof}
+
+式\eqref{eq:anchor-subset-dp}同时利用了最优子结构。若最优划分的锚点组为 $A^\star$，则余集必须采用 $F(S\setminus A^\star)$ 所表示的最优划分；否则可用更低成本的余集方案替换并改进原划分。对所有可能的锚点组取最小值，便得到状态 $S$ 的最优成本。递推关系由此给出了候选结构，但仍需确认 D 类型压缩与规范锚点共同覆盖至少一个报文级全局最优划分，并考察其计算规模如何随类型数 $m$ 增长。
+
+\subsubsection{精确性与计算规模}
+\label{subsubsec:dp-exactness-complexity}
+
+递推式本身并不自动保证报文级全局最优性。为此，需要同时利用 D 类型压缩对至少一个最优方案的保持、规范锚点对类型划分的完备枚举，以及式\eqref{eq:anchor-subset-dp}所具有的最优子结构。命题\ref{prop:same-d-compression}与引理\ref{lem:anchor-block-uniqueness}分别给出前两项保证，由此得到以下精确性结论。
+
+\begin{theorem}[固定 Offset 分组子问题的精确性]
+\label{thm:fixed-offset-dp-exactness}
+给定一个完整且固定的 Offset 分配方案，若全部时间量位于共同整数栅格，组成本采用式\eqref{eq:fixed-offset-group-cost}，参数 $\rho>0$，且式\eqref{eq:anchor-subset-dp}完整枚举所有包含规范锚点的类型子集，则 D 类型压缩与子集动态规划返回本章 CPU 开销代理模型内的全局最小 MainFunction 分组成本。
+\end{theorem}
+
+\begin{proof}[\normalfont 证明思路]
+命题\ref{prop:same-d-compression}保证至少存在一个报文级全局最优方案可以表示为 D 类型划分。引理\ref{lem:anchor-block-uniqueness}保证锚点递推对类型划分不重不漏，最优子结构则使每个状态由一个锚点组与余集最优状态组成。由集合大小归纳即可得到 $F(\mathcal U)$ 的全局最小性。完整归纳证明见附录第~\ref{subsubsec:appendix-dp-induction}~节。
+\end{proof}
+
+定理\ref{thm:fixed-offset-dp-exactness}的全局最优性限定于给定 $\boldsymbol O$ 后的 MainFunction 分组子问题。
+
+这种精确性以 D 类型集合上的指数枚举为代价。子集动态规划包含 $O(2^m)$ 个状态，候选分组的组合枚举使核心时间规模为 $O(3^m)$；其中 $m$ 表示不同 D 类型的数量，而不是具体报文数量。实际实现还包含关于 $m$ 的多项式额外开销，完整组合计数推导见附录第~\ref{subsubsec:appendix-dp-complexity-derivation}~节。
+
+实现采用整数时间和精确有理数比较代理成本，并以规范消歧规则在等成本最优方案中选择唯一代表；这些规则只保证结果稳定，不改变式\eqref{eq:cpu-proxy}的目标值及其最小成本。
+
+因此，对任一已经确定的完整 Offset 分配方案，本章方法都能精确返回模型内的最小软件调用开销代理值及一个规范最优分组。外层评价 Offset 时无需再同时启发式搜索 MainFunction 划分，这一结果为通信与软件目标的联合优化提供了结构基础。
+\clearpage
+\section{CAN--CPU 联合优化}
+\label{sec:can-cpu-joint}
+
+一个完整 Offset 分配方案 $\boldsymbol O$ 一旦确定，第~\ref{sec:offset-balancing-model}~章定义的通信侧评价即可给出其局部释放指标，第~\ref{sec:main-function-exact}~章的精确求解器则可返回该分配方案下软件分组的最小 CPU 开销代理指标。因而，同一外层决策不再只对应 CAN 侧的均衡质量，而是同时产生通信侧与软件侧两类评价结果。本章关注的问题是：如何在 Peak 不发生不可接受退化的条件下，搜索稳态负载平方和 $Q^{\mathrm{ss}}$ 与软件侧最小代理成本之间的折中。
+
+\subsection{联合搜索域与长周期相位约束}
+\label{subsec:joint-long-period-policy}
+
+联合评价首先需要界定外层实际搜索的 Offset。对于周期超过当前 Offset 搜索上界 $O^{\rm lim}$ 的可评价报文，继续扩张相位候选会直接增大组合空间，本文将其相位固定为零。若 $\Oset_i$ 表示报文 $m_i$ 的通常离散候选集合，则联合模式采用
+\begin{equation}
+ \Oset_i^{\rm joint}
+ =
+ \begin{cases}
+  \Oset_i, & T_i\le O^{\rm lim},\\
+  \{0\}, & T_i>O^{\rm lim}.
+ \end{cases}
+\label{eq:joint-offset-candidates}
+\end{equation}
+因此，$T_i=O^{\rm lim}$ 时仍保留原有候选，并未被归入固定相位情形。全部可评价报文共同构成联合搜索域
+\begin{equation}
+ \Omega_{\rm joint}
+ =
+ \prod_{m_i\in\Eset}\Oset_i^{\rm joint}.
+\label{eq:joint-offset-domain}
+\end{equation}
+
+长周期固定报文仍属于式\eqref{eq:decision-fixed-partition}定义的固定集合 $\Fset$：其释放继续计入 CAN 时隙负载，且其 $(T_i,O_i)$ 仍进入 MainFunction 精确评价，只是不再具有 Offset 决策自由度。路由排除集合 $\Xset^{\rm route}$ 中的报文则不进入两侧评价。该固定相位规则是当前联合搜索的工程域约束。
+
+\subsection{固定 Offset 下的精确内层评价}
+\label{subsec:joint-layered-solver}
+
+若把 Offset 分配 $\boldsymbol O$ 与 MainFunction 划分 $\Pi$ 同时作为外层变量，联合搜索空间将叠加相位分配与集合划分两类组合复杂度。第~\ref{sec:main-function-exact}~章给出的结构性质使这一联合枚举没有必要：对任意 $\boldsymbol O\in\Omega_{\rm joint}$，记 $\mathcal P(\boldsymbol O)$ 为相应的可行划分集合，则固定 Offset 下的最小代理成本为
+\begin{equation}
+ P^\star(\boldsymbol O)
+ =
+ \min_{\Pi\in\mathcal P(\boldsymbol O)}
+ P_{\rm CPU}(\Pi\mid\boldsymbol O).
+\label{eq:joint-inner-optimum}
+\end{equation}
+由定理\ref{thm:fixed-offset-dp-exactness}，该最小值可由 D 类型压缩与确定性子集动态规划精确取得。下文以 $\Pi^\star(\boldsymbol O)$ 表示精确求解器按既定消歧规则返回的一个最优划分。
+
+\begin{proposition}[内层最优划分的充分性]
+\label{prop:inner-optimal-partition-suffices}
+固定 $\boldsymbol O$ 后，以 $\Pi^\star(\boldsymbol O)$ 替换任意可行划分 $\Pi$，CAN 侧评价量保持不变，且 CPU 开销代理指标不增；若 $\Pi$ 严格次优，即 $P_{\rm CPU}(\Pi\mid\boldsymbol O)>P^\star(\boldsymbol O)$，则代理指标严格下降。因此，联合外层只需保留每个 Offset 分配方案的内层最优代表。
+\end{proposition}
+
+\begin{proof}[证明概要]
+固定 $\boldsymbol O$ 后，时隙负载只由报文、释放权重与 Offset 决定，与 MainFunction 划分无关。由式\eqref{eq:joint-inner-optimum}，$P^\star(\boldsymbol O)$ 不大于任意可行划分的代理成本，并在原划分严格次优时形成严格不等式。故替换后 CAN 目标不变而 CPU 目标不增，严格次优划分在二维联合评价中被对应的内层最优代表支配。完整证明见附录第~\ref{subsec:appendix-inner-replacement-proof}~节。
+\end{proof}
+
+命题\ref{prop:inner-optimal-partition-suffices}将每个外层候选压缩为统一的联合评价点：
+\begin{equation}
+ \boldsymbol O
+ \longmapsto
+ \left(
+ Q^{\mathrm{ss}}(\boldsymbol O),
+ Z^{\mathrm{ss}}(\boldsymbol O),
+ P^\star(\boldsymbol O)
+ \right).
+\label{eq:joint-evaluation-map}
+\end{equation}
+其中，$Z^{\mathrm{ss}}$ 用于限定可接受的峰值变化，后续折中与 Pareto 关系仅在 $Q^{\mathrm{ss}}$ 和 $P^\star$ 两维上定义。对外层已经访问的 $\boldsymbol O$，$P^\star(\boldsymbol O)$ 是当前代理模型下的精确内层最小值；Offset 空间的覆盖仍由启发式外层搜索决定。
+
+\subsection{Peak 约束下的 \texorpdfstring{$\varepsilon$-constraint}{Epsilon-constraint} 联合模型}
+\label{subsec:joint-epsilon-model}
+\label{subsubsec:joint-peak-cpu-budget}
+\label{subsubsec:weighted-sum-limit}
+
+式\eqref{eq:joint-evaluation-map}给出的 $Q^{\mathrm{ss}}$ 与 $P^\star$ 量纲不同，且相位调整可能使二者相互冲突。直接使用 $\alpha Q^{\mathrm{ss}}+\beta P^\star$，既需要人为处理尺度与偏好，也可能遗漏离散非凸目标集中的非支撑非支配区域。$\varepsilon$-constraint 将 CPU 开销代理指标转化为显式预算，同时保留 $Q^{\mathrm{ss}}$ 的原始均衡含义，更适合呈现不同软件预算下的通信侧变化\cite{mavrotas2009}。
+
+联合搜索还须保留通信侧的峰值边界。记累积候选集中按正式 Peak 比较准则选出的当前参考为 $\boldsymbol O_{\rm peak}^{\rm ref}$，并按式\eqref{eq:balanced-peak-budget}计算 $Z_{\rm budget}$。结合式\eqref{eq:violation-key}定义的超限二元组 $\boldsymbol G$，Peak 可行集合为
+\begin{equation}
+ \Fset_{\rm peak}
+ =
+ \left\{
+  \boldsymbol O\in\Omega_{\rm joint}
+  \ \middle|\
+  \begin{gathered}
+   Z^{\mathrm{ss}}(\boldsymbol O)\le Z_{\rm budget},\\
+   \boldsymbol G(\boldsymbol O)
+   \preceq_{\rm lex}
+   \boldsymbol G(\boldsymbol O_{\rm peak}^{\rm ref})
+  \end{gathered}
+ \right\}.
+\label{eq:joint-peak-feasible-set}
+\end{equation}
+Peak 在这里是候选准入约束，而不是 Pareto 分析的第三个目标。
+
+给定 CPU 预算 $\varepsilon$，联合模型写为
+\begin{equation}
+ \begin{aligned}
+  &\underset{\boldsymbol O}{\operatorname{minimize}}
+  && Q^{\mathrm{ss}}(\boldsymbol O)\\
+  &\textnormal{s.t.}
+  && \boldsymbol O\in\Fset_{\rm peak},\\
+  &&& P^\star(\boldsymbol O)\le\varepsilon.
+ \end{aligned}
+\label{eq:joint-epsilon-problem}
+\end{equation}
+式\eqref{eq:joint-epsilon-problem}是理论上的受约束最小化模型；实际外层求解在有限搜索预算内返回满足约束的最佳已发现候选，内层 $P^\star$ 的计算仍保持精确。
+
+记当前观测 CPU 端点与 CAN 端点的代理成本分别为 $P_{\min}$ 和 $P_{\max}$。当 $P_{\min}<P_{\max}$ 时，在两端点之间设置 $K$ 个 CPU 预算水平：
+\begin{equation}
+ \varepsilon_j
+ =
+ P_{\min}
+ +
+ \frac{j}{K-1}
+ \left(P_{\max}-P_{\min}\right),
+ \qquad j=0,1,\ldots,K-1.
+\label{eq:joint-epsilon-grid}
+\end{equation}
+其中，$K\ge2$ 为 CPU 预算网格点数。较大的 $K$ 只表示在当前观测端点之间设置更多预算水平，用于增加外层启发式搜索的预算采样；它不改变给定 Offset 下 $P^\star(\boldsymbol O)$ 的内层精确性。观测端点发生变化后，式\eqref{eq:joint-epsilon-grid}将在迭代细化过程中重新生成。预算网格的精确生成与候选复用规则见附录第~\ref{subsubsec:appendix-joint-budget}~节。
+
+由于外层搜索具有启发式性质，初始 Peak、CAN 和 CPU 候选仍可能被后续受约束搜索改善；据此固定一次端点和预算区间，会使早期搜索结果不适当地限制后续候选。
+
+\subsection{累积候选集与迭代细化}
+\label{subsec:joint-archive-refinement}
+
+后续搜索可能改进早期候选，因而联合求解不能采用一次性“初始端点—预算扫描—前沿提取”流程。新发现的完整分配需要持续反馈到 Peak 参考、端点和下一轮 CPU 预算，由此形成累积候选集与迭代细化机制。
+
+\subsubsection{初始候选与观测端点}
+\label{subsubsec:initial-anchors-observed-endpoints}
+
+初始阶段分别运行 Peak、CAN 和 CPU 方向的启发式搜索。Peak 初始候选用于建立首个峰值参考，CAN 初始候选在相应 Peak 约束内侧重降低 $Q^{\mathrm{ss}}$，CPU 初始候选则侧重降低 $P^\star$。这些候选只是累积集合的第一批成员和首轮在位解，不被解释为全空间最优点。
+
+一次联合运行维护累积候选集 $\mathcal A$，跨初始搜索、各次重启、$\varepsilon$ 扫描和细化轮次保存完整 Offset 分配方案。相同分配依据稳定标识去重；候选的来源、预算和精确评价结果随分配一并保留，具体字段见附录第~\ref{subsubsec:appendix-joint-refinement-details}~节。在当前 Peak 约束下过滤 $\mathcal A$ 得到 $\mathcal A_{\rm f}$ 后，观测 CAN 端点优先选择较小的 $Q^{\mathrm{ss}}$，再比较 $P^\star$；观测 CPU 端点则按相反次序比较。端点因此表示当前归档候选中已经观察到的两侧边界，并随 $\mathcal A$ 的增长而更新。累积候选集的作用不止于保存历史结果：新增候选可能改变 Peak 参考和两个观测端点，预算区间也必须随之调整。
+
+\subsubsection{累积细化与终止判据}
+\label{subsubsec:peak-reference-refinement}
+\label{subsubsec:refinement-stability}
+
+每轮细化先搜索新的 Peak 候选，并从累积候选集中重新选择正式 Peak 参考。参考改善后，$Z_{\rm budget}$ 随之重算，历史候选也依据新的式\eqref{eq:joint-peak-feasible-set}重新过滤；不再满足约束的候选仍可保留用于审计，但不进入当前端点与 Pareto 集合。随后分别细化 CAN 与 CPU 端点，按更新后的 $P_{\min}$ 和 $P_{\max}$ 重新生成 $\varepsilon$ 预算，并将各预算下发现的候选继续并入 $\mathcal A$。算法~\ref{alg:joint-refinement}给出这一研究级流程，其中 $R_{\max}$ 为最大细化轮数。
+
+\begin{algorithm}[htbp]
+\PaperAlgorithmStyle
+\refstepcounter{algocf}
+\label{alg:joint-refinement}
+\KwInput{联合搜索域 $\Omega_{\rm joint}$，外层搜索配置，预算点数 $K$，最大轮数 $R_{\max}$}
+\KwOutput{观测 Peak 参考、观测端点、观测 Pareto 前沿及终止状态}
+执行初始 Peak、CAN 与 CPU 搜索，并将所得候选并入 $\mathcal A$\;
+依据当前 Peak 参考计算 $Z_{\rm budget}$，过滤得到 $\mathcal A_{\rm f}$\;
+\For{$r\gets0$ \KwTo $R_{\max}-1$}{
+  细化 Peak 候选，更新参考、预算和 $\mathcal A_{\rm f}$\;
+  依次细化观测 CAN 端点与 CPU 端点，并合并新候选\;
+  由更新后的 $P_{\min}$ 与 $P_{\max}$ 重新生成精确 $\varepsilon$ 预算\;
+  执行各预算下的受约束外层搜索，并将结果并入 $\mathcal A$\;
+  按最新 Peak 约束过滤候选，更新端点与二维非支配集合\;
+  \If{当前确定性签名与上一完整轮次相同}{
+    报告 \texttt{refinement\_converged} 并终止循环\;
+  }
+}
+\If{达到 $R_{\max}$ 时签名仍有变化}{
+  报告 \texttt{refinement\_limit\_reached}\;
+}
+\PaperAlgorithmCaption{CAN--CPU 累积候选集合迭代细化}
+\end{algorithm}
+
+受约束搜索可从 $\mathcal A_{\rm f}$ 中复用满足当前预算的候选作为在位解或热启动，其中包括当前端点与前一 $\varepsilon$ 预算的可行结果。每个完整轮次结束后形成确定性签名；只有相邻两个完整轮次的签名完全相同，才报告细化稳定，达到 $R_{\max}$ 则按预算终止。完整签名、种子派生和执行顺序见附录第~\ref{subsubsec:appendix-joint-refinement-details}~节。
+
+稳定性报告同时区分两个层面：目标前沿稳定要求正式 Peak 目标、峰值预算、两个端点及有序 Pareto 目标对保持一致；分配前沿稳定还要求这些结果对应的 Offset 分配也一致。不同分配可能产生相同目标值，因此前者并不蕴含后者。
+
+\subsection{观测 Pareto 前沿}
+\label{subsec:observed-pareto-front}
+\label{subsubsec:pareto-dominance-representative}
+\label{subsubsec:observed-global-boundary}
+
+迭代细化留下的是一组满足当前 Peak 约束的候选。为了去除在通信与软件两侧都不具优势的方案，对 $a,b\in\mathcal A_{\rm f}$ 定义二维支配关系：
+\begin{equation}
+ a\prec_{\rm d} b
+ \quad\Longleftrightarrow\quad
+ Q_a^{\mathrm{ss}}\le Q_b^{\mathrm{ss}},
+ \quad
+ P_a^\star\le P_b^\star,
+ \quad
+ (Q_a^{\mathrm{ss}},P_a^\star)
+ \ne
+ (Q_b^{\mathrm{ss}},P_b^\star).
+\label{eq:joint-dominance}
+\end{equation}
+两个目标均为越小越优，最后一个条件要求至少一维严格改善。Peak 已由前置约束处理，不进入支配关系的第三维。
+
+据此得到非支配集合
+\begin{equation}
+ \Pset_{\rm obs}
+ =
+ \left\{
+  \boldsymbol O\in\mathcal A_{\rm f}
+  \ \middle|\
+  \nexists\,\boldsymbol O'\in\mathcal A_{\rm f}
+  \text{ 使 }\boldsymbol O'\prec_{\rm d}\boldsymbol O
+ \right\}.
+\label{eq:observed-pareto-set}
+\end{equation}
+若多个分配具有相同的 $(Q^{\mathrm{ss}},P^\star)$，只保留一个确定性代表；消歧顺序见附录第~\ref{subsubsec:appendix-joint-recommendation-details}~节，不构成新的 Pareto 目标。本文将 $\Pset_{\rm obs}$ 称为观测 Pareto 前沿，以强调其定义域是累积搜索到的合法候选。
+
+Pareto 过滤给出的是一组互不支配的方案，而不是默认选择。为便于工程人员浏览该集合，还需要在不改变优化过程的前提下给出一个可解释的折中候选。
+
+\subsection{折中候选的几何后处理}
+\label{subsec:geometric-knee}
+\label{subsubsec:knee-normalization}
+\label{subsubsec:knee-fallback}
+\label{subsubsec:knee-interpretation}
+
+几何后处理只读取最终观测 Pareto 前沿。记其两个目标范围分别为 $[Q_{\min},Q_{\max}]$ 与 $[P_{\min},P_{\max}]$，第 $i$ 个候选的归一化坐标为
+\begin{equation}
+ \begin{aligned}
+  x_i &=
+  \frac{Q_i^{\mathrm{ss}}-Q_{\min}}
+       {Q_{\max}-Q_{\min}},\\
+  y_i &=
+  \frac{P_i^\star-P_{\min}}
+       {P_{\max}-P_{\min}}.
+ \end{aligned}
+\label{eq:knee-normalization}
+\end{equation}
+归一化端点连线为 $x+y=1$。对前沿内部点定义弦距评分
+\begin{equation}
+ s_i=1-x_i-y_i.
+\label{eq:knee-chord-score}
+\end{equation}
+$s_i$ 与点到端点连线的有符号垂直距离仅相差公共因子 $1/\sqrt{2}$，可用其精确值排序，但不将其直接解释为欧氏距离。
+
+当存在内部点且 $s_i>0$ 时，在全部正评分内部点中选择 $s_i$ 最大者作为几何膝点（geometric knee），端点不参与这一选择。若不存在正评分内部点，包括内部评分全部为零或均为负的情形，则以归一化理想点 $(0,0)$ 为参照，定义
+\begin{equation}
+ d_i^2=x_i^2+y_i^2.
+\label{eq:knee-ideal-distance}
+\end{equation}
+此时在内部候选中选择 $d_i^2$ 最小者作为理想点回退（ideal-point fallback）方案。单点前沿直接返回唯一观测解（unique observed solution），但不称为几何膝点；双点前沿没有内部 Pareto 点，因而报告无内部膝点并保留两个端点方案，不强行生成自动推荐；只有包含至少三个点的前沿才可能产生内部几何膝点。完整消歧、退化坐标轴及空前沿处理见附录第~\ref{subsubsec:appendix-joint-recommendation-details}~节。
+
+该规则仅用于最终观测 Pareto 前沿的后处理与解释性推荐，不进入 GCLS、$P^\star(\boldsymbol O)$、$\varepsilon$-constraint 或迭代细化。联合搜索最终保留满足当前 Peak 约束的累积候选，从中提取二维非支配解构成观测 Pareto 前沿，并依据前沿结构给出几何膝点、理想点回退或明确的退化状态。这些输出使通信均衡与软件调度代价之间的权衡由单一目标值转化为可观察、可解释的工程候选集合\cite{debgupta2011}。
+
+\clearpage
+
+\section{实验设计与结果}
+\label{sec:experiments}
+
+本章从三个层面验证前述方法：考察 GCLS 对九个真实网段局部释放分布的改善，验证固定 Offset 下 MainFunction 精确子问题的实现正确性与计算规模，并分析联合优化所得 $Q^{\mathrm{ss}}$--$P^\star$ 权衡及其稳定性。九网段结果构成主要实验，开发阶段的诊断实验则用于解释启发式搜索及参数变化所呈现的算法行为。
+
+\input{generated/ch7/ch7_macros.tex}
+
+\subsection{实验数据与复现设置}
+\label{subsec:exp-data-reproducibility}
+
+\subsubsection{九网段数据与输入资格}
+\label{subsubsec:exp-network-data}
+
+实验包含 CH、DA、DK、EP、GL、IC、LC、PT 和 SU 共九个真实 CAN FD 网段，读取节点 FLZCU 的周期发送报文。结果由锁定目录
+\path{output/final_paper_nine_network/}
+中的机器可读文件生成，源代码提交见锁定清单。路由排除规则在全部网段上均被执行，但本批数据未命中需排除的报文，因此表~\ref{tab:exp-network-manifest} 中相应计数均为零。
+
+\input{generated/ch7/table_networks.tex}
+
+表中 eligible 为依次通过发送节点、周期属性、网段归属、协议与路由规则筛选的评价对象。“可优化”和“固定”进一步区分联合模式中的决策报文与仅参与负载评价的长周期报文。StartDelay 的 E/D/U 分别表示显式值、按规则补入的默认值和来源不明值；九个网段均采用显式值，且不存在来源不明项。由此，负载评价集合与实际参与 Offset 分配的报文集合保持明确区分。
+
+\subsubsection{实验参数与运行环境}
+\label{subsubsec:exp-parameters-environment}
+
+CAN-only 实验采用帧时间权重，Offset 搜索范围为 $15$--$100\,\mathrm{ms}$，步长为 $5\,\mathrm{ms}$，并满足第~\ref{subsec:integer-tick-alignment} 节的整时间刻对齐约束。GCLS 基础随机种子为 0；自适应重启至少执行 20 次，每 10 次检查一次，耐心值为 20 次，最多执行 80 次。Balanced 模式的峰值容差为 \BalancedTolerancePercent。联合实验取未标定归一化参数 $\rho=1$，每个锚点执行 3 次尝试，初始 $\varepsilon$ 网格点数为 $K=41$，最多进行 3 轮迭代细化。
+
+正式产物由 Python \FinalPythonVersion{} 在 \FinalRuntimeOS{} 环境生成。复现清单同时锁定项目配置、九个 DBC 文件、路由表及其 SHA-256 摘要。本章表图均由对应 CSV、JSON 和 YAML 文件生成，并在写出前核对网段集合、输入资格、前沿点数和峰值约束。论文实验采用 main 分支的 \path{scripts/final_paper_nine_network.py} 及上述锁定产物；配套工程界面虽复用一致的核心输入语义与优化逻辑，但不作为本章结果的数据来源。本文算法实现及工程工具已公开发布，论文对应的软件版本为 \emph{CAN FD Offset Optimizer} v1.0\cite{hao2026canfdoptimizer}。
+
+\subsubsection{评价指标与统计口径}
+\label{subsubsec:exp-metrics-gates}
+
+通信侧采用第~\ref{sec:offset-balancing-model} 节定义的稳态峰值 $Z^{\mathrm{ss}}$ 与负载平方和 $Q^{\mathrm{ss}}$，后者在总工作量固定时等价于最小化时隙负载方差。联合实验以 $Q^{\mathrm{ss}}$ 和第~\ref{subsubsec:rho-cpu-proxy} 节定义的精确分组最优值 $P^\star$ 构造二维观测 Pareto 前沿。指标 $M$ 的相对改善率统一定义为
+\begin{equation}
+ R_M
+ =
+ \frac{M_{\mathrm{base}}-M_{\mathrm{target}}}
+ {M_{\mathrm{base}}}\times 100\%,
+\label{eq:exp-relative-reduction}
+\end{equation}
+其中 $M\in\{Z^{\mathrm{ss}},Q^{\mathrm{ss}},P^\star\}$，三项指标均以数值较小为优。该比率仅用于输入集合、评价窗口和量纲一致的基准与目标之间。
+
+正式数据通过 189 项自动化测试以及 Ruff、mypy 检查。最终验证文件同时给出为真的 \texttt{paper\_ready} 标志。检查内容覆盖输入资格、Offset 合法性、固定报文处理、Peak 与 $\varepsilon$ 约束、前沿非支配性、MainFunction 覆盖与整除关系，以及 CPU 开销代理指标的一致性。这些检查用于保证实现与产物符合既定实验口径，不改变外层搜索的启发式性质。
+
+\subsection{研究问题与实验对照}
+\label{subsec:exp-rqs}
+
+实验围绕以下六个研究问题展开。
+\begin{enumerate}
+ \item \textbf{RQ1：}相对于原始配置和贪心构造，GCLS 的 Peak、Balanced 与 Variance 模式在九网段上呈现怎样的峰值与均衡结果？
+ \item \textbf{RQ2：}随机重启、峰值容差、候选池和权重口径如何影响 GCLS 的目标值与 Offset 分配方案？
+ \item \textbf{RQ3：}在代表性实例上，CP-SAT 能否找到优于 GCLS 的可行解，其求解状态能够支持何种判断？
+ \item \textbf{RQ4：}固定 Offset 下的 MainFunction 子集动态规划是否与小规模穷举一致，其计算时间随不同 $D$ 类型数如何变化？
+ \item \textbf{RQ5：}九网段联合优化得到的观测 Pareto 前沿、细化状态和后处理推荐具有怎样的结构？
+ \item \textbf{RQ6：}随机种子、$\rho$、$\varepsilon$ 网格与搜索路径对联合结果有何影响？
+\end{enumerate}
+
+CAN-only 对照包括 Original、Greedy、Peak、Balanced 和 Variance。Original 保留输入 Offset，Greedy 为第~\ref{subsec:gcls-greedy} 节的确定性构造，其余三种方法使用相同的输入资格和帧时间权重，仅目标优先关系及峰值约束不同。联合实验报告 CAN 倾向端点、CPU 倾向端点、全部观测非支配点和后处理推荐。由于内层 MainFunction 分组在固定 Offset 下精确求解，联合结果的不确定性来自外层 Offset 搜索、锚点构造和迭代细化，而非内层分组的近似误差。
+
+\subsection{RQ1：CAN-only 的峰值削减与稳态均衡}
+\label{subsec:exp-rq1}
+
+\subsubsection{Original、Greedy、Peak 与 Balanced 对比}
+\label{subsubsec:exp-rq1-main}
+
+表~\ref{tab:exp-can-main} 同时列出各方法的 $Z^{\mathrm{ss}}$ 与 $Q^{\mathrm{ss}}$，以分别观察最不利时隙和全窗口负载分布的变化。
+
+\input{generated/ch7/table_can_only.tex}
+
+Peak 相对于 Original 在 \CanPeakImprovedCount{}/9 个网段降低了稳态峰值，即 \CanPeakImprovedNetworks；其中 \CanBeyondGreedyCount{} 个网段（\CanBeyondGreedyNetworks）进一步取得了低于 Greedy 的峰值。CH、EP 和 SU 在各方法下的指标相同，表明其在当前候选域和搜索预算内未观察到可改善方案。
+
+Balanced 在九个网段上的 $Z^{\mathrm{ss}}/Q^{\mathrm{ss}}$ 均与 Peak 相同，即 \BalancedPeakEquality{} 一致。在 \BalancedTolerancePercent{} 峰值容差及当前候选池、搜索预算下，容差放宽没有带来额外的 $Q^{\mathrm{ss}}$ 改善。图~\ref{fig:exp-can-peak} 以 Original 为基准给出各方法的归一化峰值，并保留全部等值结果。
+
+\begin{figure}[htbp]
+ \centering
+ \includegraphics[width=0.86\textwidth]{generated/ch7/fig_can_peak_normalized.pdf}
+ \caption{九网段 CAN-only 稳态峰值相对于 Original 的归一化结果}
+ \label{fig:exp-can-peak}
+\end{figure}
+
+上述结果说明，Peak 在六个网段中利用候选相位重组了局部释放关系；另外三个网段的等值现象仅对应本次有限搜索结果，不能据此判定原始分配已达全局最优。Balanced 与 Peak 的一致性同样是当前参数下的观测结果，并不意味着两种目标模式一般等价。
+
+\subsubsection{Variance 模式下的均衡—峰值权衡}
+\label{subsubsec:exp-rq1-variance}
+
+Variance 以减小 $Q^{\mathrm{ss}}$ 为首要目标，因而可能接受更高的 $Z^{\mathrm{ss}}$。DK、GL、IC 和 LC 均出现平方和降低而峰值升高的结果。以 DK 为例，$Q^{\mathrm{ss}}$ 由 Peak 的 $17\,384\,489$ 降至 $16\,868\,739$，峰值则由 $532\,\mu\mathrm{s}$ 增至 $657\,\mu\mathrm{s}$；IC 的 $Q^{\mathrm{ss}}$ 由 $44\,001\,873$ 降至 $42\,584\,863$，峰值由 $572\,\mu\mathrm{s}$ 增至 $657\,\mu\mathrm{s}$。GL 与 LC 的变化方向相同。
+
+\begin{figure}[htbp]
+ \centering
+ \includegraphics[width=0.74\textwidth]{generated/ch7/fig_variance_tradeoff.pdf}
+ \caption{Variance 相对于 Peak 的稳态平方和与峰值变化}
+ \label{fig:exp-variance-tradeoff}
+\end{figure}
+
+图~\ref{fig:exp-variance-tradeoff} 汇总了上述四个网段。结果表明，$Q^{\mathrm{ss}}$ 与 $Z^{\mathrm{ss}}$ 分别描述整体分布和最不利时隙，不能相互替代；在存在明确峰值裕量要求时，方差型目标需与峰值约束结合使用。
+
+\subsection{RQ2：GCLS 的稳定性与关键消融}
+\label{subsec:exp-rq2}
+
+本节采用开发阶段诊断实验考察外层启发式搜索的随机性和配置敏感性。各诊断预算并不完全一致，因而以下结果用于解释算法行为，不与九网段主结果作绝对目标值排序。表~\ref{tab:exp-gcls-diagnostics} 汇总关键观察，完整扫描与逐批结果保留在附录第~\ref{sec:appendix-diagnostics}~节。
+
+\input{generated/ch7/table_gcls_diagnostics.tex}
+
+\subsubsection{重启搜索的目标值与分配稳定性}
+\label{subsubsec:exp-rq2-restart}
+
+重启诊断同时记录批次端点目标与完整 Offset 分配。表~\ref{tab:exp-gcls-diagnostics} 显示，Peak 和 Balanced 均出现目标值重复而分配方案仍保持高度多样的现象。这意味着目标稳定性描述的是搜索能否反复到达相近评价水平，分配稳定性则关系到能否复现同一配置，两者不能相互替代。
+
+有限重启扩大了搜索入口，并提高了发现高质量候选的机会，但全部批次均执行到最大尝试数，尚未观察到可据以判断饱和的停止行为。因此，当前重启预算应理解为有界搜索配置，而非收敛判据。
+
+\subsubsection{峰值容差与候选池效应}
+\label{subsubsec:exp-rq2-tolerance-pool}
+
+离散容差扫描表明，放宽 Peak 预算能够在部分实例上为降低 $Q^{\mathrm{ss}}$ 留出空间，但首次出现改善的位置因网段而异。表中位置仅表示在给定离散测试点首次观察到相应结果，不对应连续容差空间中的数学阈值。
+
+候选池从另一个方面利用解的结构多样性：即使若干 Peak 候选的目标值接近，其稳态相位结构仍可能不同，因而可为 Balanced 局部搜索提供不同入口。DK 的结果验证了这种保留策略在特定实例上能够带来后续改善，而 GL、IC 的对照也表明该收益并不普遍。
+
+\subsubsection{权重模式与帧时间估计}
+\label{subsubsec:exp-rq2-weight}
+
+现有完整对照工件覆盖 Payload 与帧时间两种权重。前者按数据长度描述单次释放，后者进一步纳入 nominal/data bitrate、BRS 与位填充估计。多个网段在两种口径下得到不同的 Offset 分配方案，说明权重定义不仅改变指标量纲，也会改变热点排序、候选比较和启发式搜索结果。
+
+正式实验采用帧时间权重，以近似时隙内的发送服务需求；该估计仍不等同于真实总线响应时间，也不包含仲裁等待、错误帧、重传、排队及软硬件抖动。单位计数虽是模型支持的近似口径，但当前没有与上述两种模式同批次、同表口径的完整工件，正文不补造相应对照结果。
+
+\FloatBarrier
+
+\subsection{RQ3：CP-SAT 可行解对照}
+\label{subsec:exp-rq3}
+
+\subsubsection{更优可行解的发现}
+\label{subsubsec:exp-rq3-better-feasible}
+
+为检验 GCLS 解受局部邻域与有限重启约束的程度，在 DK、GL 和 IC 上建立与 Balanced 相同候选域、帧时间权重和峰值预算的 CP-SAT 模型。表~\ref{tab:exp-cpsat} 显示，三个实例均找到低于 GCLS 的 $Q^{\mathrm{ss}}$ 可行解，改善幅度分别约为 $2.86\%$、$1.87\%$ 和 $4.20\%$。
+
+\input{generated/ch7/table_cpsat.tex}
+
+这些更优可行解构成直接反例，说明相应 GCLS 返回解并非全局最优，也与第~\ref{subsec:gcls-boundaries} 节对 1-opt、受限双报文邻域和有限重启搜索范围的分析一致。
+
+\subsubsection{\texorpdfstring{\texttt{FEASIBLE}}{FEASIBLE} 状态与证据含义}
+\label{subsubsec:exp-rq3-status}
+
+三个 CP-SAT 运行均以 \texttt{FEASIBLE} 而非 \texttt{OPTIMAL} 状态结束。表中结果证明存在优于相应 GCLS 解的可行分配，但既不是经证明的 CP-SAT 最优值，也不能用于计算 GCLS 相对于真实全局最优值的精确差距；求解日志中的下界与 incumbent 之间仍存在间隙。RQ3 因而支持对这三个 GCLS 解全局最优性的否定，但不形成所有网段上两类方法的统一性能排序。
+
+\subsection{RQ4：MainFunction 精确子问题的正确性与计算规模}
+\label{subsec:exp-rq4}
+
+\subsubsection{141 组独立穷举对照}
+\label{subsubsec:exp-rq4-oracle}
+
+固定 Offset 后，第~\ref{subsec:deterministic-subset-dp} 节的子集动态规划精确求解 MainFunction 分组。为独立核对程序实现，实验采用报文级 Bell 划分穷举作为基准：对 $n=1,\ldots,7$ 的 47 组小规模样本，分别取 $\rho\in\{1/2,1,3\}$，形成 141 个对照实例。动态规划与穷举在 141/141 个实例上得到相同的最小 CPU 开销代理指标。
+
+该结果与定理~\ref{thm:fixed-offset-dp-exactness} 的理论证明相互补充：定理由最优子结构和枚举完备性给出精确性依据，独立穷举则验证当前实现对小规模输入正确实现了相应递推。因此，固定 Offset 下的分组结果可作为精确内层评价，而外层 Offset 搜索的启发式性质保持不变。
+
+\subsubsection{不同 \texorpdfstring{$D$}{D} 类型数下的计算规模}
+\label{subsubsec:exp-rq4-scaling}
+
+内层状态规模取决于不同 $D$ 类型数 $m$，而非报文总数 $n$。九个真实网段的 $m$ 为 4--6，中位数为 5；其冷启动求解时间均低于 $1\,\mathrm{ms}$。为扩展观察范围，另构造 $m=5,8,10,12,13$ 的合成类型实例，冷启动中位时间依次为 $0.333$、$5.481$、$49.256$、$450.994$ 和 $1378.542\,\mathrm{ms}$。图~\ref{fig:exp-mainfunction-scaling} 在对数纵轴上同时给出真实网段测量值和合成实例中位数，真实网段横坐标仅作确定性轻微错位以避免同一 $m$ 下的标记重叠。
+
+\begin{figure}[!htbp]
+ \centering
+ \includegraphics[width=0.74\textwidth]{generated/ch7/fig_exact_solver_runtime.pdf}
+ \caption{不同 $D$ 类型数下 MainFunction 精确求解的计算时间}
+ \label{fig:exp-mainfunction-scaling}
+\end{figure}
+计算时间随 $m$ 增长的趋势与式~\eqref{eq:subset-enumeration-count} 的组合规模分析一致，但这些离散测量不用于拟合或外推复杂度模型。真实网段的缓存命中调用约为 $0.04$--$0.11\,\mathrm{ms}$，合成实例的缓存命中中位时间为 $0.038$--$0.099\,\mathrm{ms}$。这说明 $D$ 类型压缩与缓存能够降低联合外层重复评价的代价；相应数值仍取决于当前 Python 实现和测试平台，并非实时性保证。对本研究的九网段规模而言，每个被外层访问的 Offset 分配方案均可获得精确的 $P^\star(\boldsymbol O)$，从而为后续 $Q^{\mathrm{ss}}$--$P^\star$ 联合比较提供一致的内层评价。
+
+\FloatBarrier
+
+\subsection{RQ5：九网段 CAN--CPU 联合优化结果}
+\label{subsec:exp-rq5}
+
+\subsubsection{观测端点与观测 Pareto 前沿}
+\label{subsubsec:exp-rq5-fronts}
+
+表~\ref{tab:exp-joint-main} 汇总正式联合运行的两个观测端点、观测 Pareto 前沿规模与终止状态，其中 $P$ 表示固定 Offset 下精确求得的 $P^\star$。峰值在联合优化中作为可行性约束，而非第三个 Pareto 目标；全部保留点均重新通过峰值预算、$\varepsilon$ 预算和二维非支配性检查。
+
+\input{generated/ch7/table_joint.tex}
+
+CH、DA、DK、GL、IC 和 PT 得到多点观测前沿，呈现以较高 $Q^{\mathrm{ss}}$ 换取较低 $P^\star$ 的离散权衡；EP、LC 和 SU 仅保留一个观测非支配点，当前候选归档集中未出现第二个非支配方案。
+
+\begin{figure}[!t]
+ \centering
+ \includegraphics[width=0.92\textwidth]{generated/ch7/fig_joint_pareto.pdf}
+ \caption{九网段 CAN--CPU 观测结果中的六个多点 Pareto 前沿}
+ \label{fig:exp-joint-pareto}
+\end{figure}
+图~\ref{fig:exp-joint-pareto} 分别按照各网段自身的观测端点范围设置坐标轴，以突出前沿内部形状；不同子图的绝对坐标尺度并不相同，连线仅用于辅助辨认离散观测点。EP、LC 和 SU 的单点观测结果仍列于表~\ref{tab:exp-joint-main}，因不存在可绘制的多点折中曲线而未纳入图中。由于外层 GCLS、锚点和细化均为启发式过程，所得非支配集合记为观测 Pareto 前沿。
+
+\subsubsection{迭代细化状态与运行时间}
+\label{subsubsec:exp-rq5-refinement}
+
+CH、EP、LC、PT 和 SU 在第 2 或第 3 轮同时满足目标前沿与分配前沿的稳定判据；DA 达到 3 轮上限时仅目标前沿稳定，DK、GL 和 IC 达到上限时两类签名均未稳定。轮数上限是预算终止条件，而非九网段统一收敛的证据；增加锚点尝试或细化轮数仍可能改变当前观测前沿。
+
+九网段联合运行时间的最小值、中位数和最大值分别为 \JointRuntimeMin、\JointRuntimeMedian{} 和 \JointRuntimeMax{} 秒。MainFunction 精确求解累计时间占比的相应统计为 \JointSolverShareMin、\JointSolverShareMedian{} 和 \JointSolverShareMax；缓存命中率范围为 \JointCacheHitMin{}--\JointCacheHitMax，中位数为 \JointCacheHitMedian。较高的缓存命中率表明重复出现的 $D$ 类型子问题得到有效复用，而总时间仍主要取决于外层候选生成、评价和搜索路径。
+
+\subsubsection{几何膝点与回退推荐}
+\label{subsubsec:exp-rq5-knee}
+
+表~\ref{tab:exp-recommendations} 按第~\ref{subsec:geometric-knee} 节的确定性后处理规则给出推荐。CH、DA、DK、GL 和 IC 存在正弦距内部点，采用几何膝点；PT 的内部点不满足正弦距条件，采用理想点回退；EP、LC 和 SU 则返回唯一观测解。
+
+\input{generated/ch7/table_recommendations.tex}
+
+PT 的推荐不属于几何膝点，三个单点网段也不具有可供解释的前沿曲率。其余五个几何膝点同样只是当前观测前沿及归一化、弦距规则下的折中候选，并非唯一工程最优。总体上，九网段均得到满足既定约束的观测解，其中六个网段呈现 CAN 均衡与 CPU 开销代理指标之间的多点权衡；工程选择仍可结合峰值裕量、配置变更代价和平台约束，在同一前沿上采用其他方案。
+
+\subsection{RQ6：联合优化敏感性}
+\label{subsec:exp-rq6}
+
+本节以 DK、GL 和 IC 的开发阶段诊断结果考察观测联合结果对随机种子、CPU 开销代理模型参数与 $\varepsilon$ 搜索配置的稳定性。诊断所用网格及搜索预算与九网段正式运行不尽相同，因而只用于解释模型与搜索条件如何影响前沿和推荐。
+
+\begin{figure}[!tbp]
+ \centering
+ \includegraphics[width=0.96\textwidth]{generated/ch7/fig_joint_sensitivity.pdf}
+ \caption{联合优化的参数敏感性：（a）不同 $\rho$ 下推荐方案的 MainFunction 分组数；（b）随机种子变化与 $\varepsilon$ 网格加密引起的观测前沿公共尺度归一化对称 Hausdorff 距离。图（b）仅描述目标前沿几何，不表示 Offset 分配方案稳定性}
+ \label{fig:exp-joint-sensitivity}
+\end{figure}
+
+\subsubsection{随机种子的前沿与分配稳定性}
+\label{subsubsec:exp-rq6-seed}
+
+图~\ref{fig:exp-joint-sensitivity}（b）显示，改变随机种子后，DK 和 IC 的目标前沿 Hausdorff 距离均为 $0$，GL 的最大距离为 $0.049434$。相应地，DK 的目标值与分配哈希均保持一致；GL 的端点不变，但内部推荐点由 $Q^{\mathrm{ss}}=24\,050\,536$、$P^\star=2173$ 移至 $Q^{\mathrm{ss}}=23\,986\,536$、$P^\star=2173$。
+
+目标前沿几何稳定并不等同于配置唯一。IC 的目标前沿距离同样为 $0$，但 seed 2 在相同推荐目标值下得到不同的分配哈希。这一结果表明，相同的外部折中曲线仍可能对应不同的 Offset 分配方案，目标稳定性与分配稳定性需要分别考察。
+
+\subsubsection{\texorpdfstring{$\rho$}{rho} 对分组与前沿的影响}
+\label{subsubsec:exp-rq6-rho}
+
+参数 $\rho=C_0/C_1$ 表示 CPU 开销代理模型中固定调用成本相对于逐报文增量成本的权重。图~\ref{fig:exp-joint-sensitivity}（a）给出五个 $\rho$ 取值下的完整诊断结果：随着 $\rho$ 增大，三个网段的推荐分组数总体呈减少趋势，说明固定调用成本权重上升后，合并周期入口在代理目标中更为有利；部分相邻设置仍保持相同分组数，因而该趋势不应解释为无条件的严格单调关系。
+
+该扫描反映的是 CPU 开销代理模型的结构敏感性。由于 $\rho$ 尚未依据目标 ECU 的固定调用开销和逐报文处理开销进行测量标定，图中结果不用于选择目标平台的“真实 $\rho$”。
+
+\subsubsection{\texorpdfstring{$\varepsilon$}{Epsilon} 网格与搜索路径敏感性}
+\label{subsubsec:exp-rq6-grid}
+
+图~\ref{fig:exp-joint-sensitivity}（b）同时给出 $K=21$ 与 $K=41$ 之间的前沿差异：DK、GL 和 IC 的公共尺度归一化对称 Hausdorff 距离分别为 $0.186824$、$0.089373$ 和 $0.131505$。网格加密后三个网段的推荐点均发生移动，DK 与 GL 的部分观测端点也随之变化，三网运行时间均有所增加。
+
+这一变化不只是预算网格分辨率的提高。外层求解采用启发式搜索，改变 $\varepsilon$ 预算点会同时改变实际访问的约束搜索路径、incumbent 与 warm-start 的演化，以及候选解归档集中能够发现的分配方案。因此，当前 $K$ 敏感性同时包含网格采样效应和启发式搜索路径效应，不能据此把 $K=41$ 的结果解释为全局 Pareto 前沿。
+
+综合来看，当前联合结果能够展示实际的 $Q^{\mathrm{ss}}$--$P^\star$ 权衡，但具体推荐仍依赖 CPU 开销代理模型参数与有限启发式搜索条件。
+
+\FloatBarrier
+
+\clearpage
+
+\section{讨论}
+\label{sec:discussion}
+
+第~\ref{sec:experiments} 节呈现了两个相互关联的现象：CAN-only Offset 优化在六个网段降低了稳态峰值，而 CH、EP 和 SU 未观察到进一步改善；联合优化则在六个网段形成多点观测 Pareto 前沿，在 EP、LC 和 SU 仅保留单一非支配点。这些差异共同表明，Offset 的价值不仅取决于相位能否移动，还取决于周期、候选相位、报文权重与软件周期组织之间的结构关系。因而，实验结果的主要意义在于揭示不同网段为何呈现不同收益、通信与软件目标为何可能一致或冲突，以及这些认识在何种工程条件下成立。
+
+\subsection{Offset 相位重排的收益与网段依赖性}
+\label{subsec:discussion-offset}
+
+Offset 提供的是相位重排自由度，能够形成何种局部释放结构则由具体实例共同决定。周期集合及其倍数关系决定释放序列在统一评价窗口中的重复方式，合法候选 Offset 和原始相位限定可到达的位置，报文数量与帧时间权重决定不同重叠的代价，离散时间刻又将这些因素映射为有限的局部聚集模式。因此，即使采用相同的搜索方法，不同网段也不应预期获得相同幅度的 $Z^{\mathrm{ss}}$ 或 $Q^{\mathrm{ss}}$ 改善。
+
+Peak 在六个网段取得较低稳态峰值，说明真实工程配置中确实存在可利用的相位重排空间；CH、EP 和 SU 的等值结果则说明该空间的可利用程度具有实例依赖性。在当前候选域与搜索预算内，这三个网段未出现更低的 Peak，但该结果并不构成原始配置全局不可改进的证明。由此更合适的认识是，Offset 均衡并非稳定产生固定比例收益的通用变换，而是利用具体周期集合中已有的相位自由度重新组织局部释放。
+
+Peak 控制最高的局部聚集，$Q^{\mathrm{ss}}$ 则描述整个评价窗口内的负载形状，二者不存在一般的单调对应关系。主实验中 Balanced 与 Peak 在九个网段得到相同的核心 CAN 指标，表明在 $5\%$ Peak 容差、当前候选池和搜索预算下，尚未发现满足峰值约束而进一步改善 $Q^{\mathrm{ss}}$ 的方案。第~\ref{subsubsec:exp-rq2-tolerance-pool} 节的容差与候选池诊断产生了不同结果，说明这种一致性属于当前实例与配置，而非两类目标在数学上的等价。Variance 在部分网段以更高峰值换取更低 $Q^{\mathrm{ss}}$ 的结果也印证了两项指标的互补性。相位一旦同时约束软件侧调用周期，“更有利的相位”便进一步分化为通信侧与软件侧两种可能不同的结构偏好。
+
+\subsection{CAN--CPU 权衡的结构来源}
+\label{subsec:discussion-can-cpu-tradeoff}
+
+同一 Offset $O_i$ 沿两条路径影响联合评价。在通信侧，它改变周期报文的释放相位以及时隙负载分布，进而作用于 $Z^{\mathrm{ss}}$ 和 $Q^{\mathrm{ss}}$；在软件侧，$(T_i,O_i)$ 决定单报文最大可行调用周期 $D_i$，各 $D_i$ 的组合又通过 $B_G$ 决定 MainFunction 的 TimeBase 与调用频率。CAN 侧通常受益于高权重释放在时间轴上的分散，而软件侧则倾向于形成较有利的最大公约数关系，使更多报文能够共享较大的 $B_G$，从而减少高频固定调用开销。
+
+这两种偏好之间没有一般的单调映射。使 CAN 释放更分散的 Offset 可能降低部分 $D_i$，迫使相关 MainFunction 采用更短的调用周期；有利于形成较大公共 TimeBase 的 Offset 也可能使报文在 CAN 时间轴上重新聚集。该模型结构解释了 CAN 均衡与软件周期成本为何可能形成权衡，也为第~\ref{subsec:exp-rq5} 节观察到的 $Q^{\mathrm{ss}}$--$P^\star$ 关系提供了解释框架。由于现有实验没有逐报文隔离并检验每一条最大公约数路径，这一机制用于解释权衡的可能来源，而不被表述为某个具体网段的因果证明。
+
+CH、DA、DK、GL、IC 和 PT 的多点观测 Pareto 前沿表明，在当前累积候选中，没有一个方案能够同时替代全部其他保留方案，通信均衡与软件开销代理之间存在实际可观察的取舍。EP、LC 和 SU 的单点结果则表示当前候选归档中没有观察到第二个值得保留的二维非支配方案；它们没有显示多点权衡结构，并不排除扩大搜索后出现新方案。权衡是否显现由此同样具有网段依赖性，而不是联合模型对所有实例必然产生的固定形态。
+
+几何膝点和理想点回退只在已经形成的观测前沿上提供解释性浏览与推荐顺序，不把连续的工程偏好压缩为唯一最优配置。联合坐标中的 $Q^{\mathrm{ss}}$ 可由给定 Offset 直接评价，而 $P^\star(\boldsymbol O)$ 来自固定 Offset 下的 MainFunction 内层问题。由此需要进一步说明：在外层仍为启发式搜索时，精确内层为联合结论提供了何种确定性。
+
+\subsection{精确内层与启发式外层的分层意义}
+\label{subsec:discussion-exact-heuristic}
+
+精确内层不会使整个 CAN--CPU 联合问题转化为精确优化，但它消除了固定 Offset 下 MainFunction 分组近似所带来的不确定性。对于外层已经访问到的每个 $\boldsymbol O$，第~\ref{sec:main-function-exact} 节的求解器给出的 $P^\star(\boldsymbol O)$ 是当前 CPU 开销代理模型下可达到的最小分组成本。因此，若某个观测候选的软件侧成本较高，其原因不再是 MainFunction 可能尚未充分分组，而是该 Offset 通过 $D_i$ 与 $B_G$ 的结构限制了模型内最低代理成本。精确内层由此把主要搜索覆盖不确定性集中到外层 Offset 选择，使联合候选之间的软件侧比较具有一致基准。
+
+定理~\ref{thm:fixed-offset-dp-exactness} 从最优子结构和枚举完备性给出固定 Offset 子问题的精确性依据；141 组独立穷举对照均得到相同成本，则从实现层面交叉验证了程序与模型递推的一致性。两类证据相互补充：理论证明支撑算法性质，有限对照用于核验当前实现，并不替代数学证明。
+
+外层仍由 GCLS、有限 $\varepsilon$ 网格和迭代细化决定哪些 Offset 被访问，因而决定观测 Pareto 前沿的覆盖范围。第~\ref{subsec:exp-rq6} 节的种子、网格与搜索路径敏感性以及第~\ref{subsec:exp-rq5} 节的细化状态均表明，候选覆盖会随搜索配置变化；第~\ref{subsec:exp-rq3} 节的 better-feasible 对照进一步说明，部分小实例上的 GCLS best-found 仍存在改进空间。于是，当前分层结构可以准确概括为 exact inner 与 heuristic outer：内层最优值对已访问 Offset 是确定的，外层尚未访问的区域则可能带来新的非支配候选。图~\ref{fig:exp-joint-pareto} 因而采用“观测 Pareto 前沿”这一术语，其覆盖范围由当前 Peak 约束、候选域和搜索预算共同界定。
+
+\subsection{CPU 开销代理的解释与平台标定}
+\label{subsec:discussion-cpu-proxy}
+
+CPU 开销代理指标用于比较不同 Offset 所诱导的软件周期组织相对代价。它保留 MainFunction 数量、组内报文数量、每组最大可行 TimeBase，以及固定调用成本与逐报文增量成本之间的比例，使调用频率和单次处理规模能够在统一模型中比较。其研究价值在于揭示 Offset 与软件周期入口之间的结构耦合；目标平台上的完整执行路径、调度抢占和微体系结构效应仍需通过实测建立映射。
+
+参数 $\rho=C_0/C_1$ 表示每次 MainFunction 固定调用成本相对于单条报文增量成本的比例，而非普通的搜索超参数。第~\ref{subsubsec:exp-rq6-rho} 节的敏感性结果显示，$\rho$ 的变化可能改变 MainFunction 划分、$P^\star$ 以及观测 Pareto 结构。正式实验采用的 $\rho=1$ 提供了明确、可重复的未标定基准场景，足以用于研究 Offset 与软件周期组织之间是否存在结构性耦合；它尚不足以单独决定特定 ECU 上应采用哪个折中点。
+
+从结构代理走向目标 ECU，需要在目标硬件与软件栈上对代表性 MainFunction 配置进行性能剖析，估计一次调用的固定成本 $C_0$ 和单条报文的平均增量成本 $C_1$。若实测成本随报文类型、处理路径或分组规模呈现明显差异，可在保持组成本可评价的前提下建立更细的执行成本模型。完成标定后，固定 Offset 下的分组评价和联合搜索框架仍可继续使用，变化的是组成本模型、参数解释及其与实际执行时间的对应关系。CPU 开销代理指标由此承担候选结构比较的角色，而实际 CPU 负载与可调度性结论应由目标平台测量和系统级时序分析给出。
+
+\subsection{工程适用范围与部署路径}
+\label{subsec:discussion-deployment}
+
+九个真实 CAN FD 网段使本文能够在实际工程规模和通信矩阵上检验方法，相较纯合成实例更直接地反映了输入资格、周期组合和候选相位共同作用时的可运行性。与此同时，这些数据仍来自有限的项目环境，复杂路由、不同 Offset 来源语义以及其他软件执行架构尚未形成充分样本。因此，网段依赖性结论适用于当前数据所覆盖的工程条件，向其他车型、ECU、协议配置和网络架构推广时仍需补充跨项目验证。
+
+本文直接优化的是 release shaping，即周期报文进入总线竞争之前的局部释放结构。减少高负载时隙中的同步释放能够改善竞争的输入条件，但真实 CAN/CAN FD 时序还由优先级仲裁、非抢占阻塞、控制器排队、其他流量以及错误重传共同决定。因而，降低释放热点改善的是总线竞争的输入条件，而不是直接给出响应时间或可调度性结论；附录第~\ref{subsec:appendix-conservative-service} 节的保守服务时间诊断也应在这一层次上解释。
+
+当前工程工具已经将 CAN-only 与 CAN--CPU Joint 纳入同一面向实际工程输入的 GUI 工作流。CAN-only 路径继续完成输入资格筛选、Offset 优化、结果分析与审计以及 DBC Offset 配置导出；Joint 路径则在相同工程输入基础上执行联合搜索，展示以 $Q^{\mathrm{ss}}$ 和 CPU Cost Proxy 为坐标的观测 Pareto 前沿及自动推荐诊断，并生成 MainFunctionTx 分组及相应 TimeBase 建议。成功网段还可导出联合结果、观测前沿和 MainFunction 推荐产物，使论文中的联合模型进入了可交互、可审计的工程工作流。
+
+Joint 的正式工程输出统一绑定核心算法给出的同一自动推荐分配。该分配同时驱动 Offset 表、负载曲线、热力图、DBC replacement、MainFunction 分组和联合导出，避免 GUI 展示、配置写回与软件侧建议采用不同候选。观测前沿只用于解释权衡，GUI 不重新计算推荐，也不允许将任意手选 Pareto 点作为正式结果；若核心算法没有返回合法推荐，工具保留联合诊断与前沿产物，但不伪造 Offset 分配、不生成 MainFunction 推荐，也不写回 DBC，以失败关闭（fail-closed）保持配置输出与模型语义一致。
+
+该工具已经投入实际工程使用，现场应用观察到明显的周期释放热点改善。九网段锁定实验回答方法在受控真实输入上的可重复表现，工程部署则说明方法能够进入输入检查、结果审阅和配置输出流程；两者共同支持工程可用性，但属于不同证据来源，本文不将其合并统计。
+
+当前能力已经从 CAN-only Offset 配置扩展到 Joint 推荐以及 MainFunctionTx 与 TimeBase 建议，但这些建议尚未自动物化为目标项目可直接使用的 AUTOSAR 软件配置。下一阶段需要把推荐映射到具体 AUTOSAR 配置与 ECU 构建流程，并在完成目标硬件性能剖析后开展总线与任务时序分析、硬件在环和整车回归。由此，本文已经形成工程建议与配置候选的闭环，而从推荐结果到可执行配置及系统级验证仍是后续部署路径。
+
+\clearpage
+\section{结论}
+\label{sec:conclusion}
+
+本文研究的核心问题是，同一 Offset 一方面改变 CAN 周期报文的释放相位，另一方面约束软件周期入口可采用的调用周期。围绕这一耦合关系，本文形成了 CAN 侧 Offset 均衡、固定 Offset 下 MainFunction 精确评价以及 CAN--CPU 联合权衡搜索的一体化方法。
+
+\subsection{方法与理论结论}
+\label{subsec:conclusion-properties}
+
+在 CAN 侧，本文建立加权离散释放模型，以稳态峰值和 $Q^{\mathrm{ss}}$ 分别刻画最高局部聚集与全窗口均衡，并利用 GCLS 在有限 Offset 空间中搜索相位配置。这一建模将周期释放热点转化为可直接优化和比较的工程配置问题，同时保持 Offset 不改变周期报文长期平均释放工作量的基本性质；GCLS 承担外层启发式搜索。
+
+在软件侧，周期与 Offset 共同决定周期入口可采用的调用周期，多报文共享入口后，该约束进一步作用于 MainFunction 分组及 TimeBase。基于 CPU 开销代理模型，相同 $D$ 类型压缩与确定性子集动态规划使固定完整 Offset 下的软件分组子问题能够精确求解，从而为每个已访问相位配置提供一致的软件侧最小代理成本。
+
+在联合层，固定 Offset 的精确内层与 Peak 上界、$\varepsilon$-constraint、累计候选归档和迭代细化共同组织 CAN 均衡与软件成本之间的权衡，并以观测 Pareto 前沿及确定性后处理给出解释性推荐。该分层结构将固定 Offset 下的软件分组确定性与外层 Offset 搜索覆盖问题分离：软件分组属于精确子问题，Offset 外层仍采用启发式搜索。
+
+\subsection{实验结果与工程应用}
+\label{subsec:conclusion-results}
+
+锁定的九网段 CAN FD 实验中，Peak 相对于 Original 在 6/9 个网段降低了稳态峰值，说明真实工程配置中存在可利用的相位重排空间。Balanced 在 9/9 个网段与 Peak 得到相同的核心 CAN 指标，而 Variance 在部分网段呈现 $Q^{\mathrm{ss}}$ 降低、峰值升高的结果，表明整体均衡与最高局部负载之间不存在一般的单调一致关系。
+
+固定 Offset 下的 MainFunction 求解器与 141/141 组独立报文级穷举对照一致；九个真实网段的不同 $D$ 类型数为 4--6，当前实验平台上的冷启动求解均低于 $1\,\mathrm{ms}$。数学证明与独立实现对照共同支持固定 Offset 下的精确求解器，当前真实输入规模下的内层计算成本也较小。
+
+联合实验在六个网段形成多点观测 Pareto 前沿，另三个网段为单点前沿，说明 CAN 均衡与软件调度代理成本之间的权衡具有明显网段依赖性。部分前沿及 Offset 分配对随机种子、$\rho$ 和搜索路径仍表现出敏感性，因此联合结果继续按“观测”口径解释。
+
+本文方法已经形成面向实际工程输入的 GUI 工具，CAN-only 与 CAN--CPU Joint 均进入统一工程工作流。Joint GUI 能够执行联合搜索、展示观测 Pareto 前沿与核心自动推荐、生成 MainFunctionTx 与 TimeBase 建议，并以同一正式推荐驱动 Offset 展示、DBC 配置输出和联合审计产物。实际工程应用中已经观察到明显的周期释放热点改善；该现场观察与九网段受控实验承担不同证据角色，不作合并统计。
+
+\subsection{研究局限与后续工作}
+\label{subsec:conclusion-limitations}
+
+现有方法仍受外层 Offset 搜索覆盖范围的限制，也缺少更强的解质量评价或界。后续可结合更广的组合邻域、小规模精确求解与 CP-SAT 对照以及可证明有界的方法，评估当前观测前沿的覆盖程度；对 $T_i>O^{\rm lim}$ 的长周期报文，也可采用独立且更稀疏的候选栅格扩展搜索域。
+
+除搜索覆盖外，CPU 侧的结构代理还需要在目标 ECU 上完成成本标定。通过性能剖析估计 $C_0$、$C_1$ 与 $\rho$，并在需要时按报文类型、处理路径或分组规模扩展成本模型，可将当前结构代理映射为平台相关的软件执行成本评价。
+
+在此基础上，工程部署还需从推荐结果进一步走向目标项目的可执行配置。当前 GUI 已经完成 Joint 搜索以及 MainFunctionTx 与 TimeBase 推荐和导出，后续需要将这些建议自动映射为可用的 AUTOSAR 配置并接入 ECU 构建和实际软件配置流程，再通过目标硬件性能剖析、CAN 与任务时序分析、硬件在环、整车回归和跨项目数据验证其系统级效果。
+\clearpage
+\section*{致\hspace{2em}谢}
+\addcontentsline{toc}{section}{致谢}
+本研究的开展与本文的完成，离不开老师和同事们在实际工作中给予的支持与帮助。来自工程实践中的问题与需求，使研究得以落脚于具体而真实的应用场景；工作推进过程中积累的经验、交流与验证，也为方法的不断完善提供了重要参考。在此，向所有曾在研究过程中给予支持与帮助的老师和同事致意。\par
+\vspace{\baselineskip}
+我感谢那些焦头烂额的、灵感枯竭的、不曾搁笔的日子。
+
+宇宙无事发生，而我们永远在路上。
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{section}{参考文献}
+\begin{thebibliography}{99}
+\zihao{-4}\songti\RaggedRight
+\Urlmuskip=0mu plus 1mu\relax
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+
+\bibitem{tindell1994}
+TINDELL K, HANSSON H, WELLINGS A. Analyzing real-time communications: controller area network (CAN)[C]//Proceedings of the 15th IEEE Real-Time Systems Symposium. San Juan: IEEE, 1994.
+
+\bibitem{grenier2008}
+GRENIER M, HAVET L, NAVET N. Pushing the limits of CAN: scheduling frames with offsets provides a major performance boost[C]//Proceedings of the 4th European Congress on Embedded Real Time Software. Toulouse, 2008.
+
+\bibitem{yomsi2012}
+YOMSI P M, BERTRAND D, NAVET N, et al. Controller area network (CAN): response time analysis with offsets[C]//Proceedings of the IEEE International Workshop on Factory Communication Systems. Lemgo: IEEE, 2012.
+
+\bibitem{zeng2006periodic}
+ZENG D D, DROR M, CHEN H. Efficient scheduling of periodic information monitoring requests[J]. European Journal of Operational Research, 2006, 173(2): 583--599. DOI: \url{https://doi.org/10.1016/j.ejor.2005.01.057}.
+
+\bibitem{short2010periodic}
+SHORT M. A note on ``Efficient scheduling of periodic information monitoring requests''[J]. European Journal of Operational Research, 2010, 201(1): 329--335. DOI: \url{https://doi.org/10.1016/j.ejor.2009.03.011}.
+
+\bibitem{autosarcom}
+AUTOSAR. Specification of communication: classic platform R25-11[S/OL]. 2025[2026-08-04]. \url{https://www.autosar.org/fileadmin/standards/R25-11/CP/AUTOSAR_CP_SWS_COM.pdf}.
+
+\bibitem{liu1973}
+LIU C L, LAYLAND J W. Scheduling algorithms for multiprogramming in a hard-real-time environment[J]. Journal of the ACM, 1973, 20(1): 46--61. DOI: \url{https://doi.org/10.1145/321738.321743}.
+
+\bibitem{zhang2011autosar}
+张谚华, 项晨, 涂时亮. AUTOSAR 基础软件调度器的设计与实现[J]. 计算机工程, 2011, 37(4): 43--45. DOI: \url{https://doi.org/10.3969/j.issn.1000-3428.2011.04.016}.
+
+\bibitem{denil2011devs}
+DENIL J, VANGHELUWE H, RAMAEKERS P, et al. DEVS for AUTOSAR platform modelling[C]//Proceedings of the 2011 Symposium on Theory of Modeling and Simulation: DEVS Integrative M\&S Symposium. Boston, 2011: 67--74.
+
+\bibitem{khenfri2015}
+KHENFRI F, CHAABAN K, CHETTO M. A novel heuristic algorithm for mapping AUTOSAR runnables to tasks[C]//Proceedings of the 5th International Conference on Pervasive and Embedded Computing and Communication Systems. Angers: SciTePress, 2015: 239--246. DOI: \url{https://doi.org/10.5220/0005234202390246}.
+
+\bibitem{khenfri2020}
+KHENFRI F, CHAABAN K, CHETTO M. Efficient mapping of runnables to tasks for embedded AUTOSAR applications[J]. Journal of Systems Architecture, 2020, 110: 101800. DOI: \url{https://doi.org/10.1016/j.sysarc.2020.101800}.
+
+\bibitem{bjorklund2009}
+BJÖRKLUND A, HUSFELDT T, KOIVISTO M. Set partitioning via inclusion--exclusion[J]. SIAM Journal on Computing, 2009, 39(2): 546--563. DOI: \url{https://doi.org/10.1137/070683933}.
+
+\bibitem{mnich2015}
+MNICH M, WIESE A. Scheduling and fixed-parameter tractability[J]. Mathematical Programming, 2015, 154(1--2): 533--562. DOI: \url{https://doi.org/10.1007/s10107-014-0830-9}.
+
+\bibitem{pimentel2007}
+PIMENTEL J R. An incremental approach to task and message scheduling for AUTOSAR based distributed automotive applications[C]//Proceedings of the 4th International Workshop on Software Engineering for Automotive Systems. Minneapolis: IEEE, 2007: 1--7. DOI: \url{https://doi.org/10.1109/SEAS.2007.1}.
+
+\bibitem{minaeva2018}
+MINAEVA A, AKESSON B, HANZALEK Z, et al. Time-triggered co-scheduling of computation and communication with jitter requirements[J]. IEEE Transactions on Computers, 2018, 67(1): 115--129. DOI: \url{https://doi.org/10.1109/TC.2017.2722443}.
+
+\bibitem{lesi2020}
+LESI V, JOVANOV I, PAJIC M. Integrating security in resource-constrained cyber-physical systems[J]. ACM Transactions on Cyber-Physical Systems, 2020, 4(3): 1--27. DOI: \url{https://doi.org/10.1145/3380866}.
+
+\bibitem{mavrotas2009}
+MAVROTAS G. Effective implementation of the $\varepsilon$-constraint method in multi-objective mathematical programming problems[J]. Applied Mathematics and Computation, 2009, 213(2): 455--465. DOI: \url{https://doi.org/10.1016/j.amc.2009.03.037}.
+
+\bibitem{debgupta2011}
+DEB K, GUPTA S. Understanding knee points in bicriteria problems and their implications as preferred solution principles[J]. Engineering Optimization, 2011, 43(11): 1175--1204. DOI: \url{https://doi.org/10.1080/0305215X.2010.548863}.
+
+\bibitem{karp1972}
+KARP R M. Reducibility among combinatorial problems[C]//MILLER R E, THATCHER J W, BOHLINGER J D, eds. Complexity of Computer Computations. New York: Plenum Press, 1972: 85--103. DOI: \url{https://doi.org/10.1007/978-1-4684-2001-2_9}.
+
+\bibitem{iso11898_2024}
+ISO. ISO 11898-1:2024 Road vehicles---controller area network (CAN)---Part 1: data link layer and physical coding sublayer[S]. 3rd ed. Geneva: ISO, 2024.
+
+\bibitem{cia_canfd}
+CAN IN AUTOMATION. CAN FD (flexible data rate): the basic idea[EB/OL]. [2026-08-04]. \url{https://www.can-cia.org/can-knowledge/can-fd-the-basic-idea}.
+
+\bibitem{andrade2018canfd}
+ANDRADE R D, HODEL K N, JUSTO J F, et al. Analytical and experimental performance evaluations of CAN-FD bus[J]. IEEE Access, 2018, 6: 21287--21295. DOI: \url{https://doi.org/10.1109/ACCESS.2018.2826522}.
+
+\bibitem{hao2026canfdoptimizer}
+HAO X. CAN FD Offset Optimizer: version 1.0[CP/OL]. Zenodo, 2026. DOI: \url{https://doi.org/10.5281/zenodo.21696944}.
+
+\end{thebibliography}
+
+\clearpage
+\appendix
+\addtocontents{toc}{\protect\setlength{\protect\cftsecnumwidth}{4.3em}}
+\addtocontents{toc}{\protect\setlength{\protect\cftsubsecnumwidth}{2.5em}}
+\addtocontents{toc}{\protect\setlength{\protect\cftsubsubsecnumwidth}{3.3em}}
+\ctexset{
+  section = {
+    name = {附录\hspace{0.5em},}
+  }
+}
+
+\clearpage
+\section{补充推导与计算细节}
+\label{sec:appendix-supplementary}
+
+本附录集中给出正文模型与求解方法所需的公式推导和补充数学表达，包括 CAN FD 帧时间权重计算、保守总线服务时间诊断、GCLS 的重启预算与候选评价规模、CPU 开销代理指标与子集动态规划的补充推导，以及联合搜索和折中推荐的确定性实现规则。这些内容说明相关公式与规则如何计算，不承担命题、引理或定理的完整证明。
+
+\subsection{CAN FD 帧时间权重计算}
+\label{subsec:appendix-canfd-frame-time}
+
+设 $\ell_i$ 为报文 $m_i$ 的 Payload 字节数，$\beta_i\in\{0,1\}$ 表示 BRS 是否启用。CAN FD 的帧结构、BRS 切速位置、CRC 长度及固定填充规则依据 ISO 11898-1:2024\cite{iso11898_2024}；公开的字段说明可参见 CiA 资料\cite{cia_canfd}。
+
+SOF 至 BRS 的前缀位数随帧格式而变：
+\begin{equation}
+ b_i^{\rm pre}=
+ \begin{cases}
+  17, & m_i\text{ 为标准帧},\\
+  36, & m_i\text{ 为扩展帧}.
+ \end{cases}
+\label{eq:canfd-prefix-bits}
+\end{equation}
+
+ESI、DLC 与 Payload 构成的动态字段位数为
+\begin{equation}
+ b_i^{\rm dyn}=5+8\ell_i.
+\label{eq:canfd-dynamic-bits}
+\end{equation}
+
+CRC 序列长度由 Payload 长度决定：
+\begin{equation}
+ b_i^{\rm crc}=
+ \begin{cases}
+  17, & \ell_i\le16,\\
+  21, & \ell_i>16.
+ \end{cases}
+\label{eq:canfd-crc-bits}
+\end{equation}
+
+计入 stuff count、parity 及固定填充位后，CRC 相关字段位数为
+\begin{equation}
+ b_i^{\rm cf}
+ =b_i^{\rm crc}+5+
+ \left\lfloor\frac{b_i^{\rm crc}+4}{4}\right\rfloor.
+\label{eq:canfd-crc-field}
+\end{equation}
+
+动态位填充上界写为
+\begin{equation}
+ S(n)=
+ \begin{cases}
+  n+\left\lfloor\dfrac{n-1}{4}\right\rfloor, & n>0,\\
+  0, & n=0.
+ \end{cases}
+\label{eq:dynamic-stuffing-bound}
+\end{equation}
+
+帧尾相关字段按 10 bit 计。记 $b_i^{\rm nom}$ 为按 nominal bitrate 传输的位数，$b_i^{\rm data}$ 为按 data bitrate 传输的位数，则
+\begin{equation}
+ \left(b_i^{\rm nom},b_i^{\rm data}\right)
+ =
+ \begin{cases}
+  \left(
+   S\!\left(b_i^{\rm pre}+b_i^{\rm dyn}\right)+b_i^{\rm cf}+10,\ 0
+  \right), & \beta_i=0,\\
+  \left(
+   S\!\left(b_i^{\rm pre}\right)+10,\
+   S\!\left(b_i^{\rm dyn}\right)+b_i^{\rm cf}
+  \right), & \beta_i=1.
+ \end{cases}
+\label{eq:canfd-phase-bits}
+\end{equation}
+未启用 BRS 时，全帧按 nominal bitrate 计时；启用 BRS 时，前缀和帧尾按 nominal bitrate 计时，动态字段与 CRC 相关字段按 data bitrate 计时。
+
+帧间隔按 3 bit 计，最终帧时间估计为
+\begin{equation}
+ \widehat C_i=
+ \begin{cases}
+  \left\lceil
+   \dfrac{10^6\left(b_i^{\rm nom}+3\right)}{R_{\rm nom}}
+  \right\rceil,
+  & \beta_i=0,\\[1ex]
+  \left\lceil
+   \dfrac{10^6\left(b_i^{\rm nom}+3\right)}{R_{\rm nom}}
+  \right\rceil
+  +\left\lceil
+   \dfrac{10^6b_i^{\rm data}}{R_{\rm data}}
+  \right\rceil,
+  & \beta_i=1.
+ \end{cases}
+\label{eq:canfd-frame-time}
+\end{equation}
+其中，$R_{\rm nom}$ 与 $R_{\rm data}$ 的单位为 bit/s，$\widehat C_i$ 的单位为微秒。式\eqref{eq:canfd-frame-time}对动态位填充取上界，并包含 3 bit 帧间隔。类似的 CAN FD 传输时间解析建模与实验比较可见文献\cite{andrade2018canfd}。Classic CAN 可沿用“协议字段位数除以相应速率”的计算框架，但需替换为其对应的字段组成。
+
+\subsection{保守总线服务时间估计与诊断}
+\label{subsec:appendix-conservative-service}
+
+除式\eqref{eq:weight-modes}定义的优化权重外，工程工具还给出独立的协议级保守服务时间诊断。记 $b_i^{\rm all}$ 为 Classic CAN 或未启用 BRS 时按 nominal bitrate 传输的全帧保守位数，$b_i^{\rm nom,c}$ 与 $b_i^{\rm data,c}$ 分别为启用 BRS 时按 nominal bitrate 和 data bitrate 传输的保守位数；这些位数包含相应协议字段、最坏动态填充、CRC 固定填充和正常帧间隔。两种速率情形下的保守服务时间统一写为
+\begin{equation}
+ \widehat c_i^{\,\rm cons}=
+ \begin{cases}
+  \left\lceil
+   10^6\dfrac{b_i^{\rm all}}{R_{\rm nom}}
+  \right\rceil,
+  & \text{Classic CAN 或 }\beta_i=0,\\[1ex]
+  \left\lceil
+   10^6\left[
+    \dfrac{b_i^{\rm nom,c}}{R_{\rm nom}}
+    +\dfrac{b_i^{\rm data,c}}{R_{\rm data}}
+    +2\left(\dfrac{1}{R_{\rm nom}}+\dfrac{1}{R_{\rm data}}\right)
+   \right]
+  \right\rceil,
+  & \beta_i=1.
+ \end{cases}
+\label{eq:conservative-frame-service}
+\end{equation}
+式\eqref{eq:conservative-frame-service}的单位为微秒。BRS 分支的最后一项是切速边界的保守时间裕量：切入和切出各按相邻两种速率的一个完整位时间计入。
+
+令 $\Eset_{\rm av}\subseteq\Eset$ 表示协议类型、帧格式、Payload、nominal bitrate、data bitrate 和有效 BRS 状态足以完成计算的报文集合。对阶段 $x$ 的时隙 $s$，已知成员的保守服务时间之和为
+\begin{equation}
+ \widehat C_{s}^{\,x,\rm cons}(\symbf O)
+ =\sum_{m_i\in\Eset_{\rm av}}
+ \widehat c_i^{\,\rm cons}n_{i,s}^{x}(O_i).
+\label{eq:conservative-slot-service}
+\end{equation}
+
+当时隙内全部正式成员均可计算时，式\eqref{eq:conservative-slot-service}给出该时隙的保守服务时间估计；若仅部分成员可计算，则结果标记为完整服务时间之和的已知下界；若全部成员均不可计算，则标记为“不可用”，不采用默认速率或默认 BRS 回退。
+
+该诊断量用于配置风险识别，其结果为微秒量纲的服务时间之和。诊断中虽包含最坏位填充、帧间隔和切速裕量，仍未显式描述优先级仲裁、控制器队列、错误重传和事件流量；相应时序结论需由协议级分析、仿真或测量补充。
+
+\subsection{GCLS 搜索预算与计算规模}
+\label{subsec:appendix-gcls-budget-scale}
+
+本节补充第4章中只保留方法级语义的重启预算规则与候选评价次数。前者规定多起点搜索何时停止，后者用于说明各阶段的计算规模，均不改变第3章定义的正式比较准则。
+
+\subsubsection{自适应重启的预算规则}
+\label{subsubsec:appendix-gcls-restart-budget}
+
+以 $a=0,1,\ldots$ 表示零起始的尝试编号，基础种子为 $\operatorname{seed}_0$。第 $a$ 次尝试的组内重排使用确定性派生种子
+\begin{equation}
+ \operatorname{seed}_a
+ =
+ \operatorname{seed}_0+a.
+\label{eq:gcls-restart-seed}
+\end{equation}
+第一次尝试仍采用正文式\eqref{eq:gcls-greedy-order}的基本顺序；后续尝试只在式\eqref{eq:gcls-restart-group}定义的同周期、同帧时间组内应用该派生种子。
+
+自适应预算以 $A_{\min}$、$I_{\rm check}$、$P$ 和 $A_{\max}$ 分别表示最少尝试数、检查间隔、停滞耐心和最大尝试数。令 $A_{\rm done}$ 为已完成尝试数，$A_{\rm last}$ 为最近一次严格改善出现后记录的已完成尝试数。当且仅当
+\begin{equation}
+ A_{\rm done}\ge A_{\min},
+ \qquad
+ A_{\rm done}\bmod I_{\rm check}=0,
+ \qquad
+ A_{\rm done}-A_{\rm last}\ge P
+\label{eq:gcls-adaptive-stop}
+\end{equation}
+同时成立时，重启在检查点因停滞达到耐心阈值而停止；若此前已完成 $A_{\max}$ 次尝试，则按最大预算终止。固定次数策略可视为直接给定尝试上限。正式实验采用的参数取值见第7章。
+
+\subsubsection{候选评价规模}
+\label{subsubsec:appendix-gcls-evaluation-scale}
+
+记 $N=|\mathcal D|$，$A_i=|\Oset_i|$。单次贪心构造对每条决策报文枚举全部合法 Offset，其候选目标评价次数为
+\begin{equation}
+ E_{\rm greedy}
+ =
+ \sum_{m_i\in\mathcal D}|\Oset_i|.
+\label{eq:gcls-greedy-evaluations}
+\end{equation}
+1-opt 的一次完整扫描同样枚举每条报文的全部合法 Offset，因此
+\begin{equation}
+ E_{\rm 1\text{-}sweep}
+ =
+ \sum_{m_i\in\mathcal D}|\Oset_i|.
+\label{eq:gcls-one-sweep-evaluations}
+\end{equation}
+完整 1-opt 的评价次数还取决于严格改善所引起的扫描轮数，不能以单轮计数代替整个局部搜索成本。
+
+决策报文的可行分配总数为
+\begin{equation}
+ |\Omega|
+ =
+ \prod_{m_i\in\mathcal D}|\Oset_i|.
+\label{eq:gcls-search-space-size}
+\end{equation}
+该式用于给出严格改善序列的有限性边界，而非预测实际运行时间。
+
+以 $C$ 表示双报文阶段保留的冲突候选报文数上限。每轮形成的候选报文对数量满足
+\begin{equation}
+ N_{\rm pair}
+ \le
+ \binom{C}{2}.
+\label{eq:gcls-pair-count}
+\end{equation}
+若每条候选报文最多考察 $R$ 个 Offset，则一轮有界双报文搜索的候选评价量为
+\begin{equation}
+ E_{\rm pair\text{-}round}
+ =
+ O\!\left(C^2R^2\right).
+\label{eq:gcls-pair-round-complexity}
+\end{equation}
+双报文轮数取决于实际接受的严格改善。若实际执行 $A_{\rm run}$ 次重启，总评价量还会随各起点经历的 1-opt 扫描数和双报文轮数共同变化，因而不再给出缺乏解释力的闭式总时间。
+
+上述 $E_*$ 只统计候选目标评价次数。预计算避免重复展开完整释放序列，但一次候选评价仍需更新该候选命中的有限时隙，其成本取决于报文周期、评价窗口和 Offset，不能无条件视为 $O(1)$。
+\subsection{MainFunction 代理成本与子集动态规划推导}
+\label{subsec:appendix-mainfunction-derivations}
+
+\subsubsection{CPU 开销代理的代数形式与单位换算}
+\label{subsubsec:appendix-cpu-proxy-derivation}
+
+由正文式\eqref{eq:ideal-main-function-cost}与式\eqref{eq:linear-group-cost}，将线性组成本代入一般周期成本形式可得
+\begin{equation}
+ U
+ =
+ \sum_{G\in\Pi}
+ \frac{C_0+C_1N_G}{B_G}.
+\label{eq:cpu-proxy-substitution}
+\end{equation}
+利用 $\rho=C_0/C_1$ 提取公共正尺度 $C_1$，式\eqref{eq:cpu-proxy-substitution}进一步化为
+\begin{equation}
+ U
+ =
+ C_1
+ \sum_{G\in\Pi}
+ \frac{\rho+N_G}{B_G}
+ =
+ C_1P_{\rm CPU}(\Pi\mid\boldsymbol O).
+\label{eq:cpu-proxy-scale-derivation}
+\end{equation}
+由于 $C_1>0$ 且对同一标定场景下的所有候选划分保持一致，除去该公共尺度不会改变候选成本的大小关系。因此，$P_{\rm CPU}$ 可用于比较给定线性成本假设下的分组结构，但其数值仍不是未经平台标定的实际 CPU 利用率。
+
+当前实现以微秒保存 $B_G$。将微秒分母换算到每秒尺度时，代理指标写为
+\begin{equation}
+ P_{\rm CPU}^{(/s)}
+ =
+ 10^6
+ \sum_{G\in\Pi}
+ \frac{\rho+N_G}{B_{G,\mu\mathrm{s}}}.
+\label{eq:cpu-proxy-per-second}
+\end{equation}
+因子 $10^6$ 对所有候选划分相同，只改变指标的展示尺度，不改变最优划分或候选排序。
+
+\subsubsection{子集动态规划的组合规模}
+\label{subsubsec:appendix-dp-complexity-derivation}
+
+设不同 D 类型数为 $m$。子集动态规划以全部类型子集为状态，共有 $2^m$ 个状态。对于大小为 $k$ 的非空状态，固定锚点后，其余 $k-1$ 个元素可自由选择是否进入当前分组，因此包含锚点的候选分组数为 $2^{k-1}$。全部非空状态的候选转移数为
+\begin{equation}
+ \sum_{k=1}^{m}
+ \binom{m}{k}2^{k-1}
+ =
+ \frac{1}{2}
+ \left(
+ \sum_{k=0}^{m}\binom{m}{k}2^k-1
+ \right)
+ =
+ \frac{3^m-1}{2}.
+\label{eq:subset-enumeration-count}
+\end{equation}
+其中第二个等号由二项式定理得到。若子集统计量查询和数值比较视为常数操作，式\eqref{eq:subset-enumeration-count}给出 $O(3^m)$ 的核心组合枚举规模。
+
+抽象算法只保存数值状态与回溯指针时，状态表为 $O(2^m)$。当前实现还为每个状态保存类型子集签名和规范分组元组；全部子集签名的元素总数为 $m2^{m-1}$，每个状态保存的重构元组长度至多为 $m$，因此实际存储上界为 $O(m2^m)$。规范元组的构造、排序与比较还会在核心组合枚举之外引入关于 $m$ 的多项式操作量。
+
+\subsection{联合搜索与折中推荐的计算细节}
+\label{subsec:appendix-joint-deterministic-details}
+
+\subsubsection{CPU 预算网格与候选复用}
+\label{subsubsec:appendix-joint-budget}
+
+正文式\eqref{eq:joint-epsilon-grid}给出当前观测端点之间的 CPU 预算网格。实现中，$P_{\min}$、$P_{\max}$ 与全部 $\varepsilon_j$ 均采用精确有理数表示和比较，不经浮点插值；当 $P_{\min}=P_{\max}$ 时不存在非退化预算区间，省略内部 $\varepsilon$ 扫描。$K$ 只规定本轮外层搜索的预算采样数量，不参与固定 Offset 下的内层求解。
+
+在满足 Peak 与 CPU 预算的候选之间，$\varepsilon$ 阶段采用
+\begin{equation}
+ \kappa_{\varepsilon}(\boldsymbol O)
+ =
+ \left(
+  Q^{\mathrm{ss}}(\boldsymbol O),
+  P^\star(\boldsymbol O),
+  Z^{\mathrm{ss}}(\boldsymbol O),
+  \sigma(\boldsymbol O)
+ \right),
+\label{eq:joint-epsilon-comparator}
+\end{equation}
+CPU 方向的搜索比较键为
+\begin{equation}
+ \kappa_{\rm CPU}(\boldsymbol O)
+ =
+ \left(
+  P^\star(\boldsymbol O),
+  Q^{\mathrm{ss}}(\boldsymbol O),
+  Z^{\mathrm{ss}}(\boldsymbol O),
+  \sigma(\boldsymbol O)
+ \right),
+\label{eq:joint-cpu-comparator}
+\end{equation}
+其中 $\sigma(\boldsymbol O)$ 按报文定义次序、CAN ID、名称和 Offset 构成规范分配序列。热启动候选先满足当前 Peak 约束，并在给定预算时进一步满足 $P^\star\le\varepsilon$；随后按 $(Q^{\mathrm{ss}},P^\star,Z^{\mathrm{ss}},\sigma)$ 排序并按完整分配去重。当前端点及满足预算的前一 $\varepsilon$ 解作为必保留候选，其余候选受可配置数量上限约束。
+
+\subsubsection{迭代细化与稳定判定}
+\label{subsubsec:appendix-joint-refinement-details}
+
+累积候选集以完整 Offset 分配的 SHA-256 为稳定标识。相同标识只保留一个确定性来源代表；记录字段包括完整分配、正式 CAN 目标、$Q^{\mathrm{ss}}$、$Z^{\mathrm{ss}}$、精确 $P^\star$、对应 MainFunction 分组、来源阶段、细化轮次、种子、尝试序号和 $\varepsilon$ 预算。目标相同而分配不同的候选在归档阶段仍分别保存。
+
+在 Peak 可行归档中，观测 CAN 端点与 CPU 端点分别采用
+\begin{equation}
+ \kappa_{\rm CAN}^{\rm obs}(\boldsymbol O)
+ =
+ \left(
+  Q^{\mathrm{ss}}(\boldsymbol O),
+  P^\star(\boldsymbol O),
+  \boldsymbol F_{\rm Peak}(\boldsymbol O),
+  \sigma(\boldsymbol O)
+ \right),
+\label{eq:observed-can-endpoint-key}
+\end{equation}
+以及
+\begin{equation}
+ \kappa_{\rm CPU}^{\rm obs}(\boldsymbol O)
+ =
+ \left(
+  P^\star(\boldsymbol O),
+  Q^{\mathrm{ss}}(\boldsymbol O),
+  \boldsymbol F_{\rm Peak}(\boldsymbol O),
+  \sigma(\boldsymbol O)
+ \right)
+\label{eq:observed-cpu-endpoint-key}
+\end{equation}
+取最小值。Peak 参考则按正文式\eqref{eq:peak-objective-key}的完整正式目标及 $\sigma(\boldsymbol O)$ 选择。每次 Peak、CAN、CPU 或 $\varepsilon$ 阶段并入新候选后，均重新选择 Peak 参考、重算 $Z_{\rm budget}$，并按新约束过滤归档；细化轮次依次执行 Peak、CAN、CPU 与按预算递增的 $\varepsilon$ 搜索。
+
+设基础种子为 $s_0$，第 $r$ 个零起始细化轮次的种子基数为
+\begin{equation}
+ b_r=s_0+10^6+10^5r.
+\label{eq:joint-refinement-seed-base}
+\end{equation}
+该轮 Peak、CAN、CPU 阶段分别使用 $b_r$、$b_r+20000$ 与 $b_r+30000$；第 $j$ 个 $\varepsilon$ 阶段使用 $b_r+40000+1000j$。初始 Peak 与 CAN 阶段使用 $s_0$，初始 CPU 阶段使用 $s_0+10000$。每个阶段的第 $a$ 个零起始尝试再在阶段种子上加 $a$，从而保持不同尝试预算下的种子前缀一致。
+
+完整稳定性签名包含：Peak 参考的正式目标与分配哈希、重算后的 Peak 预算、两个观测端点的 $(Q^{\mathrm{ss}},P^\star)$ 与分配哈希，以及按确定顺序排列的 Pareto 目标对和对应分配哈希。签名以规范序列化结果计算 SHA-256；只有相邻两个完整轮次满足
+\begin{equation}
+ \Sigma^{(r)}=\Sigma^{(r-1)}
+\label{eq:refinement-signature-equality}
+\end{equation}
+时才报告 \path{refinement_converged}，否则在达到轮次上限时报告 \path{refinement_limit_reached}。目标前沿稳定仅比较正式 Peak 目标、预算、端点目标值和有序 Pareto 目标对；分配前沿稳定还要求 Peak 参考、端点及 Pareto 代表的分配哈希一致。
+
+\subsubsection{折中推荐的回退规则与确定性消歧}
+\label{subsubsec:appendix-joint-recommendation-details}
+
+Pareto 过滤先按完整分配去重，再按精确目标对 $(Q^{\mathrm{ss}},P^\star)$ 去重。相同目标对依次选择 $Z^{\mathrm{ss}}$ 更低、MainFunction 数量更少、规范分配序列更小及来源次序更稳定的候选；这些条件只选择代表，不改变二维支配关系。
+
+几何后处理中的归一化、评分和比较均采用精确有理数。若某一目标跨度为零，相应归一化坐标置为零。对正文式\eqref{eq:knee-ideal-distance}定义的内部点理想距离，存在 $s_i>0$ 的内部点时，依次按更大的 $s_i$、更小的 $d_i^2$、$Q_i^{\mathrm{ss}}$、$P_i^\star$ 和分配哈希选择几何膝点；不存在正评分内部点时，则依次按更小的 $d_i^2$、$\max\{x_i,y_i\}$、$Q_i^{\mathrm{ss}}$、$P_i^\star$ 和分配哈希选择理想点回退候选。
+
+空前沿不产生自动推荐；单点前沿返回唯一观测非支配解，但不称为膝点；双点前沿因不存在内部候选而报告无内部膝点，不强行选择端点。只有至少包含三个点的有效前沿才执行内部点的几何评分或理想点回退。
+
+\clearpage
+\section{理论性质证明}
+\label{sec:appendix-proofs}
+
+本附录给出第~\ref{sec:gcls-method}~章、第~\ref{sec:main-function-exact}~章和第~\ref{sec:can-cpu-joint}~章中命题、引理与定理的完整证明。证明所用可行域、比较向量、CPU 开销代理指标和分组成本均沿用正文定义，不引入新的优化模型；其中“精确”始终只限定于固定完整 Offset 分配下的 MainFunction 分组子问题。纯代数展开、单位换算与复杂度求和统一置于附录第~\ref{subsec:appendix-mainfunction-derivations}~节。
+
+\subsection{GCLS 1-opt 的终止性与局部最优性}
+\label{subsec:appendix-gcls-proof}
+
+\subsubsection{单报文重定位邻域}
+\label{subsubsec:appendix-one-neighborhood}
+
+沿用式~\eqref{eq:gcls-one-neighborhood} 的定义，$\mathcal N_1(\boldsymbol O)$
+包含把任一决策报文 $i\in\mathcal D$ 的当前 Offset 改为任一其他合法
+$o\in\Oset_i$ 所得的完整分配。固定报文不进入移动邻域，其贡献在搜索全过程中保持不变。本节只证明该完整单报文重定位邻域上的性质。
+
+\subsubsection{增量评价与完整重构的等价性}
+\label{subsubsec:appendix-delta-proof}
+
+对任一稳态时隙 $s$，完整分配 $\boldsymbol O$ 的负载具有可加形式
+\[
+ L_s^{\mathrm{ss}}(\boldsymbol O)
+ =
+ \sum_j w_j n_{j,s}^{\mathrm{ss}}(O_j).
+\]
+将报文 $i$ 从 $o$ 改为 $o'$ 时，其他报文的项逐项相消，故新旧负载之差正是式~\eqref{eq:gcls-slot-load-delta} 的 $\delta_s$。于是
+\[
+ L_s^{\mathrm{ss}}(\boldsymbol O^{(i\leftarrow o')})
+ =
+ L_s^{\mathrm{ss}}(\boldsymbol O)+\delta_s.
+\]
+未被旧候选或新候选命中的时隙有 $\delta_s=0$；受影响时隙按净释放次数变化更新。对启动窗口负载和两个窗口的释放计数作同样的逐报文求和，可得到完全相同的结论。因此，移除旧贡献并加入新贡献后维护的全部数组，与从候选完整分配重新累加所得数组逐元素一致。
+
+把上述负载等式代入平方和定义，直接得到正文式~\eqref{eq:gcls-exact-delta-q}。该关系是平方差恒等式，不需要线性化或近似假设。超限、峰值、启动指标与最大释放条数均由这些精确数组重新计算，故完整词典序比较向量也与全量重构一致。
+
+\subsubsection{候选回滚的不变性}
+\label{subsubsec:appendix-rollback-proof}
+
+候选试探先从状态中减去旧 Offset 的贡献，再加入候选 Offset 的贡献。评价结束后，回滚对候选贡献施加符号相反、绝对值相同的逐时隙变化；随后恢复旧 Offset 时，再加入原贡献。整数数组上的两次逆操作逐元素相消，Offset 映射也恢复为试探前的值。因此，每个未接受候选结束后，后续候选看到的是同一基准状态，而不是累积了前序试探误差的近似状态。实现中的完整重构不变量检查是对这一状态等价性的交叉验证，数学依据仍是负载贡献的可加性。
+
+\subsubsection{有限终止性}
+\label{subsubsec:appendix-one-termination}
+
+决策报文的可行分配空间为式~\eqref{eq:gcls-search-space-size} 所给出的有限笛卡尔积
+\[
+ \Omega
+ =
+ \prod_{m_i\in\mathcal D}\Oset_i,
+ \qquad |\Omega|<\infty.
+\]
+1-opt 只接受满足
+\[
+ \boldsymbol F_\pi(\boldsymbol O_{\rm new})
+ \prec_{\rm lex}
+ \boldsymbol F_\pi(\boldsymbol O_{\rm old})
+\]
+的严格改善移动。若某一完整分配在已接受移动序列中重复出现，则从第一次出现到再次出现之间，比较向量经过至少一次严格词典序下降，却又回到该分配对应的同一向量，构成矛盾。因此，已接受序列不能重复访问分配。由于 $\Omega$ 有限，可接受移动的次数也有限，算法必在有限次接受后进入一个没有新接受移动的完整扫描并终止。该证明不依赖目标分量为整数；有限状态空间与严格次序已经足够。
+
+\subsubsection{单报文重定位邻域的局部最优性}
+\label{subsubsec:appendix-one-local}
+
+终止前最后一轮是没有任何接受移动的完整扫描。在该轮中，每条决策报文均按固定顺序被处理，且其全部合法 Offset 均被枚举。因为整轮没有状态更新，每次候选比较的基准都是最终分配
+$\boldsymbol O^\star$。若存在
+$\boldsymbol O'\in\mathcal N_1(\boldsymbol O^\star)$ 满足
+\[
+ \boldsymbol F_\pi(\boldsymbol O')
+ \prec_{\rm lex}
+ \boldsymbol F_\pi(\boldsymbol O^\star),
+\]
+则处理对应报文时，最佳重定位至少不劣于 $\boldsymbol O'$，因而必构成严格改善并被接受，这与该轮没有接受移动矛盾。故对所有
+$\boldsymbol O'\in\mathcal N_1(\boldsymbol O^\star)$，均有正文式~\eqref{eq:gcls-one-local-optimum} 所述的局部最优关系。
+
+以上结论不推出双报文邻域、完整 2-opt、3-opt 或全局最优。正文随后采用的双报文搜索是冲突导向且受候选数和 Offset 数限制的有界邻域，并未枚举全部报文对；可选 3-opt 同样受限且默认关闭。重启只从不同构造盆地重复有限次启发式搜索，也不会把上述单报文局部最优性提升为全局最优性证书。
+
+\subsection{Offset--MainFunction 耦合与精确分组的理论性质}
+\label{subsec:appendix-mainfunction-proof}
+
+\subsubsection{单报文最大可行调用周期}
+\label{subsubsec:appendix-message-tick-proof}
+
+现补充命题~\ref{prop:message-max-tick} 的两个方向。由
+$D_i=\gcd(T_i,O_i)$ 可知 $D_i\mid T_i$ 且 $D_i\mid O_i$。因此对任意
+$k\in\mathbb Z_{\ge 0}$，有
+\[
+ O_i+kT_i\equiv 0\pmod {D_i},
+\]
+即释放序列中的每个时间点都落在以 $D_i$ 为间隔的整数时间刻上，故 $D_i$ 可行。
+
+反过来，设正整数 $B$ 能在同一时间原点上精确表示报文 $i$ 的周期和 Offset。由式~\eqref{eq:exact-tick-alignment}，
+$B\mid T_i$ 且 $B\mid O_i$，所以 $B$ 是二者的公约数，必有
+\[
+ B\mid\gcd(T_i,O_i)=D_i.
+\]
+正整数整除关系给出 $B\le D_i$。因此没有比 $D_i$ 更大的可行正整数调用周期，命题中的最大性成立。
+
+当 $O_i=0$ 时，任意正整数都整除 $0$，但可行调用周期仍须整除 $T_i$。所以可行集合恰为 $T_i$ 的正约数集合，其最大元素为 $T_i$；这与 $\gcd(T_i,0)=T_i$ 一致，而不是对零 Offset 另加的例外规则。
+
+\subsubsection{MainFunction 分组的最大可行调用周期}
+\label{subsubsec:appendix-group-timebase-proof}
+
+对非空组 $G$，由上一结论，正整数 $B$ 对组内报文 $i$ 可行当且仅当
+$B\mid D_i$。因此，$B$ 对整个组可行当且仅当
+\[
+ B\mid D_i,\qquad \forall i\in G.
+\]
+全部可行 $B$ 正是 $\{D_i:i\in G\}$ 的公共正约数。其最大元素为这些整数的最大公约数，即式~\eqref{eq:group-max-timebase} 定义的
+$B_G=\gcd_{i\in G}D_i$。这同时证明了命题~\ref{prop:group-max-timebase} 的可行性与最大性。
+
+\subsubsection{朴素代理的分组细化性质}
+\label{subsubsec:appendix-naive-proxy-proof}
+
+考虑命题~\ref{prop:naive-split-bias} 中把非空组 $G$ 拆为
+$G_1,\ldots,G_k$ 的操作。每个 $G_j$ 的最大公约数只删除了原组中的部分参数，故
+$B_{G_j}\ge B_G$。于是该组在拆分前后的朴素成本满足
+\[
+ \sum_{j=1}^{k}\frac{N_{G_j}}{B_{G_j}}
+ \le
+ \sum_{j=1}^{k}\frac{N_{G_j}}{B_G}
+ =
+ \frac{N_G}{B_G}.
+\]
+其余组不变，所以 $P_0(\Pi')\le P_0(\Pi)$。只有当至少一个含有报文的子组满足
+$B_{G_j}>B_G$ 时，相应项才严格减小；若所有子组的 TimeBase 均等于 $B_G$，拆分前后可以等成本。因此，无固定调用项时只能推出分组细化不增加该朴素指标，不能推出任意拆分都严格降低成本。加入 $\rho$ 后，每个新组还会引入 $\rho/B_{G_j}$，上述单调性不再直接适用于 $P_{\rm CPU}$。
+
+\subsubsection{同 D 类型的最优性保持}
+\label{subsubsec:appendix-same-d-proof}
+
+固定 $\boldsymbol O$ 后，组成本由式~\eqref{eq:fixed-offset-group-cost} 给出。其分母只取决于组内 $D_i$ 的取值，分子只取决于报文数及 $\rho$，因此报文名称、CAN ID 和定义位置均不参与成本。换言之，对该固定 Offset 子问题，D 类型及其重数构成充分统计量。
+
+下面给出命题~\ref{prop:same-d-compression} 的完整交换论证。设两条同类型
+$D_i=d$ 的报文分别位于 $G_1$ 和 $G_2$，相应 TimeBase 为 $B_1$ 和
+$B_2$。由于两组都含有类型 $d$，有 $B_1\mid d$ 与 $B_2\mid d$。不妨令
+$B_1\le B_2$，并从 $G_1$ 向 $G_2$ 移动一条类型 $d$ 的报文。
+
+若移动后 $G_1$ 中仍保留至少一条类型 $d$ 的报文，则两组的最大公约数都不变。两个固定项也不变，而报文计数项的总变化为
+\[
+ -\frac{1}{B_1}+\frac{1}{B_2}\le 0.
+\]
+因此该移动不增加总成本。
+
+若被移动的是 $G_1$ 中最后一条类型 $d$ 的报文，先考虑余集
+$H=G_1\setminus\{i\}$ 非空。记 $B'_1=\gcd_{j\in H}D_j$。从最大公约数的参数集合中删除 $d$ 后，$B'_1$ 是 $B_1$ 的倍数，故 $B'_1\ge B_1$。设
+$|H|=h$、移动前 $|G_2|=n_2$，则两个相关组的成本变化满足
+\[
+ \left(\frac{\rho+h}{B'_1}
+       +\frac{\rho+n_2+1}{B_2}\right)
+ -
+ \left(\frac{\rho+h+1}{B_1}
+       +\frac{\rho+n_2}{B_2}\right)
+ \le
+ -\frac{1}{B_1}+\frac{1}{B_2}
+ \le 0.
+\]
+这里第一项的不等式来自 $B'_1\ge B_1$，而 $G_2$ 原已含有 $d$，加入另一条同类型报文不会改变 $B_2$。
+
+若 $H$ 为空，则原 $G_1$ 只含这一条报文，从而 $B_1=d$。又因
+$B_2\mid d$、$B_1\le B_2$，只能有 $B_2=d$。删除空组并把报文加入
+$G_2$ 后，变量成本相互抵消，原 $G_1$ 的固定项消失，总成本变化为
+$-\rho/d<0$。
+
+三种情形均表明，可以把同一 D 类型从 TimeBase 不大的组逐条移向
+TimeBase 不小的组而不增加总成本。对每个分散类型重复这一操作，有限次后得到一个不拆分任何 D 类型的方案。若从全局最优方案出发，所得方案成本不高于全局最优值，故仍为全局最优。这只证明“至少存在一个”具有同类型不拆分结构的最优方案，并不排除其他等成本最优方案拆分同一类型。
+
+\subsubsection{锚点枚举的不重不漏性}
+\label{subsubsec:appendix-anchor-proof}
+
+对任意非空类型集合 $S$，正文取 $a(S)=\min S$。任一无序划分中，分组两两不交且并集为 $S$，所以恰有一个分组包含 $a(S)$。将它记为 $A$，则
+$A\subseteq S$ 且 $a(S)\in A$，余下各组构成 $S\setminus A$ 的一个无序划分。反过来，任取这样的 $A$ 以及余集的一个无序划分，把 $A$ 加入其中便唯一得到 $S$ 的一个划分。
+
+因此，式~\eqref{eq:anchor-subset-dp} 枚举所有包含锚点的 $A$ 时不会遗漏任何划分；同一划分也不可能由两个不同的锚点组产生，因为其中只有一个组含有 $a(S)$。这就是锚点递推不重不漏的组合依据。
+
+\subsubsection{子集动态规划的精确性}
+\label{subsubsec:appendix-dp-induction}
+
+现以集合大小归纳补全定理~\ref{thm:fixed-offset-dp-exactness} 的证明。基础情形为
+$S=\varnothing$。空集合只有空划分，没有分组成本，故
+$F(\varnothing)=0$ 与真实最小值一致。
+
+假设对所有满足 $|S|<k$ 的类型集合，$F(S)$ 均等于式~\eqref{eq:cpu-proxy}
+在该集合全部无序划分上的最小值。任取 $|S|=k$。由上一小节，任意
+$S$ 的划分都有唯一的锚点组 $A$，余下部分是 $S\setminus A$ 的划分，且
+$|S\setminus A|<k$。固定锚点组 $A$ 后，按归纳假设，余集可取得的最小成本为
+$F(S\setminus A)$，所以所有以 $A$ 为锚点组的划分中，最小总成本恰为
+\[
+ C(A)+F(S\setminus A).
+\]
+再对全部满足 $A\subseteq S$ 且 $a(S)\in A$ 的候选取最小值，依据不重不漏性，所得最小值恰覆盖 $S$ 的全部无序划分。这正是式~\eqref{eq:anchor-subset-dp}，故归纳步骤成立。
+
+于是 $F(\mathcal U)$ 是所有 D 类型划分中的最小成本。结合上一交换论证，至少存在一个报文级全局最优分组能够表示为不拆分 D 类型的划分，因此该最小值也等于固定完整 Offset 分配下全部报文级 MainFunction 分组的最小代理成本。这里的全局性只针对给定 $\boldsymbol O$、式~\eqref{eq:fixed-offset-group-cost} 与精确整数对齐假设下的内层分组模型，不延伸至外层 Offset 搜索。
+
+
+\subsection{固定 Offset 下的内层最优替换性质}
+\label{subsec:appendix-inner-replacement-proof}
+
+现证明命题~\ref{prop:inner-optimal-partition-suffices}。任取固定的 $\boldsymbol O\in\Omega_{\rm joint}$ 与可行划分 $\Pi\in\mathcal P(\boldsymbol O)$。通信侧时隙负载由报文释放序列、释放权重和 $\boldsymbol O$ 唯一确定，MainFunction 划分不参与式\eqref{eq:slot-load-model}所定义的负载累加。因此，以另一可行划分替换 $\Pi$ 时，$Q^{\mathrm{ss}}(\boldsymbol O)$、$Z^{\mathrm{ss}}(\boldsymbol O)$ 以及超限二元组 $\boldsymbol G(\boldsymbol O)$ 均保持不变。
+
+按式\eqref{eq:joint-inner-optimum}与定理\ref{thm:fixed-offset-dp-exactness}，$\Pi^\star(\boldsymbol O)$ 是当前模型下由精确求解器取得的内层最优划分，故对任意 $\Pi\in\mathcal P(\boldsymbol O)$ 都有
+\begin{equation}
+ P^\star(\boldsymbol O)
+ =P_{\rm CPU}(\Pi^\star(\boldsymbol O)\mid\boldsymbol O)
+ \le P_{\rm CPU}(\Pi\mid\boldsymbol O).
+\label{eq:inner-replacement-weak}
+\end{equation}
+若 $\Pi$ 严格次优，则式\eqref{eq:inner-replacement-weak}中的不等式严格成立。
+
+于是，在以 $(Q^{\mathrm{ss}},P_{\rm CPU})$ 为两个最小化目标的联合评价中，$(\boldsymbol O,\Pi^\star(\boldsymbol O))$ 与 $(\boldsymbol O,\Pi)$ 具有相同的第一维目标，第二维目标不大于后者，因而前者弱支配后者；当 $\Pi$ 严格次优时，第二维严格减小，前者严格支配后者。Peak 与超限量同样不受替换影响，所以这一关系在正文的 Peak 约束下仍成立。因此，外层对每个 $\boldsymbol O$ 只保留内层最优代表不会丢失任何可能的二维非支配目标点，命题得证。
+
+\clearpage
+
+\addtocontents{lot}{\protect\addvspace{0.75\baselineskip}}
+
+\clearpage
+\section{开发期消融与搜索敏感性}
+\label{sec:appendix-diagnostics}
+
+本附录汇总方法开发过程中用于解释搜索行为和参数影响的补充实验。其中部分结果只覆盖 DK、GL、IC 等代表性困难网段，另一些结果产生于最终九网段统一 manifest 之前，因而均属于开发期或初步诊断证据。本附录不替代第~\ref{sec:experiments}~章基于锁定输入得到的正式主实验，也不据此形成九网段总体统计结论。各组诊断的输入、搜索预算和代码状态并非完全相同，以下比较只在同一诊断内部进行。
+
+\subsection{候选池与 3-opt 扩展}
+\label{subsec:appendix-pool-triple}
+
+\noindent\textbf{候选池诊断。}
+第~\ref{subsubsec:gcls-balanced-pool}~节以相位距离选择多个 Peak 候选，本组诊断考察这种相位多样性是否能为 Balanced 搜索提供不同入口。表~\ref{tab:appendix-candidate-pool} 给出 DK、GL 和 IC 的开发期结果；“分配变化”表示最终 Offset 分配的 SHA-256 与单候选结果不同。表中的“请求/实际”同时保留配置上限与去重后实际候选数，因而请求 32 个候选时不必然得到 32 个不同入口。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{候选池规模诊断}
+\label{tab:appendix-candidate-pool}
+\begin{tabular}{@{}ccrc@{}}
+\toprule
+网段 & 请求/实际池规模 & $Q^{\mathrm{ss}}$ & 相对单候选的分配变化 \\
+\midrule
+DK & 1/1   & $17\,384\,489$ & 否 \\
+DK & 4/4   & $17\,079\,489$ & 是 \\
+DK & 8/8   & $17\,079\,489$ & 是 \\
+DK & 16/16 & $17\,079\,489$ & 是 \\
+DK & 32/30 & $17\,079\,489$ & 是 \\
+\addlinespace
+GL & 1/1   & $20\,981\,188$ & 否 \\
+GL & 4/4   & $20\,981\,188$ & 否 \\
+GL & 8/8   & $20\,981\,188$ & 否 \\
+GL & 16/16 & $20\,981\,188$ & 否 \\
+GL & 32/30 & $20\,981\,188$ & 否 \\
+\addlinespace
+IC & 1/1   & $44\,001\,873$ & 否 \\
+IC & 4/4   & $44\,001\,873$ & 否 \\
+IC & 8/8   & $44\,001\,873$ & 否 \\
+IC & 16/16 & $44\,001\,873$ & 否 \\
+IC & 32/21 & $44\,001\,873$ & 否 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+DK 在池规模由 1 增至 4 时，$Q^{\mathrm{ss}}$ 由 $17\,384\,489$ 降至 $17\,079\,489$，且分配方案发生变化；继续扩大请求规模没有观察到更低的 $Q^{\mathrm{ss}}$。GL 与 IC 在所测规模内均返回单候选结果。该现象说明候选池有时能够提供不同的相位搜索入口，但收益具有实例依赖性；它既不能证明候选池对一般实例有效，也不能据此把池规模 4 认定为最优配置。
+
+\noindent\textbf{3-opt 消融。}
+第~\ref{subsubsec:gcls-three-opt}~节的 3-opt 只在冲突导向筛选后的有限三报文集合内枚举候选，且默认关闭。为隔离其作用，表~\ref{tab:appendix-three-opt} 比较同一单候选入口在关闭和启用该扩展时的结果。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{有界 3-opt 消融}
+\label{tab:appendix-three-opt}
+\begin{tabular}{@{}crrrc@{}}
+\toprule
+网段 & 关闭时 $Q^{\mathrm{ss}}$ & 启用时 $Q^{\mathrm{ss}}$ & 变化量 & 分配变化 \\
+\midrule
+DK & $17\,384\,489$ & $17\,384\,489$ & $0$ & 否 \\
+GL & $20\,981\,188$ & $20\,981\,188$ & $0$ & 否 \\
+IC & $44\,001\,873$ & $42\,940\,673$ & $-1\,061\,200$ & 是 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+IC 中一次有界三报文搬移及其后续清理使 $Q^{\mathrm{ss}}$ 继续下降，而 DK 与 GL 未观察到改善。即使如此，IC 的 $42\,940\,673$ 仍高于同一开发期诊断中 CP-SAT 得到的更优可行值 $42\,155\,673$；该 CP-SAT 状态为 \texttt{FEASIBLE}，不提供全局最优证书。因而，3-opt 的适当解释是：扩大有限局部邻域有时能够越过 1-opt 与受限双报文搜索留下的局部结构，但其收益和计算成本均依赖实例，不能把它视为默认 GCLS 的必要阶段或局部最优问题的完整解决方案。
+
+\subsection{峰值容差与重启敏感性}
+\label{subsec:appendix-tolerance-restart}
+
+\noindent\textbf{峰值容差扫描。}
+表~\ref{tab:appendix-tolerance} 列出开发阶段九个网段在离散容差集合
+$\{0,2,5,8,10,15,20\}\%$ 上的扫描结果。“改善”仅表示相对同一网段 $0\%$ 扫描点获得更低的 $Q^{\mathrm{ss}}$；峰值预算按对应容差离散取整。该表描述的是有限测试点中的首次观测位置，不给出连续容差空间的数学阈值、真实起始点或饱和点。
+
+{\small
+\begin{longtable}{@{}ccrrrc@{}}
+\caption{峰值容差的完整离散扫描}
+\label{tab:appendix-tolerance}\\
+\toprule
+网段 & 容差/\% & 峰值预算/$\mu$s & $Z^{\mathrm{ss}}$/$\mu$s & $Q^{\mathrm{ss}}$ & 改善 \\
+\midrule
+\endfirsthead
+\multicolumn{6}{c}{表~\ref{tab:appendix-tolerance}（续）}\\
+\toprule
+网段 & 容差/\% & 峰值预算/$\mu$s & $Z^{\mathrm{ss}}$/$\mu$s & $Q^{\mathrm{ss}}$ & 改善 \\
+\midrule
+\endhead
+\midrule
+\multicolumn{6}{r}{续下页}\\
+\endfoot
+\bottomrule
+\endlastfoot
+CH & 0  & 327 & 327 & $1\,767\,529$  & 否 \\
+CH & 2  & 334 & 327 & $1\,767\,529$  & 否 \\
+CH & 5  & 344 & 327 & $1\,767\,529$  & 否 \\
+CH & 8  & 354 & 327 & $1\,767\,529$  & 否 \\
+CH & 10 & 360 & 327 & $1\,767\,529$  & 否 \\
+CH & 15 & 377 & 327 & $1\,767\,529$  & 否 \\
+CH & 20 & 393 & 327 & $1\,767\,529$  & 否 \\
+\addlinespace
+DA & 0  & 407 & 407 & $1\,288\,061$  & 否 \\
+DA & 2  & 416 & 407 & $1\,288\,061$  & 否 \\
+DA & 5  & 428 & 407 & $1\,288\,061$  & 否 \\
+DA & 8  & 440 & 407 & $1\,288\,061$  & 否 \\
+DA & 10 & 448 & 407 & $1\,288\,061$  & 否 \\
+DA & 15 & 469 & 407 & $1\,288\,061$  & 否 \\
+DA & 20 & 489 & 407 & $1\,288\,061$  & 否 \\
+\addlinespace
+DK & 0  & 532 & 532 & $17\,384\,489$ & 否 \\
+DK & 2  & 543 & 532 & $17\,384\,489$ & 否 \\
+DK & 5  & 559 & 532 & $17\,384\,489$ & 否 \\
+DK & 8  & 575 & 532 & $17\,384\,489$ & 否 \\
+DK & 10 & 586 & 577 & $16\,936\,489$ & 是 \\
+DK & 15 & 612 & 577 & $16\,936\,489$ & 是 \\
+DK & 20 & 639 & 577 & $16\,936\,489$ & 是 \\
+\addlinespace
+EP & 0  & 125 & 125 & $218\,750$    & 否 \\
+EP & 2  & 128 & 125 & $218\,750$    & 否 \\
+EP & 5  & 132 & 125 & $218\,750$    & 否 \\
+EP & 8  & 135 & 125 & $218\,750$    & 否 \\
+EP & 10 & 138 & 125 & $218\,750$    & 否 \\
+EP & 15 & 144 & 125 & $218\,750$    & 否 \\
+EP & 20 & 150 & 125 & $218\,750$    & 否 \\
+\addlinespace
+GL & 0  & 532 & 532 & $20\,981\,188$ & 否 \\
+GL & 2  & 543 & 532 & $20\,981\,188$ & 否 \\
+GL & 5  & 559 & 532 & $20\,981\,188$ & 否 \\
+GL & 8  & 575 & 532 & $20\,981\,188$ & 否 \\
+GL & 10 & 586 & 532 & $20\,981\,188$ & 否 \\
+GL & 15 & 612 & 532 & $20\,981\,188$ & 否 \\
+GL & 20 & 639 & 532 & $20\,981\,188$ & 否 \\
+\addlinespace
+IC & 0  & 572 & 572 & $44\,001\,873$ & 否 \\
+IC & 2  & 584 & 572 & $44\,001\,873$ & 否 \\
+IC & 5  & 601 & 572 & $44\,001\,873$ & 否 \\
+IC & 8  & 618 & 572 & $44\,001\,873$ & 否 \\
+IC & 10 & 630 & 572 & $44\,001\,873$ & 否 \\
+IC & 15 & 658 & 654 & $42\,597\,421$ & 是 \\
+IC & 20 & 687 & 654 & $42\,597\,421$ & 是 \\
+\addlinespace
+LC & 0  & 407 & 407 & $1\,110\,102$  & 否 \\
+LC & 2  & 416 & 407 & $1\,110\,102$  & 否 \\
+LC & 5  & 428 & 407 & $1\,110\,102$  & 否 \\
+LC & 8  & 440 & 407 & $1\,110\,102$  & 否 \\
+LC & 10 & 448 & 407 & $1\,110\,102$  & 否 \\
+LC & 15 & 469 & 407 & $1\,110\,102$  & 否 \\
+LC & 20 & 489 & 407 & $1\,110\,102$  & 否 \\
+\addlinespace
+PT & 0  & 327 & 327 & $694\,208$    & 否 \\
+PT & 2  & 334 & 327 & $694\,208$    & 否 \\
+PT & 5  & 344 & 327 & $694\,208$    & 否 \\
+PT & 8  & 354 & 327 & $694\,208$    & 否 \\
+PT & 10 & 360 & 327 & $694\,208$    & 否 \\
+PT & 15 & 377 & 327 & $694\,208$    & 否 \\
+PT & 20 & 393 & 327 & $694\,208$    & 否 \\
+\addlinespace
+SU & 0  & 165 & 165 & $245\,975$    & 否 \\
+SU & 2  & 169 & 165 & $245\,975$    & 否 \\
+SU & 5  & 174 & 165 & $245\,975$    & 否 \\
+SU & 8  & 179 & 165 & $245\,975$    & 否 \\
+SU & 10 & 182 & 165 & $245\,975$    & 否 \\
+SU & 15 & 190 & 165 & $245\,975$    & 否 \\
+SU & 20 & 198 & 165 & $245\,975$    & 否 \\
+\end{longtable}
+}
+
+DK 在所测离散点中首次于 $10\%$ 观察到改善，IC 首次于 $15\%$ 观察到改善；CH、DA、EP、GL、LC、PT 和 SU 在扫描至 $20\%$ 的测试点内均未观察到更低的 $Q^{\mathrm{ss}}$。后七个网段的结果只表示当前离散点与搜索预算下没有发现改善，不排除未测试容差或不同搜索入口产生其他结果。
+
+\noindent\textbf{重启稳定性。}
+DK 的补充诊断采用 30 个独立批次，每批最多 80 次尝试，并同时记录端点目标和完整分配哈希。表~\ref{tab:appendix-restart} 分开列出 Peak 与 Balanced 的批次端点；两种模式采用不同的词典序比较键，表中的“最佳目标”分别在各自模式内定义。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{DK 的 $30\times80$ 重启稳定性诊断}
+\label{tab:appendix-restart}
+\begin{tabularx}{\textwidth}{@{}Xcc@{}}
+\toprule
+统计量 & Peak & Balanced \\
+\midrule
+批次数与每批最大尝试数 & $30\times80$ & $30\times80$ \\
+批次端点中的最佳 $Q^{\mathrm{ss}}$ & $17\,177\,089$ & $17\,079\,489$ \\
+最佳目标命中次数 & $13/30$ & $5/30$ \\
+不同端点目标数 & 5 & 6 \\
+不同端点分配数 & 28 & 29 \\
+同一最佳分配的命中情况 & $1/30$ & 5 次最佳目标命中对应 5 个不同分配 \\
+饱和性结论 & 未验证 & 未验证 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Peak 的最佳目标在 13 个批次中出现，但其中只有一个批次复现了被选作代表的完整分配哈希；Balanced 的最佳目标出现 5 次，五个结果的分配哈希各不相同。更一般地，Peak 和 Balanced 分别观察到 28 个和 29 个不同端点分配，说明目标值复现与配置复现是两个不同问题。有限重启能够增加发现高质量候选的机会，却不能由单个目标元组的重复推出分配唯一性。全部批次达到 80 次尝试且诊断未验证饱和，因此 80 次尝试既不是收敛证明，也不是全局最优证书。
+
+\subsection{释放权重敏感性}
+\label{subsec:appendix-weight}
+
+优化器允许采用帧时间、Payload 字节数或单位计数定义每次释放的时隙工作量。三者分别对应 $\mu$s/slot、Byte/slot 和 frame/slot，不同权重下的绝对 Peak 与 $Q^{\mathrm{ss}}$ 具有不同量纲，不能直接比较数值高低。正式九网段主实验仍采用帧时间权重；本节只考察评价口径改变后，搜索改善率和 Offset 分配是否随之变化。
+
+现有可机读敏感性工件形成于最终统一 manifest 之前，完整覆盖的是 Payload 与帧时间两种模式，没有可用于同表比较的单位计数运行结果。因此，表~\ref{tab:appendix-weight} 只报告这两种模式，并将各自结果与同一模式下的原始配置比较；单位计数仅保留为模型支持的近似口径，不补造实验数值。表中 Peak 和 $Q^{\mathrm{ss}}$ 的改善率均在各自权重内部计算，“Offset 差异数”比较两种权重所得 GCLS 分配。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Payload 与帧时间权重敏感性}
+\label{tab:appendix-weight}
+\begin{tabular}{@{}crrrrrr@{}}
+\toprule
+网段 & 报文数 & Offset 差异数 &
+\multicolumn{2}{c}{Payload 改善率/\%} &
+\multicolumn{2}{c}{帧时间改善率/\%} \\
+\cmidrule(lr){4-5}\cmidrule(l){6-7}
+ & & & Peak & $Q^{\mathrm{ss}}$ & Peak & $Q^{\mathrm{ss}}$ \\
+\midrule
+CH & 9  & 0  & 0.00  & 0.00  & 0.00  & 0.00 \\
+DA & 17 & 17 & 20.00 & 20.74 & 28.85 & 18.05 \\
+DK & 25 & 21 & 40.00 & 1.79  & 38.07 & 2.76 \\
+EP & 6  & 0  & 0.00  & 0.00  & 0.00  & 0.00 \\
+GL & 25 & 16 & 46.67 & 31.57 & 38.07 & 14.09 \\
+IC & 24 & 20 & 46.67 & 27.71 & 38.07 & 4.30 \\
+LC & 8  & 0  & 11.11 & 12.66 & 23.50 & 5.65 \\
+PT & 11 & 0  & 25.00 & 18.60 & 33.54 & 13.45 \\
+SU & 7  & 0  & 0.00  & 0.00  & 0.00  & 0.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+两种权重在 DA、DK、GL 和 IC 上产生了不同的 Offset 分配，其中四个网段的差异均涉及大部分决策报文；CH、EP、LC、PT 与 SU 的分配保持一致，PT 在两种权重内部均改善了本模式的 Peak 与平方和。由此能够支持的结论是：权重定义会改变热点排序、局部搜索偏好和最终分配，其影响不只表现为单位换算；但由于各模式量纲不同、该组数据又属于开发期工件，不能据此跨权重比较绝对 Peak，也不能把某一模式概括为普遍优于另一模式。
+
+
+
+\end{document}
