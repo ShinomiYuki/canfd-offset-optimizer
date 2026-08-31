@@ -172,7 +172,10 @@ class OptimizationConfig:
 
     slot_width_us: int = 5_000
     hyperperiod_us: int | None = None
+    # Deprecated compatibility field. Parsed and preserved, but never enforced.
     hyperperiod_cap_us: int = 5_000_000
+    max_slot_count: int = 20_000
+    max_precomputed_hits: int = 2_000_000
     offset_min_us: int = 15_000
     offset_max_us: int = 100_000
     offset_step_us: int = 5_000
@@ -232,6 +235,8 @@ class OptimizationConfig:
         integer_fields = (
             self.slot_width_us,
             self.hyperperiod_cap_us,
+            self.max_slot_count,
+            self.max_precomputed_hits,
             self.offset_min_us,
             self.offset_max_us,
             self.offset_step_us,
@@ -250,6 +255,8 @@ class OptimizationConfig:
         positive = (
             self.slot_width_us,
             self.hyperperiod_cap_us,
+            self.max_slot_count,
+            self.max_precomputed_hits,
             self.offset_step_us,
             self.hot_slot_count,
             self.conflict_candidate_cap,
@@ -436,6 +443,8 @@ def load_project_config(path: Path) -> ProjectConfig:
             "slot_ms",
             "hyperperiod_ms",
             "hyperperiod_cap_ms",
+            "max_slot_count",
+            "max_precomputed_hits",
             "offset_min_ms",
             "offset_max_ms",
             "offset_step_ms",
@@ -551,6 +560,10 @@ def load_project_config(path: Path) -> ProjectConfig:
         slot_width_us=_ms(optimization_raw, "slot_ms", 5),
         hyperperiod_us=hyperperiod_us,
         hyperperiod_cap_us=_ms(optimization_raw, "hyperperiod_cap_ms", 5_000),
+        max_slot_count=_required_int(optimization_raw, "max_slot_count", 20_000),
+        max_precomputed_hits=_required_int(
+            optimization_raw, "max_precomputed_hits", 2_000_000
+        ),
         offset_min_us=_ms(optimization_raw, "offset_min_ms", 15),
         offset_max_us=_ms(optimization_raw, "offset_max_ms", 100),
         offset_step_us=_ms(optimization_raw, "offset_step_ms", 5),

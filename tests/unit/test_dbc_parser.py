@@ -11,7 +11,6 @@ import pytest
 from canfd_offset_optimizer.exceptions import (
     InputFileError,
     MissingFieldError,
-    UnsupportedMessageError,
 )
 from canfd_offset_optimizer.models import FrameProtocol
 from canfd_offset_optimizer.parsers.dbc_parser import parse_dbc
@@ -117,7 +116,7 @@ def test_tx_cyclic_message_without_cycle_has_locatable_error(tmp_path: Path) -> 
         parse_dbc(path)
 
 
-def test_mixed_classic_and_fd_messages_are_explicitly_rejected(
+def test_mixed_classic_and_fd_messages_preserve_each_message_protocol(
     tmp_path: Path,
 ) -> None:
     text = FIXTURE.read_text(encoding="utf-8").replace(
@@ -126,8 +125,11 @@ def test_mixed_classic_and_fd_messages_are_explicitly_rejected(
     )
     path = tmp_path / "classic.dbc"
     path.write_text(text, encoding="utf-8")
-    with pytest.raises(UnsupportedMessageError, match=r"classic\.dbc.*mixes eligible"):
-        parse_dbc(path)
+    parsed = parse_dbc(path)
+    assert tuple(message.frame_protocol for message in parsed.messages) == (
+        FrameProtocol.CLASSIC_CAN,
+        FrameProtocol.CAN_FD,
+    )
 
 
 def test_classic_can_periodic_tx_uses_payload_eligibility(tmp_path: Path) -> None:

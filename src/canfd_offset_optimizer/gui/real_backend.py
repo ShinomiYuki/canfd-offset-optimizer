@@ -238,13 +238,22 @@ class RealBackend(WorkspaceImporter):
                 optimizable = True
                 reason = None
                 network_warnings = list(parsed.warnings)
+                parsed_protocols = {
+                    FrameProtocol(message.frame_protocol.value)
+                    for message in parsed.messages
+                }
                 frame_protocol = (
-                    FrameProtocol.CLASSIC_CAN
-                    if parsed.messages[0].frame_protocol is CoreFrameProtocol.CLASSIC_CAN
-                    else FrameProtocol.CAN_FD
+                    next(iter(parsed_protocols))
+                    if len(parsed_protocols) == 1
+                    else FrameProtocol.MIXED
                 )
-                if frame_protocol is FrameProtocol.CAN_FD:
-                    brs_values = tuple(message.dbc_brs for message in parsed.messages)
+                if frame_protocol in {FrameProtocol.CAN_FD, FrameProtocol.MIXED}:
+                    fd_messages = tuple(
+                        message
+                        for message in parsed.messages
+                        if message.frame_protocol is CoreFrameProtocol.CAN_FD
+                    )
+                    brs_values = tuple(message.dbc_brs for message in fd_messages)
                     dbc_brs_complete = all(value is not None for value in brs_values)
                     dbc_brs_has_on = any(value is True for value in brs_values)
                     dbc_brs_mixed = (
@@ -296,6 +305,13 @@ class RealBackend(WorkspaceImporter):
                 classic_weight_model = CLASSIC_WEIGHT_MODEL
                 network_warnings.append(
                     'classic_weight_model = "payload_bytes_approximation"'
+                )
+            elif optimizable and frame_protocol is FrameProtocol.MIXED:
+                available_weight_modes = (WeightMode.PAYLOAD_BYTES,)
+                automatic_weight_mode = WeightMode.PAYLOAD_BYTES
+                network_warnings.append(
+                    "Mixed Classic CAN/CAN FD 网段固定使用 payload_bytes；"
+                    "不参与 CAN FD frame_time_us 公共选项计算。"
                 )
             elif optimizable and frame_time_channel is not None:
                 network_warnings.append(
@@ -507,15 +523,17 @@ class RealBackend(WorkspaceImporter):
             selected_protocols = {
                 record.frame_protocol
                 for record in summary.messages
-                if record.selected_transmitter_match
-                and record.base_eligible
-                and record.final_status is not MessageEligibilityStatus.INPUT_ERROR
+                if record.final_status is MessageEligibilityStatus.FINAL_ELIGIBLE
                 and record.frame_protocol is not None
             }
             selected_protocol = (
                 next(iter(selected_protocols))
                 if len(selected_protocols) == 1
-                else network.frame_protocol
+                else (
+                    FrameProtocol.MIXED
+                    if selected_protocols
+                    else network.frame_protocol
+                )
             )
             available_modes = network.available_weight_modes
             automatic_weight = network.automatic_weight_mode
@@ -524,6 +542,9 @@ class RealBackend(WorkspaceImporter):
                 available_modes = (WeightMode.PAYLOAD_BYTES,)
                 automatic_weight = WeightMode.PAYLOAD_BYTES
                 classic_model = CLASSIC_WEIGHT_MODEL
+            elif selected_protocol is FrameProtocol.MIXED:
+                available_modes = (WeightMode.PAYLOAD_BYTES,)
+                automatic_weight = WeightMode.PAYLOAD_BYTES
             elif not available_modes:
                 available_modes = (WeightMode.PAYLOAD_BYTES,)
                 automatic_weight = WeightMode.PAYLOAD_BYTES
@@ -935,6 +956,13 @@ class RealBackend(WorkspaceImporter):
                 f"offset_step_ms={request.offset_search.offset_step_ms}",
                 f"offset_effective_max_ms={request.offset_search.effective_max_offset_ms}",
                 f"offset_candidate_count={request.offset_search.candidate_count}",
+                f"slot_count={loaded.slot_map.resource_usage.slot_count}",
+                (
+                    "precomputed_hits="
+                    f"{loaded.slot_map.resource_usage.precomputed_hits}"
+                ),
+                f"hyperperiod_us={loaded.network.hyperperiod_us}",
+                f"slot_width_us={loaded.config.optimization.slot_width_us}",
                 *(
                     (
                         f"dbc_offset_attribute={offset_write_plan.attribute_name or 'existing'}",
@@ -960,6 +988,11 @@ class RealBackend(WorkspaceImporter):
                 *(
                     ('classic_weight_model = "payload_bytes_approximation"',)
                     if network.frame_protocol is FrameProtocol.CLASSIC_CAN
+                    else ()
+                ),
+                *(
+                    ("mixed_protocol_weight=payload_bytes",)
+                    if network.frame_protocol is FrameProtocol.MIXED
                     else ()
                 ),
                 conservative_log,
@@ -1330,6 +1363,18 @@ class RealBackend(WorkspaceImporter):
                 f"joint_rho={settings.rho}",
                 f"joint_peak_tolerance={settings.peak_tolerance_relative}",
                 f"arxml_channel={channel_override or 'not_used'}",
+                f"slot_count={domain.slot_map.resource_usage.slot_count}",
+                (
+                    "precomputed_hits="
+                    f"{domain.slot_map.resource_usage.precomputed_hits}"
+                ),
+                f"hyperperiod_us={domain.hyperperiod_us}",
+                f"slot_width_us={loaded.config.optimization.slot_width_us}",
+                *(
+                    ("mixed_protocol_weight=payload_bytes",)
+                    if network.frame_protocol is FrameProtocol.MIXED
+                    else ()
+                ),
             ),
             output_directory=network_output,
             frame_protocol=network.frame_protocol,
@@ -1595,6 +1640,8 @@ class RealBackend(WorkspaceImporter):
             baseline_messages,
             loaded.network.startup_window,
             loaded.network.steady_window,
+            max_slot_count=loaded.config.optimization.max_slot_count,
+            max_precomputed_hits=loaded.config.optimization.max_precomputed_hits,
         )
         state = SearchState(baseline_messages, baseline_map)
         for message in baseline_messages:
@@ -1693,7 +1740,15 @@ class RealBackend(WorkspaceImporter):
         return replace(
             loaded,
             network=filtered_network,
-            slot_map=precompute_slot_map(remaining, startup, steady),
+            slot_map=precompute_slot_map(
+                remaining,
+                startup,
+                steady,
+                max_slot_count=loaded.config.optimization.max_slot_count,
+                max_precomputed_hits=(
+                    loaded.config.optimization.max_precomputed_hits
+                ),
+            ),
         )
 
     @staticmethod
@@ -1717,7 +1772,7 @@ class RealBackend(WorkspaceImporter):
     def _network_weight(
         network: NetworkSummary, request: GuiBatchOptimizationRequest
     ) -> WeightMode:
-        if network.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if network.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}:
             return request.classic_can_weight
         return request.can_fd_weight
 
@@ -1956,11 +2011,6 @@ class RealBackend(WorkspaceImporter):
     @staticmethod
     def _eligibility_reason(exc: CanfdOptimizerError) -> str:
         text = str(exc)
-        if "mixes eligible Classic CAN and CAN FD" in text:
-            return (
-                "跳过：同一物理网段混合了 Classic CAN 与 CAN FD；"
-                f"当前核心不支持混合帧格式优化。详情：{text}"
-            )
         if "no eligible periodic TX messages" in text:
             return f"跳过：没有符合资格的周期 TX 报文。详情：{text}"
         if "not a CAN FD data frame" in text:

@@ -7,7 +7,8 @@ network:
 optimization:
   slot_ms: 5
   hyperperiod_ms: auto
-  hyperperiod_cap_ms: 5000
+  max_slot_count: 20000
+  max_precomputed_hits: 2000000
   offset_min_ms: 15
   offset_max_ms: 100
   offset_step_ms: 5

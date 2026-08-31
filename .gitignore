@@ -55,6 +55,8 @@ user_input/
 user_output/
 
 # Local test and automation scratch directories.
+/input/test/
+/tmp/
 /.codex/
 /.codex_tmp/
 /.pytest_tmp/

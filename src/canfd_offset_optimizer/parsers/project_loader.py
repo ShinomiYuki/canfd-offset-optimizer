@@ -123,14 +123,6 @@ def load_project(
         selected_transmitters=selected_transmitters,
     )
     warnings = list(dbc.warnings)
-    frame_protocol = dbc.messages[0].frame_protocol
-    if frame_protocol is FrameProtocol.CLASSIC_CAN:
-        if weight_mode_override not in (None, WeightMode.PAYLOAD_BYTES):
-            warnings.append(
-                "Classic CAN automatically overrides requested weight to payload_bytes"
-            )
-        weight_mode_override = WeightMode.PAYLOAD_BYTES
-        warnings.append('classic_weight_model = "payload_bytes_approximation"')
     sources: dict[str, str] = {}
     routing_table: RoutingTable | None = None
     canonical_routing_target: str | None = None
@@ -174,6 +166,12 @@ def load_project(
         raise InputFileError(
             f"{dbc_path}: routing exclusion removed every selected periodic TX message"
         )
+    selected_protocols = {message.frame_protocol for message in selected_dbc_messages}
+    frame_protocol = (
+        next(iter(selected_protocols))
+        if len(selected_protocols) == 1
+        else FrameProtocol.MIXED
+    )
     unknown_originals = tuple(
         raw.name for raw in selected_dbc_messages if raw.original_offset_us is None
     )
@@ -216,6 +214,23 @@ def load_project(
             config = replace(
                 config,
                 model=replace(config.model, weight_mode=weight_mode_override),
+            )
+    if frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}:
+        if config.model.weight_mode is not WeightMode.PAYLOAD_BYTES:
+            label = "Classic CAN" if frame_protocol is FrameProtocol.CLASSIC_CAN else "Mixed"
+            warnings.append(
+                f"{label} automatically overrides requested weight to payload_bytes"
+            )
+            config = replace(
+                config,
+                model=replace(config.model, weight_mode=WeightMode.PAYLOAD_BYTES),
+            )
+        if frame_protocol is FrameProtocol.CLASSIC_CAN:
+            warnings.append('classic_weight_model = "payload_bytes_approximation"')
+        else:
+            warnings.append(
+                "Mixed Classic CAN/CAN FD network requires payload_bytes; "
+                "frame_time_us is unavailable"
             )
     if channel_override is not None:
         selected_channel = channel_override.strip()
@@ -436,10 +451,20 @@ def load_project(
             input_files=network.input_files,
             cli_overrides=network.cli_overrides,
         )
+    try:
+        slot_map = precompute_slot_map(
+            network.messages,
+            startup,
+            steady,
+            max_slot_count=config.optimization.max_slot_count,
+            max_precomputed_hits=config.optimization.max_precomputed_hits,
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"invalid optimization resources: {exc}") from exc
     return LoadedProject(
         config=config,
         network=network,
-        slot_map=precompute_slot_map(network.messages, startup, steady),
+        slot_map=slot_map,
         dbc_parse_result=dbc,
         routing_table=routing_table,
         routing_target_network=canonical_routing_target,

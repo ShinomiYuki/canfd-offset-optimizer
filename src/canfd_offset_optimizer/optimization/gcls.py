@@ -78,6 +78,8 @@ def _original_baseline_score(
         baseline_messages + fixed_messages,
         slot_map.startup_window,
         slot_map.steady_window,
+        max_slot_count=slot_map.max_slot_count,
+        max_precomputed_hits=slot_map.max_precomputed_hits,
     )
     state = SearchState(
         baseline_messages,

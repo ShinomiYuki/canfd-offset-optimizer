@@ -31,6 +31,7 @@ class FrameProtocol(str, Enum):
 
     CLASSIC_CAN = "classic_can"
     CAN_FD = "can_fd"
+    MIXED = "mixed"
 
 
 class WeightMode(str, Enum):
@@ -110,6 +111,8 @@ class CanMessage:
             raise ValueError("frame_time_us must be positive")
         if not isinstance(self.frame_protocol, FrameProtocol):
             raise ValueError("frame_protocol is unsupported")
+        if self.frame_protocol is FrameProtocol.MIXED:
+            raise ValueError("one CanMessage cannot use the network-level mixed protocol")
         valid_lengths = (
             frozenset(range(9))
             if self.frame_protocol is FrameProtocol.CLASSIC_CAN
@@ -243,20 +246,16 @@ class NetworkModel:
         names = [message.name for message in self.messages]
         if len(names) != len(set(names)):
             raise ValueError("message names must be unique")
-        protocols = {message.frame_protocol for message in self.messages}
-        if len(protocols) != 1:
-            raise ValueError(
-                "one physical network must not mix eligible Classic CAN and CAN FD frames"
-            )
         if (
-            next(iter(protocols)) is FrameProtocol.CLASSIC_CAN
+            self.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}
             and self.weight_mode is not WeightMode.PAYLOAD_BYTES
         ):
-            raise ValueError("Classic CAN currently requires payload_bytes weight")
+            raise ValueError("Classic CAN and mixed networks require payload_bytes weight")
 
     @property
     def frame_protocol(self) -> FrameProtocol:
-        return self.messages[0].frame_protocol
+        protocols = {message.frame_protocol for message in self.messages}
+        return next(iter(protocols)) if len(protocols) == 1 else FrameProtocol.MIXED
 
     @property
     def average_load(self) -> float:

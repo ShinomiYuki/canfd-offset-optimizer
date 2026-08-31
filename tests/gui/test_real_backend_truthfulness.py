@@ -490,9 +490,11 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
     inspection = backend.inspect_workspace(session, lambda update: None, token)
 
     assert len(inspection.networks) == 3
-    assert len(inspection.optimizable_networks) == 1
+    assert len(inspection.optimizable_networks) == 2
+    mixed = next(item for item in inspection.networks if item.network_name == "CLASSIC")
+    assert mixed.frame_protocol is FrameProtocol.MIXED
+    assert mixed.available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
     skipped = {item.network_name: item for item in inspection.networks if not item.is_optimizable}
-    assert "混合了 Classic CAN 与 CAN FD" in skipped["CLASSIC"].unoptimizable_reason
     assert "没有符合资格的周期 TX" in skipped["EMPTY"].unoptimizable_reason
     assert all(item.message_count == 0 for item in skipped.values())
 
@@ -510,8 +512,8 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
         sender_selection=inspection.sender_selection,
     )
     batch = backend.optimize_all_networks(request, lambda update: None, token)
-    assert batch.succeeded_count == 1
-    assert batch.skipped_count == 2
+    assert batch.succeeded_count == 2
+    assert batch.skipped_count == 1
     succeeded = next(
         item for item in batch.network_results if item.status is NetworkRunStatus.SUCCEEDED
     )
@@ -521,7 +523,15 @@ def test_real_inspection_uses_core_eligibility_and_keeps_skipped_rows(
         for item in batch.network_results
         if item.status is NetworkRunStatus.SKIPPED
     )
-    assert not (batch.output_directory / "CLASSIC").exists()
+    mixed_result = next(
+        item.result
+        for item in batch.network_results
+        if item.network_name == "CLASSIC"
+    )
+    assert mixed_result is not None
+    assert mixed_result.frame_protocol is FrameProtocol.MIXED
+    assert mixed_result.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert "mixed_protocol_weight=payload_bytes" in mixed_result.logs
     assert not (batch.output_directory / "EMPTY").exists()
 
 

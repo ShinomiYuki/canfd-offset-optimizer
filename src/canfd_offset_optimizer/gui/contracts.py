@@ -56,6 +56,7 @@ class WeightMode(str, Enum):
 class FrameProtocol(str, Enum):
     CLASSIC_CAN = "classic_can"
     CAN_FD = "can_fd"
+    MIXED = "mixed"
 
 
 class TimingConfigSource(str, Enum):
@@ -659,9 +660,10 @@ class NetworkSummary:
             self.automatic_weight_mode not in self.available_weight_modes
         ):
             raise ValueError("automatic weight must be a concrete available mode")
-        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if self.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}:
             if self.is_optimizable and self.effective_weight_mode is not WeightMode.PAYLOAD_BYTES:
-                raise ValueError("Classic CAN must use payload_bytes")
+                raise ValueError("Classic CAN and Mixed networks must use payload_bytes")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
             if self.classic_weight_model != CLASSIC_WEIGHT_MODEL:
                 raise ValueError("Classic CAN must declare its approximation model")
 
@@ -1411,9 +1413,10 @@ class GuiOptimizationResult:
             or self.slot_width_us <= 0
         ):
             raise ValueError("result slot_width_us must be a positive integer")
-        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if self.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}:
             if self.weight_mode is not WeightMode.PAYLOAD_BYTES:
-                raise ValueError("Classic CAN result must use payload_bytes")
+                raise ValueError("Classic CAN and Mixed results must use payload_bytes")
+        if self.frame_protocol is FrameProtocol.CLASSIC_CAN:
             if self.classic_weight_model != CLASSIC_WEIGHT_MODEL:
                 raise ValueError("Classic CAN result must declare its approximation model")
         identity = (self.network_id, self.network_name, self.display_name, self.source_file)

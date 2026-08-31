@@ -21,8 +21,28 @@ from canfd_offset_optimizer.models import ObjectiveMode, PeakToleranceType
 
 
 def test_default_offsets_are_15_to_100_ms() -> None:
-    offsets = OptimizationConfig().allowed_offsets_us
+    config = OptimizationConfig()
+    offsets = config.allowed_offsets_us
     assert offsets == tuple(range(15_000, 100_001, 5_000))
+    assert config.max_slot_count == 20_000
+    assert config.max_precomputed_hits == 2_000_000
+
+
+def test_legacy_hyperperiod_cap_is_parsed_but_resource_limits_are_authoritative(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        "optimization:\n"
+        "  hyperperiod_cap_ms: 1\n"
+        "  max_slot_count: 123\n"
+        "  max_precomputed_hits: 456\n",
+        encoding="utf-8",
+    )
+    config = load_project_config(path).optimization
+    assert config.hyperperiod_cap_us == 1_000
+    assert config.max_slot_count == 123
+    assert config.max_precomputed_hits == 456
 
 
 def test_load_project_config_normalizes_milliseconds(tmp_path: Path) -> None:

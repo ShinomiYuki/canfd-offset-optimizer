@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from fractions import Fraction
 from itertools import product
 
@@ -13,6 +14,7 @@ from canfd_offset_optimizer.config import (
     OptimizationConfig,
     RestartPolicy,
 )
+from canfd_offset_optimizer.exceptions import OptimizationError
 from canfd_offset_optimizer.models import (
     CanMessage,
     ObjectiveMode,
@@ -143,6 +145,18 @@ def test_joint_domain_uses_strict_long_period_threshold_without_mutation() -> No
     assert domain.fixed_offset_map == {"slow": 0}
     assert domain.fixed_messages[0].allowed_offsets_us == (0,)
     assert messages[2].allowed_offsets_us == (10_000, 20_000, 30_000)
+
+
+def test_joint_domain_applies_the_same_resource_limits_before_precomputation() -> None:
+    with pytest.raises(
+        OptimizationError,
+        match=r"slot_count actual=9 exceeds max_slot_count=8; "
+        r"hyperperiod_us=60000, slot_width_us=10000",
+    ):
+        build_joint_domain(
+            _mixed_messages(),
+            replace(_config(), max_slot_count=8),
+        )
 
 
 def test_fixed_message_is_baseline_for_can_and_exact_cpu_evaluation() -> None:

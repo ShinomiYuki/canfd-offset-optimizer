@@ -486,12 +486,6 @@ def parse_loaded_dbc(
         raise InputFileError(
             f"{path}: no eligible periodic TX messages were found{sender_context}"
         )
-    protocols = {message.frame_protocol for message in parsed}
-    if len(protocols) != 1:
-        raise UnsupportedMessageError(
-            f"{path}: one physical network mixes eligible Classic CAN and CAN FD "
-            "periodic TX messages; Byte and microsecond weights cannot be mixed"
-        )
     nominal_bitrate_bps = read_dbc_nominal_bitrate(path)
     data_bitrate_bps, data_bitrate_source = read_dbc_data_bitrate(path)
     return DbcParseResult(

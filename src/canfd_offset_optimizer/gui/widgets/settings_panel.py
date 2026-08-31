@@ -321,7 +321,7 @@ class SettingsPanel(QGroupBox):
         self.sender_selection_button.setEnabled(inspection.can_select_senders)
         self.details_button.setEnabled(True)
         has_classic = any(
-            network.frame_protocol is FrameProtocol.CLASSIC_CAN
+            network.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}
             for network in inspection.optimizable_networks
         )
         has_fd = any(

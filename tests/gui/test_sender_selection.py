@@ -16,6 +16,7 @@ from canfd_offset_optimizer.gui.artifact_outputs import (
 )
 from canfd_offset_optimizer.gui.contracts import (
     CancellationToken,
+    FrameProtocol,
     GuiBatchOptimizationRequest,
     MessageEligibilityStatus,
     OptimizationMode,
@@ -546,7 +547,7 @@ def test_unselected_ecu_input_error_does_not_poison_selected_local_network(
     }
 
 
-def test_multi_node_selection_rejects_mixed_classic_and_fd_before_request(
+def test_multi_node_selection_keeps_mixed_classic_and_fd_eligible(
     tmp_path: Path,
 ) -> None:
     dbc = _matrix_dbc(tmp_path / "matrix.dbc")
@@ -575,11 +576,10 @@ def test_multi_node_selection_rejects_mixed_classic_and_fd_before_request(
 
     updated = backend.apply_sender_selection(inspection, config)
 
-    assert not updated.can_optimize
-    assert "混合 Classic CAN 与 CAN FD" in (
-        updated.networks[0].unoptimizable_reason or ""
-    )
-    assert updated.sender_selection_summaries[0].final_eligible_count == 0
+    assert updated.can_optimize
+    assert updated.networks[0].frame_protocol is FrameProtocol.MIXED
+    assert updated.networks[0].available_weight_modes == (WeightMode.PAYLOAD_BYTES,)
+    assert updated.sender_selection_summaries[0].final_eligible_count > 0
 
 
 

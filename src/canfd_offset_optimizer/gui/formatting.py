@@ -51,6 +51,8 @@ def format_weight_mode(mode: WeightMode) -> str:
 def format_result_weight(result: GuiOptimizationResult) -> str:
     if result.frame_protocol is FrameProtocol.CLASSIC_CAN:
         return "Payload 长度近似权重（payload_bytes）"
+    if result.frame_protocol is FrameProtocol.MIXED:
+        return "Mixed 网段 Payload 长度权重（payload_bytes）"
     return "帧时间权重（frame_time_us）" if result.weight_mode is WeightMode.FRAME_TIME_US else "Payload 长度权重（payload_bytes）"
 
 

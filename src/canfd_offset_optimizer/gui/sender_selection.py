@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from ..exceptions import CanfdOptimizerError
-from ..models import FrameProtocol as CoreFrameProtocol
 from ..parsers.dbc_parser import (
     message_cycle_time_us,
     message_frame_protocol,
@@ -121,11 +120,7 @@ def build_sender_inventory(
         cycle_time_us = message_cycle_time_us(raw)
         parsed_message = eligible.get(key)
         raw_protocol = message_frame_protocol(raw)
-        protocol = (
-            FrameProtocol.CLASSIC_CAN
-            if raw_protocol is CoreFrameProtocol.CLASSIC_CAN
-            else FrameProtocol.CAN_FD
-        )
+        protocol = FrameProtocol(raw_protocol.value)
         base_eligible = parsed_message is not None
         if not senders:
             record_status = MessageEligibilityStatus.NO_VALID_TRANSMITTER
@@ -237,14 +232,6 @@ def apply_selection_to_summary(
 ) -> DbcSenderSelectionSummary:
     selected = config.selected_for(summary.dbc_id)
     excluded = summary.dbc_id in config.excluded_dbc_ids
-    selected_protocols = {
-        record.frame_protocol
-        for record in summary.messages
-        if record.base_eligible
-        and selected.intersection(record.transmitter_nodes)
-        and record.frame_protocol is not None
-    }
-    mixed_protocols = len(selected_protocols) > 1
     messages: list[MessageEligibilityRecord] = []
     for record in summary.messages:
         matched = bool(selected.intersection(record.transmitter_nodes))
@@ -257,12 +244,6 @@ def apply_selection_to_summary(
         elif not matched:
             record_status = MessageEligibilityStatus.EXCLUDED_UNSELECTED_TRANSMITTER
             reason = "报文发送节点未命中用户选择的本机节点"
-        elif mixed_protocols and record.base_eligible:
-            record_status = MessageEligibilityStatus.INPUT_ERROR
-            reason = (
-                "所选本机节点的基础合资格报文混合 Classic CAN 与 CAN FD，"
-                "同一物理网段不能混合权重单位"
-            )
         elif not record.base_eligible:
             record_status = record.final_status
             reason = record.exclusion_reason

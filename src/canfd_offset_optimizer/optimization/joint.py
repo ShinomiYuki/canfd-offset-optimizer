@@ -445,19 +445,24 @@ def build_joint_domain(
     )
     calculated_hyperperiod = lcm(tuple(message.cycle_time_us for message in all_messages))
     hyperperiod = calculated_hyperperiod if config.hyperperiod_us is None else config.hyperperiod_us
-    if (
-        hyperperiod < calculated_hyperperiod
-        or hyperperiod % calculated_hyperperiod
-        or hyperperiod > config.hyperperiod_cap_us
-    ):
-        raise OptimizationError("joint hyperperiod is invalid or exceeds configured cap")
+    if hyperperiod < calculated_hyperperiod or hyperperiod % calculated_hyperperiod:
+        raise OptimizationError("joint hyperperiod must be a positive multiple of the cycle LCM")
     startup = TimeWindow(0, config.offset_max_us, config.slot_width_us)
     steady = TimeWindow(
         config.offset_max_us,
         config.offset_max_us + hyperperiod,
         config.slot_width_us,
     )
-    slot_map = precompute_slot_map(all_messages, startup, steady)
+    try:
+        slot_map = precompute_slot_map(
+            all_messages,
+            startup,
+            steady,
+            max_slot_count=config.max_slot_count,
+            max_precomputed_hits=config.max_precomputed_hits,
+        )
+    except ValueError as exc:
+        raise OptimizationError(f"invalid joint optimization resources: {exc}") from exc
     fixed_offsets = tuple((message.name, 0) for message in fixed)
     return JointDomain(
         tuple(decision),

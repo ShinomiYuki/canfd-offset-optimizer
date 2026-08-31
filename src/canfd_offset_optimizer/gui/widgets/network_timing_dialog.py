@@ -91,7 +91,11 @@ class NetworkTimingDialog(QDialog):
             protocol_item = QTableWidgetItem(
                 "Classic CAN"
                 if network.frame_protocol is FrameProtocol.CLASSIC_CAN
-                else "CAN FD"
+                else (
+                    "Mixed"
+                    if network.frame_protocol is FrameProtocol.MIXED
+                    else "CAN FD"
+                )
             )
             nominal_editor = self._bitrate_editor(
                 f"nominal_bitrate_{network.network_id}"
@@ -237,7 +241,7 @@ class NetworkTimingDialog(QDialog):
         )
         batch_brs = self.batch_brs_combo.currentData()
         for network in self._networks:
-            if network.frame_protocol is not FrameProtocol.CAN_FD:
+            if network.frame_protocol not in {FrameProtocol.CAN_FD, FrameProtocol.MIXED}:
                 continue
             nominal_editor = self._editors[network.network_id]
             data_editor = self._data_editors[network.network_id]
@@ -324,7 +328,7 @@ class NetworkTimingDialog(QDialog):
             status_item.setToolTip("优化仍可运行；保守占用时间不可计算。")
             status_item.setForeground(Qt.GlobalColor.darkYellow)
             return
-        if network.frame_protocol is FrameProtocol.CAN_FD:
+        if network.frame_protocol in {FrameProtocol.CAN_FD, FrameProtocol.MIXED}:
             if not config.has_complete_brs():
                 status_item.setText("待确认：BRS")
                 status_item.setToolTip("BRS 未知不会自动按开启或关闭猜测。")
@@ -373,7 +377,7 @@ def _sources_text(
         return "—"
 
     parts = [f"N:{label(config.nominal_source)}"]
-    if network.frame_protocol is FrameProtocol.CAN_FD:
+    if network.frame_protocol in {FrameProtocol.CAN_FD, FrameProtocol.MIXED}:
         parts.append(f"D:{label(config.data_source)}")
         if config.dbc_brs_complete:
             parts.append("BRS:DBC/按报文")

@@ -56,9 +56,9 @@ DBC Matrix 通常包含多个 ECU 的 TX。DBC 中的 Sender 只表示报文发�
 - 未被路由表判定为 routed TX。
 
 Classic CAN 还会排除明确标记为事件发送、诊断、NM 或校准流量的报文，并要求存在
-可用的原始 Offset。无合资格报文、全部报文被路由排除、所选报文混合 Classic CAN
-与 CAN FD，或输入数据不完整时，该网段会被跳过或单独报告失败，不影响其他网段继续
-运行。
+可用的原始 Offset。无合资格报文、全部报文被路由排除或输入数据不完整时，该网段会
+被跳过或单独报告失败，不影响其他网段继续运行。一个物理网段同时包含合资格 Classic
+CAN 与 CAN FD 报文时标记为 `Mixed`，保留每条报文的真实协议并继续优化。
 
 ## 输入文件
 
@@ -67,7 +67,7 @@ Classic CAN 还会排除明确标记为事件发送、诊断、NM 或校准流�
 | DBC | 必需，至少一个 | 报文、CAN ID、周期、DLC、帧类型、Sender 和原始 Offset | 无法检查和优化工程 |
 | 路由 Excel（`.xlsx`） | 可选 | 按“目标网段 + CAN ID”识别并排除 routed TX | 不执行路由排除，用户需要确认输入集合是否已排除路由报文 |
 | ARXML | 可选 | 为 CAN FD 的 `frame_time_us` 提供 Controller、nominal bitrate、data bitrate 和 BRS | CAN FD 只能使用 `payload_bytes` |
-| `project.yaml` | 可选 | 提供时隙、超周期上限、默认搜索参数和网络参数覆盖 | 导入时自动复制内置默认配置 |
+| `project.yaml` | 可选 | 提供时隙、超周期、资源上限、默认搜索参数和网络参数覆盖 | 导入时自动复制内置默认配置 |
 
 只有 DBC 也可以运行，但 CAN FD 权重会受限为 `payload_bytes`，路由报文也不会自动
 排除。若要在 GUI 中使用 `frame_time_us`，当前实现必须能把 DBC 网段唯一映射到一个
@@ -116,6 +116,13 @@ phase 分段计算；BRS 关闭时整帧按 Nominal 计算。
 
 当工程存在唯一可用的 ARXML Controller 映射时，GUI 会提供 `frame_time_us`；
 否则只提供 `payload_bytes`。Classic CAN 始终固定为 `payload_bytes`。
+
+### Mixed
+
+同一物理网段同时包含 Classic CAN 与 CAN FD 报文时，网段协议为 `Mixed`。单条报文仍保留
+`classic_can` 或 `can_fd`，GCLS、热力图、路由筛选和 Offset 回写继续使用同一个物理网段的
+完整报文集合。Mixed 网段只能使用 `payload_bytes`；配置或调用方请求 `frame_time_us` 时会
+确定性降级并记录 warning。Mixed 不参与 GUI 的 CAN FD `frame_time_us` 公共选项求交。
 
 ## 优化模式
 
@@ -433,7 +440,12 @@ python -m pip install -e ".[solver]"
 - routed TX 只有在提供并成功匹配路由 Excel 时才会自动排除；
 - Classic CAN 的 `payload_bytes` 是工程近似；
 - CAN FD optimizer 的 `frame_time_us` 是优化权重；它与结果页独立的 phase-aware 保守占用时间不是同一字段；
-- 默认自动超周期受 5000 ms 上限约束，周期最小公倍数超过上限的网段不能直接运行；
+- `hyperperiod_ms` 支持 `auto` 或显式周期最小公倍数倍数，不再设置固定时长上限；旧
+  `hyperperiod_cap_ms` 仅为兼容而解析，已 deprecated 且不参与执行；
+- 分配时隙负载数组和候选命中元组前，精确检查 `max_slot_count`（默认 20000）与
+  `max_precomputed_hits`（默认 2000000），超限错误会报告实际值、上限、超周期和时隙宽度；
+- 时隙宽度不会从 DBC 周期自动推导；例如 PTBUS2 含 2 ms 周期时仍需用户显式配置
+  `slot_ms: 1`，默认 `slot_ms: 5` 会按现有对齐规则失败；
 - 不模拟完整 CAN 仲裁、事件触发、错误帧、重传、网关运行时延迟或 ECU 调度抖动。
 
 当前优化结果仅反映本次纳入优化集合的周期发送报文，在指定时隙宽度、权重模型和排除

@@ -73,7 +73,9 @@ DBC 是必需输入，项目配置与 ARXML 可选。没有用户配置时，导
 `payload_bytes`。生产适配器通过
 核心 parser 发现 Controller `SHORT-NAME`，再以 DBC 来源签名进行唯一关联；匹配歧义时不得猜测，
 对应 CAN FD 网段只开放 `payload_bytes`。Classic CAN 固定使用
-`payload_bytes_approximation`，不参与 CAN FD 权重选择。GUI 原样显示 `DA` 等网段名，不扩写。
+`payload_bytes_approximation`，不参与 CAN FD 权重选择。Mixed 网段固定使用 `payload_bytes`，
+保留逐报文真实协议，且同样不参与 CAN FD `frame_time_us` 公共选项求交。GUI 原样显示 `DA`
+等网段名，不扩写。
 
 
 ## 4.1 DBC 本机发送节点选择契约
@@ -125,7 +127,24 @@ DBC Offset replacement 或原始/优化后的可优化报文负载曲线。
 
 同一工程包含多个独立的 Classic CAN 与 CAN FD 物理网段属于正常情况，不得因此禁用
 mode 或阻止其他网段运行。同一个 DBC/物理网段内部混合 eligible Classic CAN 与 CAN FD
-时仍应只跳过该网段，并保留清晰的单位不一致诊断。
+时必须以 `FrameProtocol.MIXED` 继续运行；`CanMessage.frame_protocol` 仍只能是
+`CLASSIC_CAN` 或 `CAN_FD`。Mixed 只允许 `payload_bytes`，任何 `frame_time_us` 请求都必须
+确定性降级并记录 warning，不能拆分成两个逻辑/物理网段。
+
+### 5.0 资源校验契约
+
+`hyperperiod_ms` 继续接受 `auto` 或显式的周期 LCM 正整数倍。执行层不得应用固定超周期时长
+上限；旧 `hyperperiod_cap_ms` 仅保留解析兼容，已 deprecated 且忽略。正式限制为：
+
+```text
+max_slot_count = 20000
+max_precomputed_hits = 2000000
+```
+
+在创建候选命中 tuple 或启动/稳态负载数组前，必须无物化地精确计算
+`startup.slot_count + steady.slot_count`，以及每条报文每个候选 Offset 在两个半开窗口中的释放
+次数总和。普通、GUI、Joint、路由过滤重建和基线重建 SlotMap 均使用同一校验；超限错误必须包含
+实际值、配置上限、真实超周期与时隙宽度。不得增加不可靠的 Python 对象内存估算。
 
 `BatchOptimizationResult` 必须为每个发现网段返回一个 `NetworkBatchResult`，并提供不可变
 `results_by_network_id` 映射。最终状态是
@@ -234,7 +253,7 @@ Estimator cache key 必须包含 message identity、network_id、协议/格式/P
 ## 7. 真实 Adapter 当前实现
 
 1. `parse_dbc` 是网段和周期 CAN TX 报文资格及 Classic/FD 协议分类的唯一来源；同一物理网段
-   混合 eligible Classic/FD 时必须拒绝。
+   混合 eligible Classic/FD 时保留逐报文协议，由 `NetworkModel` 汇总为 `MIXED`。
 2. `load_project` 提供报文、原始 Offset、候选集合、权重和时间窗。
 3. `run_gcls` 提供 assignment、目标指标、attempts、停止原因和优化后负载数组。
 4. Adapter 使用核心 `SearchState` 按核心基线规则生成原始负载快照，不在 GUI 中复制负载公式。

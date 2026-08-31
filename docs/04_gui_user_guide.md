@@ -72,8 +72,9 @@ user_input/<timestamp>_<project>/
   `user_input/<session>/config/project.yaml`。内置文件内容与仓库
   `input/config/project.yaml` 一致，并在 `import_manifest.json` 和日志中明确标记；
 - 用户提供一个 YAML/YML 时优先使用用户文件，不叠加默认配置；提供多个仍属于阻塞冲突；
-- 因此只导入一个 DBC 也可以开始；前提是该 DBC 至少包含一条核心支持的周期 CAN FD TX 报文。
-  如果 DBC 只有经典 CAN、RX 或非周期报文，界面会明确显示“没有可优化网段”，而不是误报输入不完整；
+- 因此只导入一个 DBC 也可以开始；前提是该 DBC 至少包含一条核心支持的周期 Classic CAN 或
+  CAN FD TX 报文。Classic CAN 还必须满足原 Offset 与流量类型资格规则；只有 RX、非周期或
+  被排除流量时，界面会明确显示“没有可优化网段”，而不是误报输入不完整；
 
 - 批量设置中的权重选项只作用于 CAN FD 网段：存在唯一可解析的 ARXML Controller 时，
   可选择“帧时间权重（`frame_time_us`）”或 Payload 权重；无法唯一对应时只开放
@@ -84,8 +85,10 @@ user_input/<timestamp>_<project>/
 - Classic CAN 的负载单位为 `Byte/slot`，Zss 是加权峰值，Qss 是加权平方和；该近似仅用于
   相对均衡，不代表实际占用时间、真实总线负载百分比或 75% 物理阈值判断，Nvio/Vvio
   显示为“不适用”；
-- 同一物理网段若同时包含 eligible Classic CAN 与 CAN FD 周期 TX，本版本明确拒绝，
-  不混合 Byte 与 μs。Peak、Balanced、Variance 均可用于每个网段自己的权重单位。
+- 同一物理网段若同时包含 eligible Classic CAN 与 CAN FD 周期 TX，会显示为 `Mixed` 并继续
+  优化。每条报文保留真实协议，但整个 Mixed 网段固定使用 `payload_bytes`，请求
+  `frame_time_us` 时自动降级并产生 warning；该网段不参与 CAN FD 帧时间公共选项计算。
+  Peak、Balanced、Variance 均可继续使用。
 
 后续改进项中的 Classic CAN `frame_time_us` 指可进入 GCLS 的 optimizer 权重模型；本版本仍未
 实现该权重。结果页已经提供的 Classic CAN“保守占用时间”是独立 nominal-rate 诊断，不会进入
@@ -122,8 +125,8 @@ GCLS，不能用它替代或冒充 optimizer `frame_time_us`。
 正式资格顺序为“用户所选本机发送节点 → 核心基础资格 → 路由表目标侧排除”。只有发送节点
 与当前 DBC 选择集合有交集的报文才交给核心继续检查；路由表再从这批本机基础合资格周期 TX 中
 执行排除。匹配成功的 `routing_excluded` 报文在创建搜索状态和调用 GCLS 前即被移除。每个 DBC 都会在工程汇总中
-保留一行：可优化的 CAN FD 或 Classic CAN 网段进入 GCLS；没有可优化周期 TX、同一物理
-网段混合两种协议、全部基础资格报文均被路由排除或其他核心解析不支持的网段标记为
+保留一行：可优化的 CAN FD、Classic CAN 或 Mixed 网段进入 GCLS；没有可优化周期 TX、
+全部基础资格报文均被路由排除或其他核心解析不支持的网段标记为
 `skipped`，并显示明确原因。
 
 `skipped` 网段没有 `GuiOptimizationResult`、指标、Offset 表、负载曲线或成功网段目录。
@@ -322,6 +325,22 @@ Offset 范围与步长、候选摘要，以及“高级搜索设置”入口。�
 原 DBC 中的 Offset 是真实基线输入，不要求属于新候选集，也不会被取整或替换；
 优化结果则必须属于本次配置生成的候选集。每次批量输出会在
 `results/run_config.json` 的 `offset_search` 字段记录配置最大值、实际最大候选值和候选数量。
+
+## 超周期与资源上限
+
+`optimization.hyperperiod_ms` 可为 `auto` 或显式整数毫秒；显式值必须是所有参与报文周期 LCM
+的正整数倍。v1.1 不再设置固定超周期时长上限。旧 `hyperperiod_cap_ms` 仍可读取，但已
+deprecated 且执行时忽略。
+
+在分配时隙数组和候选命中 tuple 前，程序精确预估并校验：
+
+- `max_slot_count`：启动与稳态窗口时隙数之和，默认 `20000`；
+- `max_precomputed_hits`：全部报文、全部候选 Offset 在两个窗口内的释放命中数之和，默认
+  `2000000`。
+
+任一超限会在开始优化前失败，并报告实际值、配置上限、超周期与 `slot_ms`。这些是可复现的
+离散规模限制，不是 Python 对象内存估算。时隙宽度不会根据最短周期自动推导；包含 2 ms 周期的
+PTBUS2 仍需用户显式配置 `slot_ms: 1`，本版本不会自动修改默认 `slot_ms: 5`。
 
 ## 验收
 

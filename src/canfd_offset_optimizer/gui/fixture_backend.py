@@ -1042,7 +1042,7 @@ class FixtureBackend:
     def _network_weight(
         network: NetworkSummary, request: GuiBatchOptimizationRequest
     ) -> WeightMode:
-        if network.frame_protocol is FrameProtocol.CLASSIC_CAN:
+        if network.frame_protocol in {FrameProtocol.CLASSIC_CAN, FrameProtocol.MIXED}:
             return request.classic_can_weight
         return request.can_fd_weight
 

@@ -7,7 +7,9 @@ from html import escape
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from canfd_offset_optimizer.models import WeightMode
+from canfd_offset_optimizer.config import RestartPolicy
+from canfd_offset_optimizer.models import FrameProtocol, WeightMode
+from canfd_offset_optimizer.optimization.gcls import run_gcls
 from canfd_offset_optimizer.optimization.joint import build_joint_domain
 from canfd_offset_optimizer.parsers.project_loader import load_project
 from canfd_offset_optimizer.parsers.routing_parser import (
@@ -160,3 +162,55 @@ def test_route_excluded_messages_are_not_joint_fixed_messages(tmp_path: Path) ->
     assert "Msg391" not in {
         message.name for message in domain.decision_messages + domain.fixed_messages
     }
+
+
+def test_mixed_dbc_survives_filtering_routing_and_optimizes_with_payload(
+    tmp_path: Path,
+) -> None:
+    dbc = tmp_path / "mixed.dbc"
+    dbc.write_text(
+        (FIXTURES / "dbc" / "minimal.dbc")
+        .read_text(encoding="utf-8")
+        .replace(
+            'BA_ "VFrameFormat" BO_ 913 "StandardCAN_FD";',
+            'BA_ "VFrameFormat" BO_ 913 "StandardCAN";',
+        ),
+        encoding="utf-8",
+    )
+    routing = tmp_path / "routing.xlsx"
+    _write_routing_xlsx(
+        routing,
+        (("NotPresent", "0x392", "STANDARD_CAN", "CHCAN"),),
+    )
+
+    loaded = load_project(
+        dbc,
+        FIXTURES / "arxml",
+        FIXTURES / "config" / "project.yaml",
+        selected_sender="VCU",
+        routing_excel_path=routing,
+        routing_target_network="CH",
+        weight_mode_override=WeightMode.FRAME_TIME_US,
+    )
+
+    assert loaded.network.frame_protocol is FrameProtocol.MIXED
+    assert loaded.network.weight_mode is WeightMode.PAYLOAD_BYTES
+    assert {message.frame_protocol for message in loaded.network.messages} == {
+        FrameProtocol.CLASSIC_CAN,
+        FrameProtocol.CAN_FD,
+    }
+    assert loaded.routing_exclusions == ()
+    assert any(
+        "Mixed automatically overrides requested weight to payload_bytes" in warning
+        for warning in loaded.network.warnings
+    )
+    result = run_gcls(
+        loaded.network.messages,
+        loaded.slot_map,
+        replace(
+            loaded.config.optimization,
+            restart_policy=RestartPolicy.fixed(1),
+        ),
+        weight_mode=loaded.network.weight_mode,
+    )
+    assert len(result.assignments) == len(loaded.network.messages)
