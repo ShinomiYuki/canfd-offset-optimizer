@@ -238,11 +238,11 @@ def test_selected_slot_table_displays_real_8_16_and_64_byte_payloads(
 
     displayed_payloads = {
         widget.details_table.item(row, 6).text()
-        for row in range(widget.details_table.rowCount())
+        for row in range(1, widget.details_table.rowCount())
     }
     displayed_times = {
         widget.details_table.item(row, 9).text()
-        for row in range(widget.details_table.rowCount())
+        for row in range(1, widget.details_table.rowCount())
     }
     assert {"8", "16", "64"}.issubset(displayed_payloads)
     assert "—" not in displayed_times

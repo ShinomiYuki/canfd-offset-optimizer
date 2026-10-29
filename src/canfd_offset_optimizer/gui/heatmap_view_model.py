@@ -541,6 +541,7 @@ def filter_congested_rows(
 
 def message_rows_for_cell(
     cell: HeatmapCellView,
+    order: str = "none",
 ) -> tuple[CongestedMessageRow, ...]:
     """Expose exactly the formal member list already attached to one slot."""
 
@@ -549,6 +550,12 @@ def message_rows_for_cell(
             "presentation/result data inconsistency: selected slot member count "
             f"{len(cell.messages)} != frame_count {cell.frame_count}"
         )
+    messages = cell.messages
+    if order != "none":
+        known = [m for m in messages if m.conservative_service_time_us is not None]
+        unknown = [m for m in messages if m.conservative_service_time_us is None]
+        known.sort(key=lambda m: m.conservative_service_time_us or 0, reverse=order == "desc")
+        messages = tuple(known + unknown)
     return tuple(
         CongestedMessageRow(
             cell.state,
@@ -560,8 +567,33 @@ def message_rows_for_cell(
             cell.load_unit,
             message,
         )
-        for message in cell.messages
+        for message in messages
     )
+
+
+def ordered_detail_cells(
+    view_model: HeatmapViewModel, mode: str, order: str
+) -> tuple[HeatmapCellView, ...]:
+    """Filter complete slot candidates and stably sort whole groups."""
+
+    cells = tuple(
+        cell
+        for state_cells in (view_model.original_cells, view_model.optimized_cells)
+        for cell in state_cells
+        if cell.frame_count > 0
+        and (
+            mode == "nonempty"
+            or (mode == "all" and cell.frame_count >= 4)
+            or (mode == "four" and cell.frame_count == 4)
+            or (mode == "five_plus" and cell.frame_count >= 5)
+        )
+    )
+    if order == "none" or len(cells) < 2:
+        return cells
+    complete = [c for c in cells if c.conservative_complete_count == c.frame_count]
+    incomplete = [c for c in cells if c.conservative_complete_count != c.frame_count]
+    complete.sort(key=lambda c: c.conservative_total_time_us or 0, reverse=order == "desc")
+    return tuple(complete + incomplete)
 
 
 def _reason_label(reason: str | None) -> str:

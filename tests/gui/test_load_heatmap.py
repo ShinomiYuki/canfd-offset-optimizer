@@ -399,10 +399,10 @@ def test_rebinding_same_network_result_clears_selected_slot(
     assert heatmap.table_mode is CongestionTableMode.ALL_CONGESTED
     assert heatmap.selected_cell is None
     assert heatmap.canvas.highlighted_cell is None
-    assert all(row.frame_count >= 4 for row in heatmap.visible_detail_rows)
+    assert all(row.frame_count >= 1 for row in heatmap.visible_detail_rows)
 
 
-def test_initial_mode_keeps_all_congested_summary(
+def test_initial_mode_shows_all_nonempty_groups_without_sorting(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:
     heatmap = LoadHeatmap()
@@ -413,9 +413,11 @@ def test_initial_mode_keeps_all_congested_summary(
     assert heatmap.selected_cell is None
     assert heatmap.show_all_button.isHidden()
     assert heatmap.congestion_filter.isEnabled()
-    assert heatmap.details_table.rowCount() == len(heatmap.detail_rows)
-    assert all(row.frame_count >= 4 for row in heatmap.visible_detail_rows)
-    assert not any(row.frame_count == 3 for row in heatmap.visible_detail_rows)
+    group_count = len({(r.state, r.slot_index) for r in heatmap.detail_rows})
+    assert heatmap.details_table.rowCount() == len(heatmap.detail_rows) + group_count
+    assert all(row.frame_count >= 1 for row in heatmap.visible_detail_rows)
+    assert any(row.frame_count == 3 for row in heatmap.visible_detail_rows)
+    assert heatmap.slot_sort.currentData() == heatmap.message_sort.currentData() == "none"
 
 
 @pytest.mark.parametrize(
@@ -460,7 +462,7 @@ def test_clicking_any_heatmap_cell_shows_only_that_slot(
         cell.slot_index,
     )
     assert heatmap.canvas.highlighted_cell == (state, cell.slot_index)
-    assert heatmap.details_table.rowCount() == frame_count
+    assert heatmap.details_table.rowCount() == frame_count + (1 if frame_count else 0)
     assert len(heatmap.visible_detail_rows) == frame_count
     assert {
         (row.state, row.slot_index) for row in heatmap.visible_detail_rows
@@ -595,7 +597,7 @@ def test_clicking_detail_scrolls_and_highlights_heatmap(
     assert heatmap.selected_cell is not None
     assert heatmap.selected_cell.state is state
     assert heatmap.selected_cell.slot_index == slot_index
-    assert heatmap.details_table.rowCount() == expected_count
+    assert heatmap.details_table.rowCount() == expected_count + 1
     assert all(
         row.state is state and row.slot_index == slot_index
         for row in heatmap.visible_detail_rows
@@ -806,7 +808,7 @@ def test_empty_congestion_state_is_explicit(
     heatmap.set_result(empty)
     assert heatmap.details_table.isHidden()
     assert not heatmap.details_empty_label.isHidden()
-    assert "不存在同时释放 4 帧及以上" in heatmap.details_empty_label.text()
+    assert "当前窗口没有报文释放" in heatmap.details_empty_label.text()
 
 
 def test_no_congested_slots_still_allows_two_frame_detail(
@@ -841,7 +843,9 @@ def test_no_congested_slots_still_allows_two_frame_detail(
     heatmap = LoadHeatmap()
     _show(qtbot, heatmap)
     heatmap.set_result(capped)
-    assert heatmap.detail_rows == ()
+    assert heatmap.detail_rows
+    assert all(row.frame_count <= 2 for row in heatmap.detail_rows)
+    heatmap.congestion_filter.setCurrentIndex(heatmap.congestion_filter.findData("all"))
     assert heatmap.details_table.isHidden()
     assert heatmap.view_model is not None
     cell = next(
@@ -851,7 +855,7 @@ def test_no_congested_slots_still_allows_two_frame_detail(
     _click_cell(qtbot, heatmap, cell.state, cell.slot_index)
 
     assert heatmap.table_mode is CongestionTableMode.SELECTED_SLOT
-    assert heatmap.details_table.rowCount() == 2
+    assert heatmap.details_table.rowCount() == 3
     assert len(heatmap.visible_detail_rows) == 2
 
 
@@ -908,7 +912,7 @@ def test_widget_weight_change_refreshes_cell_and_table_units_together(
     heatmap.set_result(payload)
     assert heatmap.view_model is not None
     assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.splitlines()[1].endswith(" B")
-    assert heatmap.details_table.item(0, 3).text().endswith(" B")
+    assert heatmap.details_table.item(1, 3).text().endswith(" B")
     payload_cell = next(
         cell for cell in heatmap.view_model.original_cells if cell.frame_count == 3
     )
@@ -918,7 +922,7 @@ def test_widget_weight_change_refreshes_cell_and_table_units_together(
     heatmap.set_result(frame)
     assert heatmap.view_model is not None
     assert next(cell for cell in heatmap.view_model.original_cells if cell.frame_count).text.splitlines()[1].endswith(" \u03bcs")
-    assert heatmap.details_table.item(0, 3).text().endswith(" μs")
+    assert heatmap.details_table.item(1, 3).text().endswith(" μs")
     frame_cell = next(
         cell for cell in heatmap.view_model.optimized_cells if cell.frame_count == 2
     )
@@ -926,15 +930,13 @@ def test_widget_weight_change_refreshes_cell_and_table_units_together(
     assert " \u03bcs | \u4fdd\u5b88 " in heatmap.detail_context_label.text()
 
 
-def test_detail_headers_support_numeric_sorting(
+def test_detail_headers_cannot_compete_with_group_sorting(
     qtbot, batch_result: BatchOptimizationResult
 ) -> None:
     heatmap = LoadHeatmap()
     _show(qtbot, heatmap)
     heatmap.set_result(_result(batch_result))
-    heatmap.details_table.sortItems(2, Qt.SortOrder.DescendingOrder)
-    first = int(heatmap.details_table.item(0, 2).text())
-    last = int(
-        heatmap.details_table.item(heatmap.details_table.rowCount() - 1, 2).text()
-    )
-    assert first >= last
+    assert not heatmap.details_table.isSortingEnabled()
+    header = heatmap.details_table.horizontalHeader()
+    assert not header.sectionsClickable()
+    assert not header.isSortIndicatorShown()

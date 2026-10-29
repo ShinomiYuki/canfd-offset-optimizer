@@ -48,8 +48,8 @@ from ..heatmap_view_model import (
     HeatmapViewModel,
     HeatmapWindowKind,
     build_heatmap_view_model,
-    filter_congested_rows,
     message_rows_for_cell,
+    ordered_detail_cells,
 )
 from ..load_presentation import CONGESTION_COLORS, CONGESTION_LABELS, congestion_level
 
@@ -84,19 +84,6 @@ def calculate_heatmap_cell_width(
     )
     measured = max(metrics.horizontalAdvance(text) for text in samples)
     return max(CONFIGURED_MIN_CELL_WIDTH, measured + CELL_HORIZONTAL_PADDING)
-
-
-class _SortableItem(QTableWidgetItem):
-    def __init__(self, text: str, sort_value: object) -> None:
-        super().__init__(text)
-        self.setData(Qt.ItemDataRole.UserRole, sort_value)
-
-    def __lt__(self, other: QTableWidgetItem) -> bool:
-        left = self.data(Qt.ItemDataRole.UserRole)
-        right = other.data(Qt.ItemDataRole.UserRole)
-        if type(left) is type(right):
-            return bool(left < right)
-        return super().__lt__(other)
 
 
 class _HeatmapCanvas(QWidget):
@@ -408,25 +395,43 @@ class LoadHeatmap(QWidget):
         upper.setMaximumHeight(CANVAS_HEIGHT + 64)
 
         self.congestion_filter = QComboBox()
+        self.congestion_filter.addItem("全部有报文时隙（1 帧及以上）", "nonempty")
         self.congestion_filter.addItem("4 帧及以上", "all")
         self.congestion_filter.addItem("仅 4 帧", "four")
         self.congestion_filter.addItem("5 帧及以上", "five_plus")
-        self.detail_title_label = QLabel("拥挤时隙明细")
+        self.slot_sort = QComboBox()
+        self.message_sort = QComboBox()
+        for combo in (self.slot_sort, self.message_sort):
+            combo.addItem("不排序", "none")
+            combo.addItem("升序（短→长）", "asc")
+            combo.addItem("降序（长→短）", "desc")
+        self.detail_title_label = QLabel("时隙与报文明细")
         self.detail_title_label.setStyleSheet("font-weight: bold;")
-        self.detail_context_label = QLabel("当前：全部 4 帧及以上时隙")
+        self.detail_context_label = QLabel("当前：全部有报文时隙")
         self.detail_context_label.setWordWrap(True)
-        self.show_all_button = QPushButton("查看全部拥挤时隙")
+        self.show_all_button = QPushButton("返回全部时隙")
         self.show_all_button.setVisible(False)
-        self.congestion_filter_label = QLabel("筛选")
+        self.congestion_filter_label = QLabel("帧数筛选")
+        self.slot_sort_label = QLabel("时隙总保守占用时间")
+        self.message_sort_label = QLabel("时隙内单帧保守占用时间")
         detail_controls = QHBoxLayout()
         detail_controls.addWidget(self.detail_title_label)
         detail_controls.addWidget(self.detail_context_label, 1)
         detail_controls.addStretch(1)
         detail_controls.addWidget(self.show_all_button)
-        detail_controls.addWidget(self.congestion_filter_label)
-        detail_controls.addWidget(self.congestion_filter)
+        # Separate rows keep labels readable at the existing narrow window size.
+        detail_filters = QVBoxLayout()
+        for label, combo in (
+            (self.congestion_filter_label, self.congestion_filter),
+            (self.slot_sort_label, self.slot_sort),
+            (self.message_sort_label, self.message_sort),
+        ):
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(label)
+            row_layout.addWidget(combo, 1)
+            detail_filters.addLayout(row_layout)
 
-        self.details_empty_label = QLabel("当前窗口不存在同时释放 4 帧及以上的时隙。")
+        self.details_empty_label = QLabel("当前窗口没有报文释放。")
         self.details_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.details_table = QTableWidget(0, 10)
         self.details_table.setHorizontalHeaderLabels(
@@ -450,7 +455,9 @@ class LoadHeatmap(QWidget):
             QAbstractItemView.SelectionMode.SingleSelection
         )
         self.details_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.details_table.setSortingEnabled(True)
+        self.details_table.setSortingEnabled(False)
+        self.details_table.horizontalHeader().setSectionsClickable(False)
+        self.details_table.horizontalHeader().setSortIndicatorShown(False)
         self.details_table.setMinimumHeight(180)
         self.details_table.setMaximumHeight(520)
         self.details_table.verticalHeader().setVisible(False)
@@ -462,6 +469,7 @@ class LoadHeatmap(QWidget):
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.addLayout(detail_controls)
+        detail_layout.addLayout(detail_filters)
         detail_layout.addWidget(self.details_empty_label, 1)
         detail_layout.addWidget(self.details_table, 1)
 
@@ -490,6 +498,8 @@ class LoadHeatmap(QWidget):
         self.network_combo.currentIndexChanged.connect(self._network_changed)
         self.window_combo.currentIndexChanged.connect(self._window_changed)
         self.congestion_filter.currentIndexChanged.connect(self._populate_details)
+        self.slot_sort.currentIndexChanged.connect(self._populate_details)
+        self.message_sort.currentIndexChanged.connect(self._populate_details)
         self.canvas.cell_clicked.connect(self._select_cell_from_heatmap)
         self.details_table.cellClicked.connect(self._locate_cell_from_detail)
         self.show_all_button.clicked.connect(self.show_all_congested)
@@ -624,7 +634,11 @@ class LoadHeatmap(QWidget):
         self._view_model = view_model
         config = view_model.timing_config
         self.timing_basis_label.setText(_timing_basis_text(result, config))
-        self._detail_rows = view_model.congested_rows
+        self._detail_rows = tuple(
+            row
+            for cell in ordered_detail_cells(view_model, "nonempty", "none")
+            for row in message_rows_for_cell(cell)
+        )
         self.title_label.setText(
             f"{result.display_name} / {kind.label}可优化报文拥挤热力图，"
             f"核心真实范围 {view_model.duration_ms:g} ms / {result.source_file}"
@@ -642,6 +656,7 @@ class LoadHeatmap(QWidget):
     def _populate_details(self) -> None:
         selected_cell: HeatmapCellView | None = None
         data_error: str | None = None
+        cells: tuple[HeatmapCellView, ...] = ()
         if (
             self._table_mode is CongestionTableMode.SELECTED_SLOT
             and self._selected_cell is not None
@@ -655,11 +670,10 @@ class LoadHeatmap(QWidget):
                 self._populate_details()
                 return
             try:
-                rows = message_rows_for_cell(selected_cell)
+                message_rows_for_cell(selected_cell)
+                cells = (selected_cell,) if selected_cell.frame_count else ()
             except ValueError as exc:
-                rows = ()
                 data_error = str(exc)
-            self.detail_title_label.setText("时隙报文明细")
             self.detail_context_label.setText(
                 "当前："
                 f"{selected_cell.state.label} | {selected_cell.start_ms:g}～"
@@ -671,63 +685,75 @@ class LoadHeatmap(QWidget):
             self.show_all_button.setEnabled(True)
             self.congestion_filter_label.setEnabled(False)
             self.congestion_filter.setEnabled(False)
+            self.slot_sort_label.setEnabled(False)
+            self.slot_sort.setEnabled(False)
         else:
             mode = self.congestion_filter.currentData()
             if not isinstance(mode, str):
-                mode = "all"
-            rows = filter_congested_rows(self._detail_rows, mode)
-            self.detail_title_label.setText("拥挤时隙明细")
-            self.detail_context_label.setText("当前：全部 4 帧及以上时隙")
+                mode = "nonempty"
+            if self._view_model is not None:
+                cells = ordered_detail_cells(self._view_model, mode, self.slot_sort.currentData())
+            self.detail_context_label.setText(f"当前：{self.congestion_filter.currentText()}，{len(cells)} 个时隙")
             self.show_all_button.setVisible(False)
             self.congestion_filter_label.setEnabled(True)
             self.congestion_filter.setEnabled(True)
+            self.slot_sort_label.setEnabled(True)
+            self.slot_sort.setEnabled(True)
 
+        groups = tuple(
+            (cell, message_rows_for_cell(cell, self.message_sort.currentData()))
+            for cell in cells
+        )
+        rows = tuple(row for _, members in groups for row in members)
         self._visible_detail_rows = rows
         table = self.details_table
         blocker = QSignalBlocker(table)
         table.setSortingEnabled(False)
         table.clearSelection()
-        table.setRowCount(len(rows))
-        for index, row in enumerate(rows):
-            view_model = self._view_model
-            if view_model is None:
-                raise RuntimeError("detail rows require a heatmap view model")
-            selection = view_model.selection_for(row.state, row.slot_index)
-            values: tuple[tuple[str, object], ...] = (
-                (row.state.label, row.state.sort_order),
-                (row.time_text, row.start_us),
-                (str(row.frame_count), row.frame_count),
-                (row.total_load_text, row.total_load),
-                (row.message.message_name, row.message.message_name),
-                (row.can_id_text, row.message.can_id),
-                (
-                    row.payload_text,
-                    row.message.payload_bytes
-                    if row.message.payload_bytes is not None
-                    else -1,
-                ),
-                (row.period_text, row.message.cycle_time_us),
-                (row.offset_text, row.message.offset_us),
-                (
-                    row.conservative_time_text,
-                    row.message.conservative_service_time_us or -1,
-                ),
+        table.clearSpans()
+        table.setRowCount(len(rows) + len(groups))
+        index = 0
+        for cell, members in groups:
+            assert self._view_model is not None
+            selection = self._view_model.selection_for(cell.state, cell.slot_index)
+            summary = cell.conservative_text
+            if cell.conservative_complete_count < cell.frame_count:
+                summary += f"（已知 {cell.conservative_complete_count}/{cell.frame_count} 帧）"
+            group_item = QTableWidgetItem(
+                f"{cell.state.label} | {cell.start_ms:g}～{cell.end_ms:g} ms | "
+                f"{cell.frame_count} 帧 | 时隙总{summary}"
             )
-            for column, (text, sort_value) in enumerate(values):
-                item = _SortableItem(text, sort_value)
-                item.setData(Qt.ItemDataRole.UserRole + 1, row.state.value)
-                item.setData(Qt.ItemDataRole.UserRole + 2, row.slot_index)
-                item.setData(Qt.ItemDataRole.UserRole + 3, selection)
-                if column == 5:
-                    item.setToolTip(
-                        f"{'Extended' if row.message.is_extended else 'Standard'} CAN ID：{row.can_id_text}"
-                    )
-                elif column == 6:
-                    item.setToolTip("DBC Payload Length；不是 raw DLC code。")
-                elif column == 9:
-                    item.setToolTip(row.conservative_tooltip)
-                table.setItem(index, column, item)
-        table.setSortingEnabled(True)
+            group_item.setData(Qt.ItemDataRole.UserRole + 3, selection)
+            group_item.setToolTip(cell.tooltip)
+            group_item.setBackground(self.palette().alternateBase())
+            font = group_item.font()
+            font.setBold(True)
+            group_item.setFont(font)
+            table.setItem(index, 0, group_item)
+            table.setSpan(index, 0, 1, table.columnCount())
+            index += 1
+            for row in members:
+                values = (
+                    row.state.label, row.time_text, str(row.frame_count),
+                    row.total_load_text, row.message.message_name, row.can_id_text,
+                    row.payload_text, row.period_text, row.offset_text,
+                    row.conservative_time_text,
+                )
+                for column, text in enumerate(values):
+                    item = QTableWidgetItem(text)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, row.state.value)
+                    item.setData(Qt.ItemDataRole.UserRole + 2, row.slot_index)
+                    item.setData(Qt.ItemDataRole.UserRole + 3, selection)
+                    if column == 5:
+                        item.setToolTip(
+                            f"{'Extended' if row.message.is_extended else 'Standard'} CAN ID：{row.can_id_text}"
+                        )
+                    elif column == 6:
+                        item.setToolTip("DBC Payload Length；不是 raw DLC code。")
+                    elif column == 9:
+                        item.setToolTip(row.conservative_tooltip)
+                    table.setItem(index, column, item)
+                index += 1
         del blocker
         has_rows = bool(rows)
         table.setVisible(has_rows)
@@ -739,9 +765,9 @@ class LoadHeatmap(QWidget):
                 self.details_empty_label.setText("当前时隙没有报文释放。")
             else:
                 self.details_empty_label.setText(
-                    "当前窗口不存在同时释放 4 帧及以上的时隙。"
+                    "当前窗口没有报文释放。"
                     if not self._detail_rows
-                    else "当前筛选条件下没有拥挤时隙。"
+                    else "当前帧数筛选条件下没有时隙。"
                 )
 
     def _select_cell_from_heatmap(self, state_value: str, slot_index: int) -> None:
