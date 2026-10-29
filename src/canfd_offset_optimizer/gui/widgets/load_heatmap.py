@@ -419,17 +419,21 @@ class LoadHeatmap(QWidget):
         detail_controls.addWidget(self.detail_context_label, 1)
         detail_controls.addStretch(1)
         detail_controls.addWidget(self.show_all_button)
-        # Separate rows keep labels readable at the existing narrow window size.
-        detail_filters = QVBoxLayout()
+        detail_filters = QHBoxLayout()
+        detail_filters.setSpacing(16)
         for label, combo in (
             (self.congestion_filter_label, self.congestion_filter),
             (self.slot_sort_label, self.slot_sort),
             (self.message_sort_label, self.message_sort),
         ):
-            row_layout = QHBoxLayout()
-            row_layout.addWidget(label)
-            row_layout.addWidget(combo, 1)
-            detail_filters.addLayout(row_layout)
+            group = QWidget()
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(4)
+            group_layout.addWidget(label)
+            group_layout.addWidget(combo)
+            detail_filters.addWidget(group)
+        detail_filters.addStretch(1)
 
         self.details_empty_label = QLabel("当前窗口没有报文释放。")
         self.details_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -462,7 +466,9 @@ class LoadHeatmap(QWidget):
         self.details_table.setMaximumHeight(520)
         self.details_table.verticalHeader().setVisible(False)
         header = self.details_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Continuous content sizing rescans the grouped table on every cell update.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setResizeContentsPrecision(-1)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
 
         detail_panel = QWidget()
@@ -754,6 +760,7 @@ class LoadHeatmap(QWidget):
                         item.setToolTip(row.conservative_tooltip)
                     table.setItem(index, column, item)
                 index += 1
+        table.resizeColumnsToContents()
         del blocker
         has_rows = bool(rows)
         table.setVisible(has_rows)

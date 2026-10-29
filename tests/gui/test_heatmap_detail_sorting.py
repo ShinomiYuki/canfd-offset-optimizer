@@ -1,4 +1,5 @@
 from dataclasses import replace
+from time import perf_counter
 
 import pytest
 from PySide6.QtCore import Qt
@@ -240,3 +241,54 @@ def test_two_sort_controls_selection_return_and_group_identity(
     widget.message_sort.setCurrentIndex(0)
     assert widget.visible_detail_rows == natural
     assert widget.canvas.highlighted_cell is None
+
+
+def test_both_sorts_remain_responsive_after_table_layout(qtbot, monkeypatch, detail_view):
+    result, view = detail_view
+    original = tuple(_cell(i, (400, 200, 300)) for i in range(10))
+    optimized = tuple(replace(c, state=HeatmapState.OPTIMIZED) for c in original)
+    view = replace(view, original_cells=original, optimized_cells=optimized)
+    monkeypatch.setattr(heatmap_module, "build_heatmap_view_model", lambda *args: view)
+    widget = LoadHeatmap()
+    qtbot.addWidget(widget)
+    widget.resize(1000, 800)
+    widget.show()
+    widget.set_result(result)
+    # Complete the first layout, as happens before a user can click a sort menu.
+    qtbot.wait(20)
+    natural = widget.visible_detail_rows
+
+    started = perf_counter()
+    for combo in (widget.slot_sort, widget.message_sort):
+        for index in (2, 1, 0):
+            combo.setCurrentIndex(index)
+            qtbot.wait(1)
+            assert len(widget.visible_detail_rows) == 60
+            assert widget.details_table.rowCount() == 80
+    elapsed = perf_counter() - started
+
+    assert widget.visible_detail_rows == natural
+    assert elapsed < 5, f"Visible table sorting blocked for {elapsed:.2f} seconds"
+
+
+def test_detail_filters_are_compact_and_aligned(qtbot):
+    widget = LoadHeatmap()
+    qtbot.addWidget(widget)
+    widget.resize(1280, 800)
+    widget.show()
+    qtbot.wait(20)
+    groups = [
+        combo.parentWidget()
+        for combo in (widget.congestion_filter, widget.slot_sort, widget.message_sort)
+    ]
+    assert len({group.y() for group in groups}) == 1
+    assert all(group.width() < widget.width() / 2 for group in groups)
+
+    widget.resize(620, 800)
+    qtbot.wait(20)
+    for index, group in enumerate(groups):
+        assert group.geometry().right() < group.parentWidget().width()
+        assert all(
+            not group.geometry().intersects(other.geometry())
+            for other in groups[index + 1 :]
+        )
